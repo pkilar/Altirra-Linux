@@ -846,6 +846,14 @@ static void DrawMenuBar() {
 				ShowToast(msg);
 			}
 
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Unmount All", nullptr, false, activeDrives >= 1)) {
+				for (int i = 0; i < 15; ++i)
+					g_sim.GetDiskInterface(i).UnloadDisk();
+				ShowToast("All disks unmounted");
+			}
+
 			ImGui::EndMenu();
 		}
 
