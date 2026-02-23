@@ -910,6 +910,27 @@ static void DrawMenuBar() {
 
 		ImGui::Separator();
 
+		if (ImGui::MenuItem("Open Config Directory")) {
+			vdvector<VDStringW> fwPaths;
+			ATGetFirmwareSearchPaths(fwPaths);
+			if (!fwPaths.empty()) {
+				// First firmware path parent is the config dir
+				VDStringW configDir = VDFileSplitPathLeft(fwPaths[0]);
+				VDStringW dummy = VDMakePath(configDir.c_str(), L".");
+				ATShowFileInSystemExplorer(dummy.c_str());
+			}
+		}
+		if (ImGui::MenuItem("Open Firmware Directory")) {
+			vdvector<VDStringW> fwPaths;
+			ATGetFirmwareSearchPaths(fwPaths);
+			if (!fwPaths.empty()) {
+				VDStringW dummy = VDMakePath(fwPaths[0].c_str(), L".");
+				ATShowFileInSystemExplorer(dummy.c_str());
+			}
+		}
+
+		ImGui::Separator();
+
 		if (ImGui::MenuItem("About Altirra..."))
 			s_showAbout = true;
 
