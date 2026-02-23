@@ -48,6 +48,7 @@ class ATIRQController;
 #include "gtia.h"
 #include "uikeyboard.h"
 #include "devicemanager.h"
+#include "cpu.h"
 #include "debugger.h"
 
 #include <SDL.h>
@@ -83,6 +84,7 @@ static bool s_showKeyboardConfig = false;
 static bool s_showDeviceManager = false;
 static bool s_showCassetteControl = false;
 static bool s_showBootOptions = false;
+static bool s_showCPUOptions = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -247,6 +249,13 @@ static const char *kCassetteTurboModeNames[] = {
 };
 static_assert(sizeof(kCassetteTurboModeNames)/sizeof(kCassetteTurboModeNames[0]) == kATCassetteTurboMode_Always + 1);
 
+static const char *kCPUModeNames[] = {
+	"6502",
+	"65C02",
+	"65C816"
+};
+static_assert(sizeof(kCPUModeNames)/sizeof(kCPUModeNames[0]) == kATCPUModeCount);
+
 // ============= Helper: load file via dialog =============
 
 static void TryLoadImage(const VDStringW& path) {
@@ -345,6 +354,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Boot & Acceleration...")) {
 			s_showBootOptions = true;
+		}
+		if (ImGui::MenuItem("CPU & Memory...")) {
+			s_showCPUOptions = true;
 		}
 
 		ImGui::Separator();
@@ -1731,6 +1743,95 @@ static void DrawKeyboardConfig() {
 	ImGui::End();
 }
 
+// ============= CPU & Memory Options =============
+
+static void DrawCPUOptions() {
+	if (!s_showCPUOptions)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(380, 340), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("CPU & Memory", &s_showCPUOptions)) {
+		ImGui::End();
+		return;
+	}
+
+	// CPU type
+	if (ImGui::CollapsingHeader("CPU", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int cpuMode = (int)g_sim.GetCPUMode();
+		ImGui::Text("CPU Type:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(180);
+		if (ImGui::Combo("##cpumode", &cpuMode, kCPUModeNames, kATCPUModeCount))
+			g_sim.SetCPUMode((ATCPUMode)cpuMode, 1);
+
+		// Profiling/verification tools
+		bool profiling = g_sim.IsProfilingEnabled();
+		if (ImGui::Checkbox("CPU profiling", &profiling))
+			g_sim.SetProfilingEnabled(profiling);
+
+		bool verifier = g_sim.IsVerifierEnabled();
+		if (ImGui::Checkbox("CPU verifier", &verifier))
+			g_sim.SetVerifierEnabled(verifier);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Enable illegal instruction and address checks");
+
+		bool heatmap = g_sim.IsHeatMapEnabled();
+		if (ImGui::Checkbox("Heat map", &heatmap))
+			g_sim.SetHeatMapEnabled(heatmap);
+	}
+
+	// Memory options
+	if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
+		// Memory mode (also in System Settings, duplicated for convenience)
+		int memMode = (int)g_sim.GetMemoryMode();
+		ImGui::Text("Memory:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(180);
+		if (ImGui::Combo("##memmode", &memMode, kMemoryModeNames, kATMemoryModeCount))
+			g_sim.SetMemoryMode((ATMemoryMode)memMode);
+
+		// Axlon memory
+		uint8 axlonBits = g_sim.GetAxlonMemoryMode();
+		int axlonKB = axlonBits ? (1 << axlonBits) / 1024 * 16 : 0;
+		const char *axlonNames[] = { "Disabled", "64K", "128K", "256K", "512K", "1024K", "2048K", "4096K" };
+		int axlonIdx = 0;
+		if (axlonBits >= 2 && axlonBits <= 8)
+			axlonIdx = axlonBits - 1;
+
+		ImGui::Text("Axlon RAM:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(180);
+		if (ImGui::Combo("##axlon", &axlonIdx, axlonNames, 8))
+			g_sim.SetAxlonMemoryMode(axlonIdx == 0 ? 0 : (uint8)(axlonIdx + 1));
+
+		bool axlonAlias = g_sim.GetAxlonAliasingEnabled();
+		if (ImGui::Checkbox("Axlon aliasing", &axlonAlias))
+			g_sim.SetAxlonAliasingEnabled(axlonAlias);
+
+		// High memory banks
+		sint32 highBanks = g_sim.GetHighMemoryBanks();
+		int highIdx = highBanks < 0 ? 0 : (highBanks == 0 ? 1 : 2 + highBanks);
+		ImGui::Text("High RAM:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(180);
+		const char *highNames[] = { "Auto", "None", "64K", "256K", "1024K", "4096K", "16384K", "65536K" };
+		if (ImGui::Combo("##highmem", &highIdx, highNames, 8)) {
+			sint32 newBanks = highIdx == 0 ? -1 : (highIdx == 1 ? 0 : highIdx - 2);
+			g_sim.SetHighMemoryBanks(newBanks);
+		}
+
+		bool mapRAM = g_sim.IsMapRAMEnabled();
+		if (ImGui::Checkbox("MapRAM", &mapRAM))
+			g_sim.SetMapRAMEnabled(mapRAM);
+
+		bool shadowROM = g_sim.GetShadowROMEnabled();
+		if (ImGui::Checkbox("Shadow ROM", &shadowROM))
+			g_sim.SetShadowROMEnabled(shadowROM);
+	}
+
+	ImGui::End();
+}
+
 // ============= Boot & Acceleration Options =============
 
 static void DrawBootOptions() {
@@ -2235,6 +2336,7 @@ void ATImGuiEmulatorInit() {
 void ATImGuiEmulatorDraw() {
 	DrawMenuBar();
 	DrawSystemConfig();
+	DrawCPUOptions();
 	DrawBootOptions();
 	DrawCassetteControl();
 	DrawCartridgeBrowser();
