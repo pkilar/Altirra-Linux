@@ -56,6 +56,7 @@
 #include <imgui_manager.h>
 #include <debugger_imgui.h>
 #include <emulator_imgui.h>
+#include <imgui.h>
 
 #include <SDL.h>
 #include <GL/gl.h>
@@ -511,6 +512,14 @@ static void ProcessEvents(SDL_Window *window) {
 		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F12) {
 			if (g_pImGui)
 				g_pImGui->ToggleVisible();
+			continue;
+		}
+
+		// Escape closes overlay (when visible and no popup active)
+		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE
+			&& g_pImGui && g_pImGui->IsVisible()
+			&& !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
+			g_pImGui->SetVisible(false);
 			continue;
 		}
 
