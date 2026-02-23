@@ -39,7 +39,7 @@ inline void *VDAtomicCompareExchangePointer(void *volatile *pp, void *p, void *c
 	#else
 		return (void *)(sintptr)_InterlockedCompareExchange((volatile long *)(volatile sintptr *)pp, (long)(sintptr)p, (long)(sintptr)compare);
 	#endif
-#elif defined(VD_COMPILER_CLANG)
+#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC) || defined(VD_COMPILER_GCC)
 	return __sync_val_compare_and_swap(pp, compare, p);
 #else
 	#error not implemented
@@ -77,7 +77,7 @@ public:
 	static inline int staticExchange(volatile int *dst, int v) {
 		#if defined(VD_COMPILER_MSVC)
 			return (int)_InterlockedExchange((volatile long *)dst, v);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_lock_test_and_set((int *)dst, v);
 		#else
 			#error not implemented
@@ -88,7 +88,7 @@ public:
 	static inline void staticIncrement(volatile int *dst) {
 		#if defined(VD_COMPILER_MSVC)
 			_InterlockedExchangeAdd((volatile long *)dst, 1);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			__sync_fetch_and_add(dst, 1);
 		#else
 			#error not implemented
@@ -99,7 +99,7 @@ public:
 	static inline void staticDecrement(volatile int *dst) {
 		#if defined(VD_COMPILER_MSVC)
 			_InterlockedExchangeAdd((volatile long *)dst, -1);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			__sync_fetch_and_sub(dst, 1);
 		#else
 			#error not implemented
@@ -111,7 +111,7 @@ public:
 	static inline bool staticDecrementTestZero(volatile int *dst) {
 		#if defined(VD_COMPILER_MSVC)
 			return 1 == _InterlockedExchangeAdd((volatile long *)dst, -1);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return 1 == __sync_fetch_and_sub((int *)dst, 1);
 		#else
 			#error not implemented
@@ -123,7 +123,7 @@ public:
 	static inline int staticAdd(volatile int *dst, int v) {
 		#if defined(VD_COMPILER_MSVC)
 			return (int)_InterlockedExchangeAdd((volatile long *)dst, v) + v;
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_fetch_and_add((int *)dst, v) + v;
 		#else
 			#error not implemented
@@ -135,7 +135,7 @@ public:
 	static inline int staticExchangeAdd(volatile int *dst, int v) {
 		#if defined(VD_COMPILER_MSVC)
 			return _InterlockedExchangeAdd((volatile long *)dst, v);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_fetch_and_add((int *)dst, v);
 		#else
 			#error not implemented
@@ -148,7 +148,7 @@ public:
 	static inline int staticCompareExchange(volatile int *dst, int v, int compare) {
 		#if defined(VD_COMPILER_MSVC)
 			return _InterlockedCompareExchange((volatile long *)dst, v, compare);
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_val_compare_and_swap((int *)dst, compare, v);
 		#else
 			#error not implemented
@@ -166,13 +166,13 @@ public:
 	int operator+=(int v)	{ return staticAdd(&n, v); }
 	int operator-=(int v)	{ return staticAdd(&n, -v); }
 
-#if _MSC_VER >= 1310
+#if defined(VD_COMPILER_MSVC) && _MSC_VER >= 1310
 
 	void operator&=(int v)	{ _InterlockedAnd((volatile long *)&n, v); }	///< Atomic bitwise AND.
 	void operator|=(int v)	{ _InterlockedOr((volatile long *)&n, v); }		///< Atomic bitwise OR.
 	void operator^=(int v)	{ _InterlockedXor((volatile long *)&n, v); }	///< Atomic bitwise XOR.
 
-#elif defined(VD_COMPILER_CLANG)
+#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 
 	void operator&=(int v) {
 		__sync_fetch_and_and(&n, v);
@@ -184,29 +184,10 @@ public:
 
 	void operator^=(int v) {
 		__sync_fetch_and_xor(&n, v);
-	}	
+	}
 
 #else
-	/// Atomic bitwise AND.
-	void operator&=(int v) {
-		__asm mov eax,v
-		__asm mov ecx,this
-		__asm lock and dword ptr [ecx],eax
-	}
-
-	/// Atomic bitwise OR.
-	void operator|=(int v) {
-		__asm mov eax,v
-		__asm mov ecx,this
-		__asm lock or dword ptr [ecx],eax
-	}
-
-	/// Atomic bitwise XOR.
-	void operator^=(int v) {
-		__asm mov eax,v
-		__asm mov ecx,this
-		__asm lock xor dword ptr [ecx],eax
-	}
+	#error Atomic bitwise operations not implemented for this compiler
 #endif
 
 	operator int() const {
@@ -340,7 +321,7 @@ public:
 			#else
 				return ptr == p ? p : (T *)_InterlockedExchange((volatile long *)&ptr, (long)p);
 			#endif
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_lock_test_and_set(&ptr, p);
 		#endif
 	}
@@ -352,7 +333,7 @@ public:
 			#else
 				return (T *)_InterlockedCompareExchange((volatile long *)&ptr, (long)(size_t)newValue, (long)(size_t)oldValue);
 			#endif
-		#elif defined(VD_COMPILER_CLANG)
+		#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 			return __sync_val_compare_and_swap(&ptr, oldValue, newValue);
 		#endif
 	}

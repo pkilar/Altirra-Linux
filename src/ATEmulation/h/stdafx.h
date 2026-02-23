@@ -18,15 +18,19 @@
 
 #pragma once
 
+#ifdef _MSC_VER
 #pragma warning(disable: 4351)	// warning C4351: new behavior: elements of array '...' will be default initialized
 #pragma warning(disable: 4355)	// warning C4355: 'this' : used in base member initializer list
+#endif
 
 #define _SCL_SECURE_NO_WARNINGS
 #include <stddef.h>
 #include <string.h>
 #include <stdio.h>
 #include <math.h>
+#ifdef VD_PLATFORM_WINDOWS
 #include <tchar.h>
+#endif
 #include <vd2/system/function.h>
 #include <vd2/system/linearalloc.h>
 #include <vd2/system/refcount.h>

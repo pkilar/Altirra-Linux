@@ -236,7 +236,7 @@ void VDException::vwsetf(const wchar_t *f, va_list val) {
 	}
 }
 
-void VDException::post(HWND hWndParent, const char *title) const noexcept {
+void VDException::post(VDExceptionPostContext hWndParent, const char *title) const noexcept {
 	if (!visible())
 		return;
 

@@ -139,6 +139,9 @@
 						(((uint64)value & 0x000000000000FF00) << 40) +
 						(((uint64)value & 0x00000000000000FF) << 56));
 	}
+
+	inline uint32 VDRotateLeftU32(uint32 value, int bits) { return (value << bits) | (value >> (32 - bits)); }
+	inline uint32 VDRotateRightU32(uint32 value, int bits) { return (value >> bits) | (value << (32 - bits)); }
 #endif
 
 #if defined(__clang__) || defined(__GNUC__)

@@ -15,6 +15,7 @@
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
+#include <cmath>
 #include <at/atio/vorbisbitreader.h>
 
 // Read Vorbis-encoded floats. These use a different representation from IEEE floats.
@@ -38,7 +39,7 @@ float ATVorbisBitReader::ReadFloat() {
 	const float sign = v & 0x80000000U ? -1.0f : 1.0f;
 	const int exponent = std::clamp((int)((v & 0x7fe00000) >> 21) - 788, -63, 63);
 
-	return sign * ldexpf((float)mantissa, exponent);
+	return sign * std::ldexp((float)mantissa, exponent);
 }
 
 void ATVorbisBitReader::RefillSlow() {

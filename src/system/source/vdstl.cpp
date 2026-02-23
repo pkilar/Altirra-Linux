@@ -25,7 +25,7 @@
 
 #include <stdafx.h>
 #include <vd2/system/constexpr.h>
-#include <vd2/system/error.h>
+#include <vd2/system/Error.h>
 #include <vd2/system/vdstl.h>
 #include <vd2/system/vdstl_algorithm.h>
 

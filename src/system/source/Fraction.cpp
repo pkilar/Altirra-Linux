@@ -26,7 +26,7 @@
 #include <stdafx.h>
 #include <math.h>
 
-#include <vd2/system/fraction.h>
+#include <vd2/system/Fraction.h>
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/math.h>
 

@@ -31,15 +31,15 @@
 #include <vd2/system/bitmath.h>
 #include <vd2/system/constexpr.h>
 #include <vd2/system/date.h>
-#include <vd2/system/error.h>
+#include <vd2/system/Error.h>
 #include <vd2/system/function.h>
 
 #if defined(VD_CPU_X86) || defined(VD_CPU_X64)
 #include <vd2/system/cpuaccel.h>
-#include <intrin.h>
+#include <vd2/system/win32/intrin.h>
 #elif defined(VD_CPU_ARM64)
 #include <vd2/system/cpuaccel.h>
-#include <intrin.h>
+#include <vd2/system/win32/intrin.h>
 #include <arm_neon.h>
 
 #if !VD_COMPILER_MSVC
@@ -893,7 +893,7 @@ void VDDeflateHuffmanTable::BuildCode(int depth_limit) {
 	
 		for(int i = depth_limit-2; overallocation > 0; ) {
 			if (i < 0)
-				__debugbreak();
+				VDBREAK;
 
 			if (mCodesPerLen[i]) {
 				--mCodesPerLen[i];
@@ -912,7 +912,7 @@ void VDDeflateHuffmanTable::BuildCode(int depth_limit) {
 
 		for(int i = 1; underallocation > 0; ) {
 			if (i < 0 || i > 15)
-				__debugbreak();
+				VDBREAK;
 			if (mCodesPerLen[i] && (0x8000>>i) <= underallocation) {
 				underallocation -= (0x8000>>i);
 				--mCodesPerLen[i];

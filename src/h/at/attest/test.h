@@ -17,11 +17,16 @@
 #ifndef f_AT_ATTEST_TEST_H
 #define f_AT_ATTEST_TEST_H
 
-#ifdef ATNRELEASE
+#if defined(ATNRELEASE) || defined(AT_TESTS_FORCE_ENABLED)
 	#define AT_TESTS_ENABLED 1
 #endif
 
 #include <vd2/system/error.h>
+
+#if !defined(_MSC_VER) && !defined(__debugbreak)
+#include <signal.h>
+#define __debugbreak() (void)raise(SIGTRAP)
+#endif
 
 #ifdef AT_TESTS_ENABLED
 	typedef int (*ATTestFn)();

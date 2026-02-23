@@ -26,6 +26,7 @@
 #ifndef f_VD2_SYSTEM_DATE_H
 #define f_VD2_SYSTEM_DATE_H
 
+#include <cmath>
 #include <vd2/system/vdtypes.h>
 
 class VDStringW;

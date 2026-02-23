@@ -73,6 +73,8 @@ inline float VDGetIntAsFloat(sint32 i) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+#ifdef VD_COMPILER_MSVC
+
 inline int VDFindLowestSetBit(uint32 v) {
 	unsigned long index;
 	return _BitScanForward(&index, v) ? index : 32;
@@ -104,11 +106,7 @@ inline int VDFindLowestSetBitFast64(uint64 v) {
 	#if defined(VD_CPU_AMD64)
 		return _tzcnt_u64(v);
 	#elif defined(VD_CPU_ARM64)
-		#ifdef VD_COMPILER_MSVC
-			return _CountTrailingZeros64(v);
-		#else
-			return __clzll(__rbitll(v));
-		#endif
+		return _CountTrailingZeros64(v);
 	#else
 		if ((uint32)v)
 			return VDFindLowestSetBitFast((uint32)v);
@@ -116,5 +114,29 @@ inline int VDFindLowestSetBitFast64(uint64 v) {
 			return 32 + VDFindLowestSetBitFast((uint32)(v >> 32));
 	#endif
 }
+
+#else // GCC/Clang
+
+inline int VDFindLowestSetBit(uint32 v) {
+	return v ? __builtin_ctz(v) : 32;
+}
+
+inline int VDFindHighestSetBit(uint32 v) {
+	return v ? (31 - __builtin_clz(v)) : -1;
+}
+
+inline int VDFindLowestSetBitFast(uint32 v) {
+	return __builtin_ctz(v);
+}
+
+inline int VDFindHighestSetBitFast(uint32 v) {
+	return 31 - __builtin_clz(v);
+}
+
+inline int VDFindLowestSetBitFast64(uint64 v) {
+	return __builtin_ctzll(v);
+}
+
+#endif
 
 #endif

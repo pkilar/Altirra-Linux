@@ -19,6 +19,7 @@
 //	archive for details.
 
 #include <stdafx.h>
+#include <cmath>
 #include <vd2/system/bitmath.h>
 #include <vd2/system/hash.h>
 #include <vd2/system/registry.h>
@@ -295,7 +296,7 @@ bool ATConfigVarFloat::FromPersistence(ATConfigVariableRegKey& k) {
 	mbOverridden = true;
 
 	float v = VDGetIntAsFloat(k.getInt(mpVarName, VDGetFloatAsInt(mValue)));
-	if (mValue == v || !isfinite(v))
+	if (mValue == v || !std::isfinite(v))
 		return false;
 
 	mValue = v;
@@ -306,7 +307,7 @@ bool ATConfigVarFloat::FromString(const char *s) {
 	float val = 0;
 	char dummy;
 
-	if (sscanf(s, "%g %c", &val, &dummy) == 1 && isfinite(val)) {
+	if (sscanf(s, "%g %c", &val, &dummy) == 1 && std::isfinite(val)) {
 		*this = val;
 
 		return true;

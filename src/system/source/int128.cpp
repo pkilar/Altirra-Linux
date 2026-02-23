@@ -25,7 +25,9 @@
 
 #include <stdafx.h>
 #include <math.h>
+#ifdef VD_COMPILER_MSVC
 #include <intrin.h>
+#endif
 
 #include <vd2/system/bitmath.h>
 #include <vd2/system/int128.h>
@@ -379,7 +381,7 @@
 		}
 	}
 
-#elif defined(VD_CPU_AMD64)
+#elif defined(VD_CPU_AMD64) && defined(VD_COMPILER_MSVC)
 
 	void vdasm_uint128_add(uint64 dst[2], const uint64 x[2], const uint64 y[2]) {
 		_addcarry_u64(_addcarry_u64(0, x[0], y[0], &dst[0]), x[1], y[1], &dst[1]);
@@ -388,7 +390,7 @@
 	void vdasm_uint128_sub(uint64 dst[2], const uint64 x[2], const uint64 y[2]) {
 		_subborrow_u64(_subborrow_u64(0, x[0], y[0], &dst[0]), x[1], y[1], &dst[1]);
 	}
-#else
+#elif !defined(VD_CPU_AMD64)
 
 	// These aren't really assembly routines, but we define them so we aren't asm dependent.
 
@@ -569,8 +571,8 @@ const vdint128 vdint128::operator/(int x) const {
 }
 
 vdint128::operator double() const {
-	return (double)(unsigned long)q[0]
-		+ ldexp((double)(unsigned long)((unsigned __int64)q[0]>>32), 32)
+	return (double)(uint32)q[0]
+		+ ldexp((double)(uint32)((uint64)q[0]>>32), 32)
 		+ ldexp((double)q[1], 64);
 }
 

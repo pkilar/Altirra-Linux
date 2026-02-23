@@ -204,10 +204,10 @@ public:
 	}
 
 	void Reserve(ATFFTAllocator& allocator, bool optimizeForSpeed) requires T_SharedAllocator {
-		ReserveImpl(allocator, N, optimizeForSpeed);
+		ReserveImpl(allocator, N, false, optimizeForSpeed);
 	}
 
-	void Bind(const ATFFTAllocator& allocator) requires T_SharedAllocator {
+	void Bind(ATFFTAllocator& allocator) requires T_SharedAllocator {
 		BindImpl(allocator);
 	}
 

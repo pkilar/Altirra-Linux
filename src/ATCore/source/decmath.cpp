@@ -20,6 +20,7 @@
 //	archive for details.
 
 #include <stdafx.h>
+#include <cmath>
 #include <at/atcore/decmath.h>
 
 bool ATDecFloat::SetDouble(double v) {

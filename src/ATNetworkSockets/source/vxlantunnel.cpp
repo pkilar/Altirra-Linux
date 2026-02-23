@@ -1,5 +1,7 @@
 #include <stdafx.h>
+#ifdef VD_PLATFORM_WINDOWS
 #include <tchar.h>
+#endif
 #include <vd2/system/binary.h>
 #include <vd2/system/error.h>
 #include <vd2/system/refcount.h>

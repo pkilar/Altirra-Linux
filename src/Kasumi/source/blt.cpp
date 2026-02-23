@@ -19,6 +19,10 @@
 #include <stdafx.h>
 #include <vector>
 #include <malloc.h>
+#ifndef _WIN32
+#include <alloca.h>
+#define _alloca alloca
+#endif
 #include <vd2/system/memory.h>
 #include <vd2/system/cpuaccel.h>
 #include <vd2/system/vdstl.h>

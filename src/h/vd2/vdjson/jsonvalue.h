@@ -21,7 +21,7 @@
 
 #include <vd2/vdjson/jsonnametable.h>
 
-#include <vd2/system/error.h>
+#include <vd2/system/Error.h>
 class VDParseException : public MyError {
 public:
 	VDParseException() = default;

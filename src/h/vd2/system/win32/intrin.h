@@ -26,31 +26,39 @@
 #ifndef f_VD2_SYSTEM_WIN32_INTRIN_H
 #define f_VD2_SYSTEM_WIN32_INTRIN_H
 
-#pragma once
+#include <vd2/system/vdtypes.h>
 
-// The Windows SDK conflicts with the VS2005 declaration of a couple
-// of intrinsics starting with the Vista SDK. The conflict is between
-// intrin.h and winnt.h. To work around this, we wrap intrin.h and
-// rename its declaration.
-#pragma push_macro("_interlockedbittestandset")
-#pragma push_macro("_interlockedbittestandreset")
-#pragma push_macro("_interlockedbittestandset64")
-#pragma push_macro("_interlockedbittestandreset64")
+#ifdef VD_COMPILER_MSVC
+	#pragma once
 
-#define _interlockedbittestandset _interlockedbittestandset_vc
-#define _interlockedbittestandreset _interlockedbittestandreset_vc
-#define _interlockedbittestandset64 _interlockedbittestandset64_vc
-#define _interlockedbittestandreset64 _interlockedbittestandreset64_vc
+	// The Windows SDK conflicts with the VS2005 declaration of a couple
+	// of intrinsics starting with the Vista SDK. The conflict is between
+	// intrin.h and winnt.h. To work around this, we wrap intrin.h and
+	// rename its declaration.
+	#pragma push_macro("_interlockedbittestandset")
+	#pragma push_macro("_interlockedbittestandreset")
+	#pragma push_macro("_interlockedbittestandset64")
+	#pragma push_macro("_interlockedbittestandreset64")
 
-#ifdef _MSC_VER
+	#define _interlockedbittestandset _interlockedbittestandset_vc
+	#define _interlockedbittestandreset _interlockedbittestandreset_vc
+	#define _interlockedbittestandset64 _interlockedbittestandset64_vc
+	#define _interlockedbittestandreset64 _interlockedbittestandreset64_vc
+
 	#include <intrin.h>
-#else
-	#include <emmintrin.h>
-#endif
 
-#pragma pop_macro("_interlockedbittestandreset64")
-#pragma pop_macro("_interlockedbittestandset64")
-#pragma pop_macro("_interlockedbittestandreset")
-#pragma pop_macro("_interlockedbittestandset")
+	#pragma pop_macro("_interlockedbittestandreset64")
+	#pragma pop_macro("_interlockedbittestandset64")
+	#pragma pop_macro("_interlockedbittestandreset")
+	#pragma pop_macro("_interlockedbittestandset")
+
+#else
+	// GCC/Clang on Linux: include the relevant SIMD headers based on CPU target
+	#if defined(VD_CPU_AMD64) || defined(VD_CPU_X86)
+		#include <x86intrin.h>
+	#elif defined(VD_CPU_ARM64)
+		#include <arm_neon.h>
+	#endif
+#endif
 
 #endif
