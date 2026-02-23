@@ -554,8 +554,14 @@ static void ProcessEvents(SDL_Window *window) {
 
 		// F12 toggles debugger overlay
 		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F12) {
-			if (g_pImGui)
+			if (g_pImGui) {
 				g_pImGui->ToggleVisible();
+				// Show cursor when overlay becomes visible
+				if (g_pImGui->IsVisible() && g_cursorHidden) {
+					SDL_ShowCursor(SDL_ENABLE);
+					g_cursorHidden = false;
+				}
+			}
 			continue;
 		}
 
