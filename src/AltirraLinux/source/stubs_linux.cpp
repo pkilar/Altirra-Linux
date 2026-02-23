@@ -50,6 +50,7 @@
 
 #include <SDL.h>
 #include <error_imgui.h>
+#include "display_sdl2.h"
 
 #include <algorithm>
 #include <mutex>
@@ -177,10 +178,11 @@ uint32 ATUIGetBootUnloadStorageMask() { return 0; }
 uint32 ATUIGetResetFlags() { return 0; }
 
 static ATDisplayFilterMode s_displayFilterMode = (ATDisplayFilterMode)0;
+static ATDisplayStretchMode s_displayStretchMode = kATDisplayStretchMode_PreserveAspectRatio;
 static float s_speedModifier = 1.0f;
 
 ATDisplayFilterMode ATUIGetDisplayFilterMode() { return s_displayFilterMode; }
-ATDisplayStretchMode ATUIGetDisplayStretchMode() { return (ATDisplayStretchMode)0; }
+ATDisplayStretchMode ATUIGetDisplayStretchMode() { return s_displayStretchMode; }
 ATFrameRateMode ATUIGetFrameRateMode() { return (ATFrameRateMode)0; }
 ATUIEnhancedTextMode ATUIGetEnhancedTextMode() { return kATUIEnhancedTextMode_None; }
 
@@ -208,7 +210,13 @@ void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; 
 void ATUISetDisplayIndicators(bool) {}
 void ATUISetDisplayPadIndicators(bool) {}
 void ATUISetDisplayPanOffset(const vdfloat2&) {}
-void ATUISetDisplayStretchMode(ATDisplayStretchMode) {}
+void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
+	s_displayStretchMode = m;
+	extern ATDisplaySDL2 *ATGetLinuxDisplay();
+	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	if (disp)
+		disp->SetStretchMode(m);
+}
 void ATUISetDisplayZoom(float) {}
 void ATUISetDrawPadBoundsEnabled(bool) {}
 void ATUISetDrawPadPointersEnabled(bool) {}

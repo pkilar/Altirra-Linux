@@ -115,29 +115,57 @@ void ATDisplaySDL2::RenderQuad() {
 	if (winW <= 0 || winH <= 0)
 		return;
 
-	// Calculate aspect-correct destination rect
-	// Atari pixel aspect ratio: approximately 1.0 for NTSC (depending on mode)
-	// The source already accounts for PAR, so we just fit to window
-	float srcAspect = (float)mSourceW / (float)mSourceH;
-	float winAspect = (float)winW / (float)winH;
-
+	// Calculate destination rect based on stretch mode
 	float destX0, destY0, destX1, destY1;
-	if (srcAspect > winAspect) {
-		// Source is wider — letterbox top/bottom
-		float scale = (float)winW / (float)mSourceW;
-		float destH = mSourceH * scale;
+
+	if (mStretchMode == kATDisplayStretchMode_Unconstrained) {
+		// Fill entire window
 		destX0 = 0;
-		destX1 = (float)winW;
-		destY0 = ((float)winH - destH) * 0.5f;
-		destY1 = destY0 + destH;
-	} else {
-		// Source is taller — pillarbox left/right
-		float scale = (float)winH / (float)mSourceH;
-		float destW = mSourceW * scale;
-		destX0 = ((float)winW - destW) * 0.5f;
-		destX1 = destX0 + destW;
 		destY0 = 0;
+		destX1 = (float)winW;
 		destY1 = (float)winH;
+	} else {
+		float srcAspect = (float)mSourceW / (float)mSourceH;
+		float winAspect = (float)winW / (float)winH;
+
+		if (mStretchMode == kATDisplayStretchMode_SquarePixels) {
+			// 1:1 pixel mapping, centered
+			float destW = (float)mSourceW;
+			float destH = (float)mSourceH;
+			destX0 = ((float)winW - destW) * 0.5f;
+			destY0 = ((float)winH - destH) * 0.5f;
+			destX1 = destX0 + destW;
+			destY1 = destY0 + destH;
+		} else if (mStretchMode == kATDisplayStretchMode_Integral || mStretchMode == kATDisplayStretchMode_IntegralPreserveAspectRatio) {
+			// Integer scaling — find largest integer scale that fits
+			int scaleX = winW / mSourceW;
+			int scaleY = winH / mSourceH;
+			int scale = (scaleX < scaleY) ? scaleX : scaleY;
+			if (scale < 1) scale = 1;
+			float destW = (float)(mSourceW * scale);
+			float destH = (float)(mSourceH * scale);
+			destX0 = ((float)winW - destW) * 0.5f;
+			destY0 = ((float)winH - destH) * 0.5f;
+			destX1 = destX0 + destW;
+			destY1 = destY0 + destH;
+		} else {
+			// Preserve aspect ratio (default)
+			if (srcAspect > winAspect) {
+				float scale = (float)winW / (float)mSourceW;
+				float destH = mSourceH * scale;
+				destX0 = 0;
+				destX1 = (float)winW;
+				destY0 = ((float)winH - destH) * 0.5f;
+				destY1 = destY0 + destH;
+			} else {
+				float scale = (float)winH / (float)mSourceH;
+				float destW = mSourceW * scale;
+				destX0 = ((float)winW - destW) * 0.5f;
+				destX1 = destX0 + destW;
+				destY0 = 0;
+				destY1 = (float)winH;
+			}
+		}
 	}
 
 	// Set up orthographic projection
