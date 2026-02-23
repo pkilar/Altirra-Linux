@@ -139,11 +139,33 @@ void ATUIManager::SetCustomEffectPath(const wchar_t *, bool) {
 
 static ATUIQueue s_stubQueue;
 
-void ATUIQueue::PushStep(const vdfunction<void()>&) {
+void ATUIQueue::PushStep(const vdfunction<void()>& step) {
+	mSteps.push_back(step);
+}
+
+bool ATUIQueue::Run() {
+	if (mSteps.empty())
+		return false;
+
+	ATUIStep step(std::move(mSteps.back()));
+	mSteps.pop_back();
+
+	try {
+		step();
+	} catch (const MyError& e) {
+		ATUIShowError(e);
+	} catch (...) {
+	}
+
+	return true;
 }
 
 ATUIQueue& ATUIGetQueue() {
 	return s_stubQueue;
+}
+
+void ATUIPushStep(const ATUIStep& step) {
+	s_stubQueue.PushStep(step);
 }
 
 ///////////////////////////////////////////////////////////////////////////

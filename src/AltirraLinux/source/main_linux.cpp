@@ -49,6 +49,7 @@
 #include "cartridge.h"
 #include "inputmanager.h"
 #include "uiaccessors.h"
+#include "uiqueue.h"
 #include "inputmap.h"
 
 #include <display_sdl2.h>
@@ -972,6 +973,9 @@ int main(int argc, char *argv[]) {
 				g_cursorHidden = true;
 			}
 		}
+
+		// Process UI step queue (custom device scripts, deferred actions)
+		while (ATUIGetQueue().Run()) {}
 
 		// Check if quit was confirmed (after dirty disk dialog)
 		if (ATImGuiIsQuitConfirmed()) {
