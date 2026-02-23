@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+	<channel>
+		<title>Altirra update feed (release channel)</title>
+		<link>https://www.virtualdub.org/altirra.html</link>
+		<description>Automatic update notifications for release versions of the Altirra emulator.</description>
+		<item>
+			<title>Altirra 4.31 (4.31.200.16684; win7; sse2)</title>
+			<description>
+				<ul>
+<li>Cassette: Fixed a crash if decoding errors occurred while loading a raw tape.</li>
+<li>Devices: Fixed a crash when adding a device with certain nodes selected. </li>
+<li>Display: Fixed D3D9 gamma correction bugs in specific display configurations with bloom enabled.</li>
+<li>Display: Fixed crash when enabling frame blending at extended PAL height and artifacting enabled.</li>
+<li>Display: Fixed regression in NTSC high artifacting on ARM64 only.</li>
+<li>Input: Fixed console controller inputs being blocked in full-screen mode.</li>
+<li>Printer: Fixed rendering artifacts at edges when scrolling 1020 plotter output at high zoom.</li>
+<li>Printer: Fixed a crash when zooming in on 1020 plotter output on ARM64 only.</li>
+<li>UI: Fixed some cases of empty error dialogs when long operations are cancelled.</li>
+				</ul>
+			</description>
+   			<link>https://www.virtualdub.org/altirra.html</link>
+			<pubDate>
+				now
+			</pubDate>
+			<category>release</category>
+		</item>
+	</channel>
+</rss>

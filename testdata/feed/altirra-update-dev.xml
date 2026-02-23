@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0">
+	<channel>
+		<title>Altirra update feed (test channel)</title>
+		<link>https://forums.atariage.com/topic/378003-altirra-430-released/</link>
+		<description>Automatic update notifications for test versions of the Altirra emulator, used by the Check for Updates feature in the program.</description>
+		<item>
+			<title>Altirra {../../../dev/publish/last-test-build-info.txt|version_id} ({../../../dev/publish/last-test-build-info.txt|version_number}; win7; sse2)</title>
+			<description>
+				<ul>
+<li>Tweaked the Multiplexer emulation to load much faster.</li>
+<li>Fixed a bug where connection errors were getting stuck on the Multiplexer device in the device UI.</li>
+<li>Fixed modems not being able to dial out to IPv6 addresses.</li>
+<li>Fixed SX212 connection speed setting not saving properly.</li>
+<li>Fixed SX212 emulation mode setting not switching properly on the fly.</li>
+<li>/profile command line switch is no longer case sensitive.</li>
+				</ul>
+			</description>
+   			<link>https://forums.atariage.com/topic/378003-altirra-430-released/page/18/#findComment-5756158</link>
+			<pubDate>
+				now
+			</pubDate>
+			<category>release</category>
+		</item>
+	</channel>
+</rss>
