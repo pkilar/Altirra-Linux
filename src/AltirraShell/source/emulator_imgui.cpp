@@ -2263,6 +2263,15 @@ static void DrawAudioOptions() {
 		}
 	}
 
+	// Drive sounds
+	if (ImGui::CollapsingHeader("Drive Sounds", ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool driveSounds = g_sim.GetDiskInterface(0).AreDriveSoundsEnabled();
+		if (ImGui::Checkbox("Enable drive sounds", &driveSounds)) {
+			for (int i = 0; i < 15; ++i)
+				g_sim.GetDiskInterface(i).SetDriveSoundsEnabled(driveSounds);
+		}
+	}
+
 	// POKEY options
 	if (ImGui::CollapsingHeader("POKEY Options", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ATPokeyEmulator& pokey = g_sim.GetPokey();
