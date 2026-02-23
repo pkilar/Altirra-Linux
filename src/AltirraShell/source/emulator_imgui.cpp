@@ -3252,6 +3252,26 @@ void ATImGuiShowToast(const char *message) {
 	ShowToast(message);
 }
 
+static double s_startTime = 0;
+
 void ATImGuiDrawToastsOnly() {
 	DrawToasts();
+
+	// Show overlay hint for first 5 seconds
+	if (s_startTime == 0)
+		s_startTime = (double)SDL_GetTicks() / 1000.0;
+
+	double elapsed = (double)SDL_GetTicks() / 1000.0 - s_startTime;
+	if (elapsed < 5.0) {
+		float alpha = elapsed > 4.0f ? (float)(5.0 - elapsed) : 1.0f;
+		ImVec2 vp = ImGui::GetMainViewport()->Size;
+		ImGui::SetNextWindowPos(ImVec2(vp.x * 0.5f, 30.0f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+		ImGui::SetNextWindowBgAlpha(0.6f * alpha);
+		ImGui::Begin("##hint", nullptr,
+			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs);
+		ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, alpha), "Press F12 for menu");
+		ImGui::End();
+	}
 }
