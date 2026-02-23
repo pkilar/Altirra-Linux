@@ -834,12 +834,19 @@ static void DrawMenuBar() {
 		ImGui::Separator();
 
 		float speed = ATUIGetSpeedModifier();
-		ImGui::Text("Speed: %.0f%%", speed * 100.0f);
 
-		if (ImGui::MenuItem("50%"))  ATUISetSpeedModifier(0.5f);
-		if (ImGui::MenuItem("100%")) ATUISetSpeedModifier(1.0f);
-		if (ImGui::MenuItem("200%")) ATUISetSpeedModifier(2.0f);
-		if (ImGui::MenuItem("400%")) ATUISetSpeedModifier(4.0f);
+		if (ImGui::MenuItem("50%",  nullptr, speed == 0.5f))  ATUISetSpeedModifier(0.5f);
+		if (ImGui::MenuItem("100%", nullptr, speed == 1.0f))  ATUISetSpeedModifier(1.0f);
+		if (ImGui::MenuItem("200%", nullptr, speed == 2.0f))  ATUISetSpeedModifier(2.0f);
+		if (ImGui::MenuItem("400%", nullptr, speed == 4.0f))  ATUISetSpeedModifier(4.0f);
+
+		ImGui::Separator();
+
+		int speedPct = (int)(speed * 100.0f + 0.5f);
+		ImGui::SetNextItemWidth(120);
+		if (ImGui::SliderInt("##speed", &speedPct, 10, 800, "%d%%")) {
+			ATUISetSpeedModifier((float)speedPct / 100.0f);
+		}
 
 		ImGui::EndMenu();
 	}
