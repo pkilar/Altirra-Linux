@@ -15,6 +15,7 @@
 #include <vd2/VDDisplay/display.h>
 #include <at/atdebugger/target.h>
 #include <at/atcore/media.h>
+#include <at/atcore/propertyset.h>
 #include <at/atcore/serializable.h>
 #include <at/atio/image.h>
 #include <at/atio/cartridgeimage.h>
@@ -45,6 +46,7 @@ class ATIRQController;
 #include "uitypes.h"
 #include "gtia.h"
 #include "uikeyboard.h"
+#include "devicemanager.h"
 #include "debugger.h"
 
 #include <SDL.h>
@@ -52,6 +54,7 @@ class ATIRQController;
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 // Forward declarations for functions defined in cartdetect.cpp (compiled in Linux build)
 uint32 ATCartridgeAutodetectMode(const void *data, uint32 size, vdfastvector<int>& cartModes);
@@ -76,6 +79,13 @@ static bool s_showFirmwareManager = false;
 static bool s_showAudioOptions = false;
 static bool s_showVideoConfig = false;
 static bool s_showKeyboardConfig = false;
+static bool s_showDeviceManager = false;
+
+// Device manager state
+static IATDevice *s_devSelectedDevice = nullptr;
+static bool s_devShowConfig = false;
+static ATPropertySet s_devEditProps;
+static std::string s_devEditTag;
 
 // Cartridge browser state
 static bool s_cartMapperActive = false;
@@ -310,6 +320,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Keyboard...")) {
 			s_showKeyboardConfig = true;
+		}
+		if (ImGui::MenuItem("Devices...")) {
+			s_showDeviceManager = true;
 		}
 
 		ImGui::Separator();
@@ -1363,6 +1376,236 @@ static void DrawAudioOptions() {
 	ImGui::End();
 }
 
+// ============= Device Configuration Window =============
+
+// Generic property set editor - renders ImGui controls for each property
+static bool DrawPropertySetEditor(ATPropertySet& props) {
+	bool changed = false;
+
+	struct PropEntry {
+		std::string name;
+		ATPropertyType type;
+		ATPropertyValue value;
+	};
+
+	// Collect properties into a sortable list
+	std::vector<PropEntry> entries;
+	props.EnumProperties([&](const char *name, const ATPropertyValue& val) {
+		PropEntry e;
+		e.name = name;
+		e.type = val.mType;
+		e.value = val;
+		// For string type, deep copy
+		if (val.mType == kATPropertyType_String16 && val.mValStr16) {
+			// Store pointer directly; it's valid for the editor's lifetime
+			e.value.mValStr16 = val.mValStr16;
+		}
+		entries.push_back(std::move(e));
+	});
+
+	// Sort alphabetically
+	std::sort(entries.begin(), entries.end(), [](const PropEntry& a, const PropEntry& b) {
+		return a.name < b.name;
+	});
+
+	for (const PropEntry& e : entries) {
+		ImGui::PushID(e.name.c_str());
+
+		switch (e.type) {
+			case kATPropertyType_Bool: {
+				bool val = e.value.mValBool;
+				if (ImGui::Checkbox(e.name.c_str(), &val)) {
+					props.SetBool(e.name.c_str(), val);
+					changed = true;
+				}
+				break;
+			}
+
+			case kATPropertyType_Int32: {
+				int val = (int)e.value.mValI32;
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputInt(e.name.c_str(), &val)) {
+					props.SetInt32(e.name.c_str(), (sint32)val);
+					changed = true;
+				}
+				break;
+			}
+
+			case kATPropertyType_Uint32: {
+				int val = (int)e.value.mValU32;
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputInt(e.name.c_str(), &val)) {
+					if (val >= 0) {
+						props.SetUint32(e.name.c_str(), (uint32)val);
+						changed = true;
+					}
+				}
+				break;
+			}
+
+			case kATPropertyType_Float: {
+				float val = e.value.mValF;
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputFloat(e.name.c_str(), &val, 0, 0, "%.3f")) {
+					props.SetFloat(e.name.c_str(), val);
+					changed = true;
+				}
+				break;
+			}
+
+			case kATPropertyType_Double: {
+				float val = (float)e.value.mValD;
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputFloat(e.name.c_str(), &val, 0, 0, "%.6f")) {
+					props.SetDouble(e.name.c_str(), (double)val);
+					changed = true;
+				}
+				break;
+			}
+
+			case kATPropertyType_String16: {
+				VDStringA u8val;
+				if (e.value.mValStr16)
+					u8val = VDTextWToU8(VDStringW(e.value.mValStr16));
+
+				char buf[512];
+				strncpy(buf, u8val.c_str(), sizeof(buf) - 1);
+				buf[sizeof(buf) - 1] = 0;
+
+				ImGui::SetNextItemWidth(300);
+				if (ImGui::InputText(e.name.c_str(), buf, sizeof(buf))) {
+					VDStringW wstr = VDTextU8ToW(VDStringA(buf));
+					props.SetString(e.name.c_str(), wstr.c_str());
+					changed = true;
+				}
+				break;
+			}
+
+			default:
+				ImGui::Text("%s: <unsupported type>", e.name.c_str());
+				break;
+		}
+
+		ImGui::PopID();
+	}
+
+	if (entries.empty()) {
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No configurable properties.");
+	}
+
+	return changed;
+}
+
+static void DrawDeviceManager() {
+	if (!s_showDeviceManager)
+		return;
+
+	ATDeviceManager *devMgr = g_sim.GetDeviceManager();
+	if (!devMgr) {
+		s_showDeviceManager = false;
+		return;
+	}
+
+	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Device Manager", &s_showDeviceManager)) {
+		ImGui::End();
+		return;
+	}
+
+	// Toolbar
+	if (ImGui::Button("Configure...") && s_devSelectedDevice) {
+		ATDeviceInfo info;
+		s_devSelectedDevice->GetDeviceInfo(info);
+		s_devEditTag = info.mpDef ? info.mpDef->mpTag : "";
+		s_devEditProps.Clear();
+		s_devSelectedDevice->GetSettings(s_devEditProps);
+		s_devShowConfig = true;
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Remove") && s_devSelectedDevice) {
+		devMgr->RemoveDevice(s_devSelectedDevice);
+		s_devSelectedDevice = nullptr;
+		s_devShowConfig = false;
+	}
+
+	// Device list
+	ImGui::Separator();
+
+	uint32 devCount = devMgr->GetDeviceCount();
+
+	if (ImGui::BeginTable("##devtable", 3,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+		ImVec2(0, 200)))
+	{
+		ImGui::TableSetupColumn("Device", 0, 2.0f);
+		ImGui::TableSetupColumn("Type", 0, 1.5f);
+		ImGui::TableSetupColumn("Settings", 0, 2.0f);
+		ImGui::TableHeadersRow();
+
+		for (uint32 i = 0; i < devCount; ++i) {
+			IATDevice *dev = devMgr->GetDeviceByIndex(i);
+			if (!dev)
+				continue;
+
+			ATDeviceInfo info;
+			dev->GetDeviceInfo(info);
+
+			VDStringW blurb;
+			dev->GetSettingsBlurb(blurb);
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			const wchar_t *devName = info.mpDef ? info.mpDef->mpName : L"Unknown";
+			VDStringA u8name = VDTextWToU8(VDStringW(devName));
+			bool selected = (s_devSelectedDevice == dev);
+
+			if (ImGui::Selectable(u8name.c_str(), selected, ImGuiSelectableFlags_SpanAllColumns))
+				s_devSelectedDevice = dev;
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%s", info.mpDef ? info.mpDef->mpTag : "?");
+
+			ImGui::TableNextColumn();
+			VDStringA u8blurb = VDTextWToU8(blurb);
+			ImGui::Text("%s", u8blurb.c_str());
+		}
+
+		ImGui::EndTable();
+	}
+
+	// Device configuration editor (inline)
+	if (s_devShowConfig && s_devSelectedDevice) {
+		ImGui::Separator();
+
+		ATDeviceInfo info;
+		s_devSelectedDevice->GetDeviceInfo(info);
+		const wchar_t *devName = info.mpDef ? info.mpDef->mpName : L"Device";
+		VDStringA u8name = VDTextWToU8(VDStringW(devName));
+
+		ImGui::Text("Configure: %s", u8name.c_str());
+
+		ImGui::BeginChild("##devcfg", ImVec2(0, 150), ImGuiChildFlags_Borders);
+		DrawPropertySetEditor(s_devEditProps);
+		ImGui::EndChild();
+
+		if (ImGui::Button("Apply")) {
+			devMgr->ReconfigureDevice(*s_devSelectedDevice, s_devEditProps);
+			s_devShowConfig = false;
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Cancel"))
+			s_devShowConfig = false;
+	}
+
+	ImGui::End();
+}
+
 // ============= Keyboard Configuration Window =============
 
 static void DrawKeyboardConfig() {
@@ -1661,6 +1904,7 @@ void ATImGuiEmulatorDraw() {
 	DrawAudioOptions();
 	DrawVideoConfig();
 	DrawKeyboardConfig();
+	DrawDeviceManager();
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
@@ -1677,4 +1921,6 @@ void ATImGuiEmulatorShutdown() {
 	s_cartDetectedModes.clear();
 	s_cartDisplayModes.clear();
 	s_fwList.clear();
+	s_devSelectedDevice = nullptr;
+	s_devEditProps.Clear();
 }
