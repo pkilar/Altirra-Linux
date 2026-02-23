@@ -784,7 +784,19 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Stretch Mode")) {
+			ATDisplayStretchMode curStretch = ATUIGetDisplayStretchMode();
+			for (int i = 0; i < (int)kATDisplayStretchModeCount; ++i) {
+				if (ImGui::MenuItem(kStretchModeNames[i], nullptr, curStretch == (ATDisplayStretchMode)i))
+					ATUISetDisplayStretchMode((ATDisplayStretchMode)i);
+			}
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
+
+		if (ImGui::MenuItem("Video Settings..."))
+			s_showVideoConfig = true;
 
 		bool fullscreen = ATUIGetFullscreen();
 		if (ImGui::MenuItem("Fullscreen", "F11", &fullscreen))
