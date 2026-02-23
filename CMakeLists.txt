@@ -24,3 +24,8 @@ add_subdirectory(src/ATNetworkSockets)
 add_subdirectory(src/ATDebugger)
 add_subdirectory(src/ATVM)
 add_subdirectory(src/ATTest)
+
+# Linux frontend (Phase 3-5)
+if(NOT WIN32)
+	add_subdirectory(src/AltirraShell)
+endif()

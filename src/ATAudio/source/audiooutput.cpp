@@ -19,8 +19,25 @@
 //	archive for details.
 
 #include <stdafx.h>
+#ifdef VD_PLATFORM_WINDOWS
 #include <windows.h>
 #include <mmreg.h>
+#else
+#include <vd2/system/vdtypes.h>
+#include "audioout_sdl2.h"
+
+// WAVEFORMATEX-compatible struct for Linux
+struct WAVEFORMATEX {
+	uint16 wFormatTag;
+	uint16 nChannels;
+	uint32 nSamplesPerSec;
+	uint32 nAvgBytesPerSec;
+	uint16 nBlockAlign;
+	uint16 wBitsPerSample;
+	uint16 cbSize;
+};
+#define WAVE_FORMAT_PCM 1
+#endif
 #include <vd2/system/math.h>
 #include <vd2/system/vdalloc.h>
 #include <vd2/system/time.h>
@@ -1056,18 +1073,23 @@ void ATAudioOutput::RecomputeResamplingRate() {
 }
 
 void ATAudioOutput::ReinitAudio() {
+#ifdef VD_PLATFORM_WINDOWS
 	if (mSelectedApi == kATAudioApi_Auto) {
 		if (!ReinitAudio(kATAudioApi_WASAPI))
 			ReinitAudio(kATAudioApi_WaveOut);
 	} else {
 		ReinitAudio(mSelectedApi);
 	}
+#else
+	ReinitAudio(kATAudioApi_Auto);
+#endif
 }
 
 bool ATAudioOutput::ReinitAudio(ATAudioApi api) {
 	if (!mbNativeAudioEnabled)
 		return true;
 
+#ifdef VD_PLATFORM_WINDOWS
 	if (api == kATAudioApi_WASAPI)
 		mpAudioOut = VDCreateAudioOutputWASAPIW32();
 	else if (api == kATAudioApi_XAudio2)
@@ -1076,6 +1098,9 @@ bool ATAudioOutput::ReinitAudio(ATAudioApi api) {
 		mpAudioOut = VDCreateAudioOutputDirectSoundW32();
 	else
 		mpAudioOut = VDCreateAudioOutputWaveOutW32();
+#else
+	mpAudioOut = VDCreateAudioOutputSDL2();
+#endif
 
 	mActiveApi = api;
 
