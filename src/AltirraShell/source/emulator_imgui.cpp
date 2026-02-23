@@ -43,6 +43,7 @@ class ATIRQController;
 #include "firmwaredetect.h"
 #include "uiaccessors.h"
 #include "uitypes.h"
+#include "gtia.h"
 #include "debugger.h"
 
 #include <SDL.h>
@@ -71,6 +72,7 @@ static bool s_showAbout = false;
 static bool s_showCartridgeBrowser = false;
 static bool s_showFirmwareManager = false;
 static bool s_showAudioOptions = false;
+static bool s_showVideoConfig = false;
 
 // Cartridge browser state
 static bool s_cartMapperActive = false;
@@ -182,6 +184,37 @@ static const char *kDisplayFilterNames[] = {
 	"Sharp Bilinear"
 };
 
+static const char *kArtifactModeNames[] = {
+	"None", "NTSC", "PAL", "NTSC Hi", "PAL Hi", "Auto", "Auto Hi"
+};
+static_assert(sizeof(kArtifactModeNames)/sizeof(kArtifactModeNames[0]) == (int)ATArtifactMode::Count);
+
+static const char *kMonitorModeNames[] = {
+	"Color", "Peritel", "Green Mono", "Amber Mono", "Bluish White Mono", "White Mono"
+};
+static_assert(sizeof(kMonitorModeNames)/sizeof(kMonitorModeNames[0]) == (int)ATMonitorMode::Count);
+
+static const char *kOverscanModeNames[] = {
+	"Normal (168cc)", "Extended (192cc)", "Full (228cc)", "OS Screen (160cc)", "Widescreen (176cc)"
+};
+
+static const char *kVertOverscanModeNames[] = {
+	"Default", "OS Screen (192)", "Normal (224)", "Extended (240)", "Full"
+};
+
+static const char *kStretchModeNames[] = {
+	"Unconstrained", "Preserve Aspect Ratio", "Square Pixels", "Integral", "Integral + Aspect"
+};
+static_assert(sizeof(kStretchModeNames)/sizeof(kStretchModeNames[0]) == kATDisplayStretchModeCount);
+
+static const char *kColorMatchingNames[] = {
+	"None", "sRGB", "Adobe RGB", "Gamma 2.2", "Gamma 2.4"
+};
+
+static const char *kLumaRampNames[] = {
+	"Linear", "XL"
+};
+
 // ============= Helper: load file via dialog =============
 
 static void TryLoadImage(const VDStringW& path) {
@@ -268,6 +301,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Audio Options...")) {
 			s_showAudioOptions = true;
+		}
+		if (ImGui::MenuItem("Video Settings...")) {
+			s_showVideoConfig = true;
 		}
 
 		ImGui::Separator();
@@ -1321,6 +1357,206 @@ static void DrawAudioOptions() {
 	ImGui::End();
 }
 
+// ============= Video Configuration Window =============
+
+static void DrawVideoConfig() {
+	if (!s_showVideoConfig)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(500, 550), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Video Settings", &s_showVideoConfig)) {
+		ImGui::End();
+		return;
+	}
+
+	ATGTIAEmulator& gtia = g_sim.GetGTIA();
+
+	// Display options
+	if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen)) {
+		// Display filter (already in View menu, but also here for convenience)
+		int filterMode = (int)ATUIGetDisplayFilterMode();
+		ImGui::Text("Filter:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##filter", &filterMode, kDisplayFilterNames, 5)) {
+			ATUISetDisplayFilterMode((ATDisplayFilterMode)filterMode);
+
+			ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+			if (disp) {
+				IVDVideoDisplay::FilterMode fm =
+					(filterMode == kATDisplayFilterMode_Point)
+						? IVDVideoDisplay::kFilterPoint
+						: IVDVideoDisplay::kFilterBilinear;
+				disp->SetFilterMode(fm);
+			}
+		}
+
+		// Stretch mode
+		int stretchMode = (int)ATUIGetDisplayStretchMode();
+		ImGui::Text("Stretch:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##stretch", &stretchMode, kStretchModeNames, kATDisplayStretchModeCount))
+			ATUISetDisplayStretchMode((ATDisplayStretchMode)stretchMode);
+
+		// Overscan
+		int osMode = (int)gtia.GetOverscanMode();
+		ImGui::Text("H Overscan:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##hoverscan", &osMode, kOverscanModeNames, ATGTIAEmulator::kOverscanCount))
+			gtia.SetOverscanMode((ATGTIAEmulator::OverscanMode)osMode);
+
+		int vosMode = (int)gtia.GetVerticalOverscanMode();
+		ImGui::Text("V Overscan:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##voverscan", &vosMode, kVertOverscanModeNames, ATGTIAEmulator::kVerticalOverscanCount))
+			gtia.SetVerticalOverscanMode((ATGTIAEmulator::VerticalOverscanMode)vosMode);
+	}
+
+	// Artifacting
+	if (ImGui::CollapsingHeader("Artifacting", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int artMode = (int)gtia.GetArtifactingMode();
+		ImGui::Text("Mode:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##artifact", &artMode, kArtifactModeNames, (int)ATArtifactMode::Count))
+			gtia.SetArtifactingMode((ATArtifactMode)artMode);
+
+		// Monitor mode
+		int monMode = (int)gtia.GetMonitorMode();
+		ImGui::Text("Monitor:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(220);
+		if (ImGui::Combo("##monitor", &monMode, kMonitorModeNames, (int)ATMonitorMode::Count))
+			gtia.SetMonitorMode((ATMonitorMode)monMode);
+
+		// Scanlines / interlace
+		bool scanlines = gtia.AreScanlinesEnabled();
+		if (ImGui::Checkbox("Scanlines", &scanlines))
+			gtia.SetScanlinesEnabled(scanlines);
+
+		bool interlace = gtia.IsInterlaceEnabled();
+		if (ImGui::Checkbox("Interlace", &interlace))
+			gtia.SetInterlaceEnabled(interlace);
+
+		if (interlace) {
+			int deinterlace = (int)gtia.GetDeinterlaceMode();
+			const char *deinterlaceNames[] = { "None", "Adaptive Bob" };
+			ImGui::Text("Deinterlace:");
+			ImGui::SameLine(120);
+			ImGui::SetNextItemWidth(220);
+			if (ImGui::Combo("##deinterlace", &deinterlace, deinterlaceNames, 2))
+				gtia.SetDeinterlaceMode((ATVideoDeinterlaceMode)deinterlace);
+		}
+	}
+
+	// Color adjustment
+	if (ImGui::CollapsingHeader("Color Adjustment")) {
+		ATColorSettings cs = gtia.GetColorSettings();
+		bool isPAL = gtia.IsPALMode();
+		ATColorParams& params = isPAL ? cs.mPALParams : cs.mNTSCParams;
+		bool changed = false;
+
+		ImGui::Text("Editing: %s parameters", isPAL ? "PAL" : "NTSC");
+
+		bool usePALParams = cs.mbUsePALParams;
+		if (ImGui::Checkbox("Use separate PAL parameters", &usePALParams)) {
+			cs.mbUsePALParams = usePALParams;
+			changed = true;
+		}
+
+		ImGui::Separator();
+
+		// Presets
+		uint32 presetCount = ATGetColorPresetCount();
+		if (presetCount > 0 && ImGui::BeginCombo("##preset", "Load Preset...")) {
+			for (uint32 i = 0; i < presetCount; ++i) {
+				VDStringA name = VDTextWToU8(VDStringW(ATGetColorPresetNameByIndex(i)));
+				if (ImGui::Selectable(name.c_str())) {
+					params = ATGetColorPresetByIndex(i);
+					changed = true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Hue Start", &params.mHueStart, -60.0f, 60.0f, "%.1f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Hue Range", &params.mHueRange, 160.0f, 360.0f, "%.1f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Brightness", &params.mBrightness, -0.5f, 0.5f, "%.3f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Contrast", &params.mContrast, 0.0f, 2.0f, "%.3f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Saturation", &params.mSaturation, 0.0f, 1.0f, "%.3f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Gamma", &params.mGammaCorrect, 0.5f, 3.0f, "%.2f");
+		ImGui::SetNextItemWidth(200);
+		changed |= ImGui::SliderFloat("Intensity", &params.mIntensityScale, 0.5f, 2.0f, "%.2f");
+
+		// Color matching
+		int colorMatch = (int)params.mColorMatchingMode;
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("Color Matching", &colorMatch, kColorMatchingNames, 5)) {
+			params.mColorMatchingMode = (ATColorMatchingMode)colorMatch;
+			changed = true;
+		}
+
+		// Luma ramp
+		int lumaRamp = (int)params.mLumaRampMode;
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("Luma Ramp", &lumaRamp, kLumaRampNames, kATLumaRampModeCount)) {
+			params.mLumaRampMode = (ATLumaRampMode)lumaRamp;
+			changed = true;
+		}
+
+		if (ImGui::TreeNode("Artifact Tuning")) {
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Artifact Hue", &params.mArtifactHue, -180.0f, 180.0f, "%.1f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Artifact Sat", &params.mArtifactSat, 0.0f, 2.0f, "%.3f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Artifact Sharpness", &params.mArtifactSharpness, 0.0f, 1.0f, "%.3f");
+			ImGui::TreePop();
+		}
+
+		if (ImGui::TreeNode("RGB Correction")) {
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Red Shift", &params.mRedShift, -30.0f, 30.0f, "%.1f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Red Scale", &params.mRedScale, 0.5f, 2.0f, "%.3f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Green Shift", &params.mGrnShift, -30.0f, 30.0f, "%.1f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Green Scale", &params.mGrnScale, 0.5f, 2.0f, "%.3f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Blue Shift", &params.mBluShift, -30.0f, 30.0f, "%.1f");
+			ImGui::SetNextItemWidth(200);
+			changed |= ImGui::SliderFloat("Blue Scale", &params.mBluScale, 0.5f, 2.0f, "%.3f");
+			ImGui::TreePop();
+		}
+
+		bool palQuirks = params.mbUsePALQuirks;
+		if (ImGui::Checkbox("PAL quirks", &palQuirks)) {
+			params.mbUsePALQuirks = palQuirks;
+			changed = true;
+		}
+
+		if (changed)
+			gtia.SetColorSettings(cs);
+
+		if (ImGui::Button("Reset to Defaults")) {
+			ATColorSettings defaults = gtia.GetDefaultColorSettings();
+			gtia.SetColorSettings(defaults);
+		}
+	}
+
+	ImGui::End();
+}
+
 // ============= Public API =============
 
 void ATImGuiEmulatorInit() {
@@ -1333,6 +1569,7 @@ void ATImGuiEmulatorDraw() {
 	DrawCartridgeBrowser();
 	DrawFirmwareManager();
 	DrawAudioOptions();
+	DrawVideoConfig();
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
