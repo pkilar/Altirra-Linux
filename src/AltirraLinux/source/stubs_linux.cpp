@@ -875,11 +875,15 @@ void ATIDEPhysicalDisk::WriteSectors(const void *, uint32, uint32) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 15. VDFileWatcher (Windows FindFirstChangeNotification)
+// 15. VDFileWatcher — Linux inotify implementation
+//     mChangeHandle stores inotify fd (via intptr_t cast, -1 = inactive).
+//     mTimerId stores the inotify watch descriptor.
 ///////////////////////////////////////////////////////////////////////////
 
+#include <sys/inotify.h>
+
 VDFileWatcher::VDFileWatcher()
-	: mChangeHandle(nullptr)
+	: mChangeHandle(reinterpret_cast<void *>(static_cast<intptr_t>(-1)))
 	, mLastWriteTime(0)
 	, mbWatchDir(false)
 	, mpCB(nullptr)
@@ -894,12 +898,98 @@ VDFileWatcher::~VDFileWatcher() {
 	Shutdown();
 }
 
-void VDFileWatcher::InitDir(const wchar_t *, bool, IVDFileWatcherCallback *) {
-	// Stub: file watching not yet implemented on Linux.
-	// A real implementation would use inotify.
+bool VDFileWatcher::IsActive() const {
+	return reinterpret_cast<intptr_t>(mChangeHandle) >= 0;
+}
+
+void VDFileWatcher::Init(const wchar_t *file, IVDFileWatcherCallback *callback) {
+	Shutdown();
+
+	const wchar_t *pathEnd = VDFileSplitPath(file);
+	VDStringW basePath(file, pathEnd);
+	if (basePath.empty())
+		basePath = L".";
+
+	int ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (ifd < 0)
+		return;
+
+	VDStringA u8path = VDTextWToU8(basePath);
+	int wd = inotify_add_watch(ifd, u8path.c_str(),
+		IN_MODIFY | IN_CREATE | IN_DELETE | IN_MOVED_FROM | IN_MOVED_TO);
+	if (wd < 0) {
+		::close(ifd);
+		return;
+	}
+
+	mChangeHandle = reinterpret_cast<void *>(static_cast<intptr_t>(ifd));
+	mTimerId = static_cast<uint32>(wd);
+	mPath = file;
+	mLastWriteTime = VDFileGetLastWriteTime(mPath.c_str());
+	mpCB = callback;
+	mbRepeatRequested = false;
+	mbWatchDir = false;
+}
+
+void VDFileWatcher::InitDir(const wchar_t *path, bool subdirs, IVDFileWatcherCallback *callback) {
+	Shutdown();
+
+	int ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (ifd < 0)
+		return;
+
+	VDStringA u8path = VDTextWToU8(VDStringW(path));
+	int wd = inotify_add_watch(ifd, u8path.c_str(),
+		IN_MODIFY | IN_CREATE | IN_DELETE | IN_ATTRIB |
+		IN_MOVED_FROM | IN_MOVED_TO);
+	if (wd < 0) {
+		::close(ifd);
+		return;
+	}
+
+	mChangeHandle = reinterpret_cast<void *>(static_cast<intptr_t>(ifd));
+	mTimerId = static_cast<uint32>(wd);
+	mPath = path;
+	mpCB = callback;
+	mbRepeatRequested = false;
+	mbWatchDir = true;
 }
 
 void VDFileWatcher::Shutdown() {
+	int ifd = static_cast<int>(reinterpret_cast<intptr_t>(mChangeHandle));
+	if (ifd >= 0) {
+		::close(ifd);  // closing the fd also removes all watches
+		mChangeHandle = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
+		mTimerId = 0;
+	}
+}
+
+bool VDFileWatcher::Wait(uint32 delay) {
+	int ifd = static_cast<int>(reinterpret_cast<intptr_t>(mChangeHandle));
+	if (ifd < 0)
+		return false;
+
+	// Poll the inotify fd with the given timeout
+	struct pollfd pfd {};
+	pfd.fd = ifd;
+	pfd.events = POLLIN;
+
+	int ret = ::poll(&pfd, 1, delay == 0xFFFFFFFFU ? -1 : (int)delay);
+	if (ret <= 0)
+		return false;
+
+	// Drain inotify events
+	char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+	while (::read(ifd, buf, sizeof(buf)) > 0) {}
+
+	if (!mbWatchDir) {
+		uint64 t = VDFileGetLastWriteTime(mPath.c_str());
+		if (mLastWriteTime == t)
+			return false;
+		mLastWriteTime = t;
+	}
+
+	return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////
