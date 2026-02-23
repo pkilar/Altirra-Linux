@@ -770,6 +770,35 @@ static void DrawMenuBar() {
 					ImGui::EndMenu();
 				}
 			}
+
+			ImGui::Separator();
+
+			// Find highest active drive for rotation
+			int activeDrives = 0;
+			for (int i = 14; i >= 0; --i) {
+				if (g_sim.GetDiskInterface(i).IsDiskLoaded()) {
+					activeDrives = i + 1;
+					break;
+				}
+			}
+
+			if (ImGui::MenuItem("Rotate Down", nullptr, false, activeDrives >= 2)) {
+				g_sim.RotateDrives(activeDrives, +1);
+				const wchar_t *label = g_sim.GetDiskInterface(0).GetMountedImageLabel().c_str();
+				VDStringA u8 = VDTextWToU8(VDStringW(label));
+				char msg[128];
+				snprintf(msg, sizeof(msg), "D1: %s", u8.c_str());
+				ShowToast(msg);
+			}
+			if (ImGui::MenuItem("Rotate Up", nullptr, false, activeDrives >= 2)) {
+				g_sim.RotateDrives(activeDrives, -1);
+				const wchar_t *label = g_sim.GetDiskInterface(0).GetMountedImageLabel().c_str();
+				VDStringA u8 = VDTextWToU8(VDStringW(label));
+				char msg[128];
+				snprintf(msg, sizeof(msg), "D1: %s", u8.c_str());
+				ShowToast(msg);
+			}
+
 			ImGui::EndMenu();
 		}
 
