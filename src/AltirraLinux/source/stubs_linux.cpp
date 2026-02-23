@@ -250,7 +250,9 @@ static vdfloat2 s_displayPanOffset{0, 0};
 vdfloat2 ATUIGetDisplayPanOffset() { return s_displayPanOffset; }
 
 const char *ATUIGetCurrentAltOutputName() { return ""; }
-const char *ATUIGetWindowCaptionTemplate() { return ""; }
+
+static VDStringA s_windowCaptionTemplate;
+const char *ATUIGetWindowCaptionTemplate() { return s_windowCaptionTemplate.c_str(); }
 
 VDGUIHandle ATUIGetNewPopupOwner() { return nullptr; }
 
@@ -283,7 +285,20 @@ void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
 void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
-void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) { s_enhancedTextMode = v; }
+void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
+	s_enhancedTextMode = v;
+	extern ATSimulator g_sim;
+	switch (v) {
+		case kATUIEnhancedTextMode_None:
+		case kATUIEnhancedTextMode_Hardware:
+			g_sim.SetVirtualScreenEnabled(false);
+			break;
+		case kATUIEnhancedTextMode_Software:
+			g_sim.SetVirtualScreenEnabled(true);
+			g_sim.GetPokey().PushBreak();
+			break;
+	}
+}
 void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; ATUIUpdateSpeedTiming(); }
 void ATUISetFrameRateVSyncAdaptive(bool v) { s_frameRateVSyncAdaptive = v; }
 void ATUISetMenuAutoHideEnabled(bool v) { s_menuAutoHide = v; }
@@ -306,7 +321,7 @@ void ATUISetTurbo(bool v) {
 	ATUIUpdateSpeedTiming();
 }
 void ATUISetViewFilterSharpness(int v) { s_viewFilterSharpness = v; }
-void ATUISetWindowCaptionTemplate(const char *) {}
+void ATUISetWindowCaptionTemplate(const char *s) { s_windowCaptionTemplate = s ? s : ""; }
 
 ///////////////////////////////////////////////////////////////////////////
 // 7. ATUI keyboard map functions
