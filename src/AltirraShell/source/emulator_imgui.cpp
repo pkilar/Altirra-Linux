@@ -1735,7 +1735,8 @@ static void PollFileDialogFallback() {
 						g_sim.ColdReset();
 						MRUAdd(result.c_str());
 						ShowToast("Booted image");
-					} catch (...) { ShowToast("Failed to boot image"); }
+					} catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Boot failed: %s", e.what()); ShowToast(m); }
+					catch (...) { ShowToast("Failed to boot image"); }
 				}
 				break;
 			default:
@@ -3695,6 +3696,10 @@ void ATImGuiBootImage() {
 			VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 			char msg[256];
 			snprintf(msg, sizeof(msg), "Booted: %s", fname.c_str());
+			ShowToast(msg);
+		} catch (const std::exception& e) {
+			char msg[512];
+			snprintf(msg, sizeof(msg), "Boot failed: %s", e.what());
 			ShowToast(msg);
 		} catch (...) {
 			ShowToast("Failed to boot image");
