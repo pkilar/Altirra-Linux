@@ -228,6 +228,7 @@ set(LINUX_SOURCES
 	source/oshelper_linux.cpp
 	source/console_linux.cpp
 	source/stubs_linux.cpp
+	source/modemtcp_linux.cpp
 )
 
 # Build executable

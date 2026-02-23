@@ -618,10 +618,7 @@ vdrefptr<IATDeviceCustomNetworkEngine> ATCreateDeviceCustomNetworkEngine(
 	return nullptr;
 }
 
-// Modem driver (Winsock based)
-IATModemDriver *ATCreateModemDriverTCP() {
-	return nullptr;
-}
+// Modem driver — provided by modemtcp_linux.cpp
 
 // Native ETW/WPR tracer (Windows trace infrastructure)
 vdrefptr<IVDRefCount> ATCreateNativeTracer(ATTraceContext&, const ATNativeTraceSettings&) {
