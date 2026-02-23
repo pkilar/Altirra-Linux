@@ -86,6 +86,7 @@
 #include "customdevice_win32.h"
 #include "trace.h"
 #include <at/atcore/cio.h>
+#include <at/atcore/constants.h>
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -167,6 +168,9 @@ ATUIQueue& ATUIGetQueue() {
 void ATUIPushStep(const ATUIStep& step) {
 	s_stubQueue.PushStep(step);
 }
+
+// Forward declaration (defined in section 8)
+void ATUIUpdateSpeedTiming();
 
 ///////////////////////////////////////////////////////////////////////////
 // 4. ATUI accessor getters (bool) — simple stubs
@@ -280,7 +284,7 @@ void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
 void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) { s_enhancedTextMode = v; }
-void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; }
+void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; ATUIUpdateSpeedTiming(); }
 void ATUISetFrameRateVSyncAdaptive(bool v) { s_frameRateVSyncAdaptive = v; }
 void ATUISetMenuAutoHideEnabled(bool v) { s_menuAutoHide = v; }
 void ATUISetMouseAutoCapture(bool v) { s_mouseAutoCapture = v; }
@@ -291,11 +295,7 @@ void ATUISetResetFlags(uint32 v) { s_resetFlags = v; }
 void ATUISetShowFPS(bool v) { s_showFPS = v; }
 void ATUISetSpeedModifier(float v) {
 	s_speedModifier = v;
-	extern ATSimulator g_sim;
-	double rate = std::clamp((double)v, 0.01, 100.0);
-	IATAudioOutput *audio = g_sim.GetAudioOutput();
-	if (audio)
-		audio->SetCyclesPerSecond(1789772.5, 1.0 / rate);
+	ATUIUpdateSpeedTiming();
 }
 void ATUISetTargetPointerVisible(bool v) { s_targetPointerVisible = v; }
 void ATUISetTurbo(bool v) {
@@ -303,6 +303,7 @@ void ATUISetTurbo(bool v) {
 	extern ATSimulator g_sim;
 	g_sim.SetTurboModeEnabled(v);
 	SDL_GL_SetSwapInterval(v ? 0 : 1);
+	ATUIUpdateSpeedTiming();
 }
 void ATUISetViewFilterSharpness(int v) { s_viewFilterSharpness = v; }
 void ATUISetWindowCaptionTemplate(const char *) {}
@@ -345,7 +346,43 @@ void ATSetWindowSize(int w, int h) {
 	if (s_pfnSetWindowSize)
 		s_pfnSetWindowSize(w, h);
 }
-void ATUIUpdateSpeedTiming() {}
+void ATUIUpdateSpeedTiming() {
+	extern ATSimulator g_sim;
+
+	// NTSC: 1.7897725MHz master clock, 262 scanlines of 114 clocks each
+	// PAL:  1.773447MHz master clock, 312 scanlines of 114 clocks each
+	// SECAM: 1.7815MHz master clock, 312 scanlines of 114 clocks each
+	static constexpr double kMasterClocks[3] = {
+		kATMasterClock_NTSC,
+		kATMasterClock_PAL,
+		kATMasterClock_SECAM,
+	};
+
+	static constexpr double kPeriods[3][3] = {
+		{ 1.0 / kATFrameRate_NTSC, 1.0 / kATFrameRate_PAL, 1.0 / kATFrameRate_SECAM },
+		{ 1.0 / 59.9400, 1.0 / 50.0000, 1.0 / 50.0 },
+		{ 1.0 / 60.0000, 1.0 / 50.0000, 1.0 / 50.0 },
+	};
+
+	const auto vstd = g_sim.GetVideoStandard();
+	const bool hz50 = vstd != kATVideoStandard_NTSC && vstd != kATVideoStandard_PAL60;
+	const bool isSECAM = vstd == kATVideoStandard_SECAM;
+	const int tableIndex = isSECAM ? 2 : hz50 ? 1 : 0;
+	double rawSecondsPerFrame = kPeriods[s_frameRateMode][tableIndex];
+
+	const double cyclesPerSecond = kMasterClocks[tableIndex] * kPeriods[0][tableIndex] / rawSecondsPerFrame;
+
+	double rate = 1.0;
+
+	if (!g_sim.IsTurboModeEnabled())
+		rate = std::max<double>(0, s_speedModifier + 1.0);
+
+	rate = std::clamp<double>(rate, 0.01, 100.0);
+
+	IATAudioOutput *audioOutput = g_sim.GetAudioOutput();
+	if (audioOutput)
+		audioOutput->SetCyclesPerSecond(cyclesPerSecond, 1.0 / rate);
+}
 void ATSyncCPUHistoryState() {
 	extern ATSimulator g_sim;
 	const bool historyEnabled = g_sim.GetCPU().IsHistoryEnabled();
