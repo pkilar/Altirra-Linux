@@ -646,6 +646,13 @@ static void DrawMenuBar() {
 					}
 
 					if (di.IsDiskLoaded()) {
+						if (di.IsDirty()) {
+							snprintf(label, sizeof(label), "Save D%d", i + 1);
+							if (ImGui::MenuItem(label)) {
+								try { di.SaveDisk(); } catch (...) {}
+							}
+						}
+
 						snprintf(label, sizeof(label), "Unmount D%d", i + 1);
 						if (ImGui::MenuItem(label)) {
 							di.UnloadDisk();
