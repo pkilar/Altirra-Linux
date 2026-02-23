@@ -135,6 +135,55 @@ static int s_newDiskSlot = 0;
 static int s_newDiskFormat = 1;  // 0=Custom, 1=SD 720, 2=MD 1040, 3=DD 720, 4=DSDD 1440
 static int s_newDiskFS = 0;      // 0=None, 1=DOS 2, 2=MyDOS
 
+// Toast notification system
+struct Toast {
+	std::string message;
+	double expireTime;
+};
+static std::vector<Toast> s_toasts;
+
+static void ShowToast(const char *msg) {
+	double now = (double)SDL_GetTicks() / 1000.0;
+	s_toasts.push_back({msg, now + 2.5});
+}
+
+static void DrawToasts() {
+	if (s_toasts.empty())
+		return;
+
+	double now = (double)SDL_GetTicks() / 1000.0;
+
+	// Remove expired
+	while (!s_toasts.empty() && s_toasts.front().expireTime <= now)
+		s_toasts.erase(s_toasts.begin());
+
+	if (s_toasts.empty())
+		return;
+
+	ImVec2 vp = ImGui::GetMainViewport()->Size;
+	float y = vp.y - 60.0f;
+
+	for (int i = (int)s_toasts.size() - 1; i >= 0; --i) {
+		float remaining = (float)(s_toasts[i].expireTime - now);
+		float alpha = remaining < 0.5f ? remaining * 2.0f : 1.0f;
+
+		ImGui::SetNextWindowPos(ImVec2(vp.x * 0.5f, y), ImGuiCond_Always, ImVec2(0.5f, 1.0f));
+		ImGui::SetNextWindowBgAlpha(0.75f * alpha);
+
+		char winId[32];
+		snprintf(winId, sizeof(winId), "##toast%d", i);
+		ImGui::Begin(winId, nullptr,
+			ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+			ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+			ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs);
+
+		ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, alpha), "%s", s_toasts[i].message.c_str());
+		ImGui::End();
+
+		y -= 30.0f;
+	}
+}
+
 // FPS counter state
 static double s_lastFpsTime = 0;
 static int s_fpsFrameCount = 0;
@@ -593,16 +642,18 @@ static void DrawMenuBar() {
 			try {
 				s_pQuickState.clear();
 				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
+				ShowToast("State saved");
 			} catch (...) {
-				fprintf(stderr, "Quick save state failed\n");
+				ShowToast("Save state failed");
 			}
 		}
 		if (ImGui::MenuItem("Quick Load State", "F8", false, s_pQuickState != nullptr)) {
 			try {
 				ATStateLoadContext ctx {};
 				g_sim.ApplySnapshot(*s_pQuickState, &ctx);
+				ShowToast("State loaded");
 			} catch (...) {
-				fprintf(stderr, "Quick load state failed\n");
+				ShowToast("Load state failed");
 			}
 		}
 
@@ -613,8 +664,9 @@ static void DrawMenuBar() {
 			if (!path.empty()) {
 				try {
 					g_sim.SaveState(path.c_str());
+					ShowToast("State saved to file");
 				} catch (...) {
-					fprintf(stderr, "Save state failed\n");
+					ShowToast("Save state failed");
 				}
 			} else if (ATLinuxFileDialogIsFallbackOpen()) {
 				s_pendingDialog = PendingDialog::kSaveState;
@@ -670,7 +722,14 @@ static void DrawMenuBar() {
 						if (di.IsDirty()) {
 							snprintf(label, sizeof(label), "Save D%d", i + 1);
 							if (ImGui::MenuItem(label)) {
-								try { di.SaveDisk(); } catch (...) {}
+								try {
+									di.SaveDisk();
+									char msg[64];
+									snprintf(msg, sizeof(msg), "D%d saved", i + 1);
+									ShowToast(msg);
+								} catch (...) {
+									ShowToast("Disk save failed");
+								}
 							}
 						}
 
@@ -685,8 +744,9 @@ static void DrawMenuBar() {
 									if (ext && !vdwcsicmp(ext, L".xfd"))
 										fmt = kATDiskImageFormat_XFD;
 									di.SaveDiskAs(path.c_str(), fmt);
+									ShowToast("Disk saved");
 								} catch (...) {
-									fprintf(stderr, "Failed to save disk\n");
+									ShowToast("Disk save failed");
 								}
 							}
 						}
@@ -3046,8 +3106,11 @@ static void DrawNewDisk() {
 				if (fs)
 					fs->Flush();
 			}
+			char msg[64];
+			snprintf(msg, sizeof(msg), "New disk created in D%d", s_newDiskSlot + 1);
+			ShowToast(msg);
 		} catch (...) {
-			fprintf(stderr, "Failed to create new disk\n");
+			ShowToast("Failed to create new disk");
 		}
 		s_showNewDisk = false;
 	}
@@ -3151,6 +3214,8 @@ void ATImGuiEmulatorDraw() {
 	CheckPendingErrors();
 	DrawErrorPopup();
 
+	DrawToasts();
+
 	// Draw debugger windows (without toolbar — menu bar handles that now)
 	ATImGuiDebuggerDrawWindows();
 }
@@ -3181,4 +3246,12 @@ bool ATImGuiIsQuitConfirmed() {
 		return true;
 	}
 	return false;
+}
+
+void ATImGuiShowToast(const char *message) {
+	ShowToast(message);
+}
+
+void ATImGuiDrawToastsOnly() {
+	DrawToasts();
 }

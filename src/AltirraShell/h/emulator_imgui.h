@@ -17,4 +17,7 @@ void ATImGuiEmulatorShutdown();
 void ATImGuiRequestQuit();
 bool ATImGuiIsQuitConfirmed();
 
+// Toast notifications (2.5s fade-out)
+void ATImGuiShowToast(const char *message);
+
 #endif

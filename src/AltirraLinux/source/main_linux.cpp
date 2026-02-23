@@ -336,9 +336,9 @@ static void HandleShortcuts(const SDL_Event& event) {
 			try {
 				s_pQuickState.clear();
 				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
-				fprintf(stderr, "Quick state saved\n");
+				ATImGuiShowToast("State saved");
 			} catch (...) {
-				fprintf(stderr, "Quick save state failed\n");
+				ATImGuiShowToast("Save state failed");
 			}
 			return;
 		}
@@ -349,9 +349,9 @@ static void HandleShortcuts(const SDL_Event& event) {
 				try {
 					ATStateLoadContext ctx {};
 					g_sim.ApplySnapshot(*s_pQuickState, &ctx);
-					fprintf(stderr, "Quick state loaded\n");
+					ATImGuiShowToast("State loaded");
 				} catch (...) {
-					fprintf(stderr, "Quick load state failed\n");
+					ATImGuiShowToast("Load state failed");
 				}
 			}
 			return;
@@ -362,7 +362,6 @@ static void HandleShortcuts(const SDL_Event& event) {
 			VDPixmapBuffer pxbuf;
 			VDPixmap px;
 			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
-				// Generate timestamped filename in ~/Pictures/
 				char fname[256];
 				time_t now = time(nullptr);
 				struct tm tm;
@@ -375,9 +374,9 @@ static void HandleShortcuts(const SDL_Event& event) {
 				try {
 					VDStringW wpath = VDTextU8ToW(VDStringA(fname));
 					ATSaveFrame(px, wpath.c_str());
-					fprintf(stderr, "Screenshot saved: %s\n", fname);
+					ATImGuiShowToast("Screenshot saved");
 				} catch (...) {
-					fprintf(stderr, "Screenshot failed\n");
+					ATImGuiShowToast("Screenshot failed");
 				}
 			}
 			return;
@@ -581,6 +580,12 @@ static void RenderAndSwap(SDL_Window *window) {
 	if (g_pImGui && g_pImGui->IsVisible()) {
 		g_pImGui->NewFrame();
 		ATImGuiEmulatorDraw();
+		g_pImGui->Render();
+	} else if (g_pImGui) {
+		// Minimal frame for toast notifications when overlay is hidden
+		g_pImGui->NewFrame();
+		extern void ATImGuiDrawToastsOnly();
+		ATImGuiDrawToastsOnly();
 		g_pImGui->Render();
 	}
 
