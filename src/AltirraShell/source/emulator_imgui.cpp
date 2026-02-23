@@ -18,6 +18,8 @@
 #include <at/atcore/serializable.h>
 #include <at/atio/image.h>
 #include <at/atio/cartridgeimage.h>
+#include <at/ataudio/audiooutput.h>
+#include <at/ataudio/pokey.h>
 
 #include <vd2/system/filesys.h>
 
@@ -68,6 +70,7 @@ static bool s_showSystemConfig = false;
 static bool s_showAbout = false;
 static bool s_showCartridgeBrowser = false;
 static bool s_showFirmwareManager = false;
+static bool s_showAudioOptions = false;
 
 // Cartridge browser state
 static bool s_cartMapperActive = false;
@@ -262,6 +265,9 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Firmware Manager...")) {
 			s_showFirmwareManager = true;
 			s_fwListDirty = true;
+		}
+		if (ImGui::MenuItem("Audio Options...")) {
+			s_showAudioOptions = true;
 		}
 
 		ImGui::Separator();
@@ -1203,6 +1209,118 @@ static void DrawFirmwareManager() {
 	ImGui::End();
 }
 
+// ============= Audio Options Window =============
+
+static void DrawAudioOptions() {
+	if (!s_showAudioOptions)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(420, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Audio Options", &s_showAudioOptions)) {
+		ImGui::End();
+		return;
+	}
+
+	IATAudioOutput *audioOut = g_sim.GetAudioOutput();
+
+	// Volume controls
+	if (ImGui::CollapsingHeader("Volume", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (audioOut) {
+			float masterVol = audioOut->GetVolume();
+			ImGui::Text("Master Volume:");
+			ImGui::SameLine(140);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::SliderFloat("##mastervol", &masterVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetVolume(masterVol);
+			}
+
+			bool mute = audioOut->GetMute();
+			ImGui::SameLine();
+			if (ImGui::Checkbox("Mute", &mute))
+				audioOut->SetMute(mute);
+
+			float driveVol = audioOut->GetMixLevel(kATAudioMix_Drive);
+			ImGui::Text("Drive Volume:");
+			ImGui::SameLine(140);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::SliderFloat("##drivevol", &driveVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetMixLevel(kATAudioMix_Drive, driveVol);
+			}
+
+			float covoxVol = audioOut->GetMixLevel(kATAudioMix_Covox);
+			ImGui::Text("Covox Volume:");
+			ImGui::SameLine(140);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::SliderFloat("##covoxvol", &covoxVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetMixLevel(kATAudioMix_Covox, covoxVol);
+			}
+		} else {
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Audio output not available");
+		}
+	}
+
+	// Latency
+	if (ImGui::CollapsingHeader("Buffering")) {
+		if (audioOut) {
+			int latency = audioOut->GetLatency();
+			ImGui::Text("Latency:");
+			ImGui::SameLine(140);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::SliderInt("##latency", &latency, 10, 500, "%d ms")) {
+				audioOut->SetLatency(latency);
+			}
+
+			int extraBuf = audioOut->GetExtraBuffer();
+			ImGui::Text("Extra Buffer:");
+			ImGui::SameLine(140);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::SliderInt("##extrabuf", &extraBuf, 20, 500, "%d ms")) {
+				audioOut->SetExtraBuffer(extraBuf);
+			}
+		}
+	}
+
+	// POKEY options
+	if (ImGui::CollapsingHeader("POKEY Options", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ATPokeyEmulator& pokey = g_sim.GetPokey();
+
+		bool stereoMono = pokey.IsStereoAsMonoEnabled();
+		if (ImGui::Checkbox("Downmix stereo to mono", &stereoMono))
+			pokey.SetStereoAsMonoEnabled(stereoMono);
+
+		bool nonlinear = pokey.IsNonlinearMixingEnabled();
+		if (ImGui::Checkbox("Non-linear mixing", &nonlinear))
+			pokey.SetNonlinearMixingEnabled(nonlinear);
+
+		bool speakerFilter = pokey.IsSpeakerFilterEnabled();
+		if (ImGui::Checkbox("Speaker filter", &speakerFilter))
+			pokey.SetSpeakerFilterEnabled(speakerFilter);
+
+		bool serialNoise = pokey.IsSerialNoiseEnabled();
+		if (ImGui::Checkbox("Serial noise", &serialNoise))
+			pokey.SetSerialNoiseEnabled(serialNoise);
+	}
+
+	// Audio status
+	if (ImGui::CollapsingHeader("Audio Status")) {
+		if (audioOut) {
+			ATUIAudioStatus status = audioOut->GetAudioStatus();
+
+			ImGui::Text("Sampling Rate:  %.1f Hz", status.mSamplingRate);
+			ImGui::Text("Incoming Rate:  %.1f Hz", status.mIncomingRate);
+			ImGui::Text("Expected Rate:  %.1f Hz", status.mExpectedRate);
+			ImGui::Text("Buffer Range:   %d - %d (target: %d - %d)",
+				status.mMeasuredMin, status.mMeasuredMax,
+				status.mTargetMin, status.mTargetMax);
+			ImGui::Text("Underflows: %d  Overflows: %d  Drops: %d",
+				status.mUnderflowCount, status.mOverflowCount, status.mDropCount);
+			ImGui::Text("Stereo Mixing:  %s", status.mbStereoMixing ? "Yes" : "No");
+		}
+	}
+
+	ImGui::End();
+}
+
 // ============= Public API =============
 
 void ATImGuiEmulatorInit() {
@@ -1214,6 +1332,7 @@ void ATImGuiEmulatorDraw() {
 	DrawSystemConfig();
 	DrawCartridgeBrowser();
 	DrawFirmwareManager();
+	DrawAudioOptions();
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
