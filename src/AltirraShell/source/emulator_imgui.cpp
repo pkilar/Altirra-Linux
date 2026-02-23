@@ -44,6 +44,7 @@ class ATIRQController;
 #include "uiaccessors.h"
 #include "uitypes.h"
 #include "gtia.h"
+#include "uikeyboard.h"
 #include "debugger.h"
 
 #include <SDL.h>
@@ -59,6 +60,7 @@ uint32 ATCartridgeAutodetectMode(const void *data, uint32 size, vdfastvector<int
 void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
 
 extern ATSimulator g_sim;
+extern ATUIKeyboardOptions g_kbdOpts;
 
 // Display backend accessor (defined in main_linux.cpp)
 extern ATDisplaySDL2 *ATGetLinuxDisplay();
@@ -73,6 +75,7 @@ static bool s_showCartridgeBrowser = false;
 static bool s_showFirmwareManager = false;
 static bool s_showAudioOptions = false;
 static bool s_showVideoConfig = false;
+static bool s_showKeyboardConfig = false;
 
 // Cartridge browser state
 static bool s_cartMapperActive = false;
@@ -304,6 +307,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Video Settings...")) {
 			s_showVideoConfig = true;
+		}
+		if (ImGui::MenuItem("Keyboard...")) {
+			s_showKeyboardConfig = true;
 		}
 
 		ImGui::Separator();
@@ -1357,6 +1363,90 @@ static void DrawAudioOptions() {
 	ImGui::End();
 }
 
+// ============= Keyboard Configuration Window =============
+
+static void DrawKeyboardConfig() {
+	if (!s_showKeyboardConfig)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(400, 350), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Keyboard Settings", &s_showKeyboardConfig)) {
+		ImGui::End();
+		return;
+	}
+
+	// Layout mode
+	if (ImGui::CollapsingHeader("Layout Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int layoutMode = (int)g_kbdOpts.mLayoutMode;
+		bool changed = false;
+
+		changed |= ImGui::RadioButton("Natural", &layoutMode, ATUIKeyboardOptions::kLM_Natural);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Direct (Raw)", &layoutMode, ATUIKeyboardOptions::kLM_Raw);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Custom", &layoutMode, ATUIKeyboardOptions::kLM_Custom);
+
+		if (changed) {
+			g_kbdOpts.mLayoutMode = (ATUIKeyboardOptions::LayoutMode)layoutMode;
+			ATUIInitVirtualKeyMap(g_kbdOpts);
+		}
+
+		ImGui::TextWrapped(
+			layoutMode == ATUIKeyboardOptions::kLM_Natural
+				? "Host keyboard layout mapped to logical Atari keys."
+			: layoutMode == ATUIKeyboardOptions::kLM_Raw
+				? "Physical scancodes map directly to Atari keyboard matrix."
+				: "User-customizable per-key mappings."
+		);
+	}
+
+	// Keyboard mode
+	if (ImGui::CollapsingHeader("Keyboard Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int keyMode = g_kbdOpts.mbFullRawKeys ? 2 : (g_kbdOpts.mbRawKeys ? 1 : 0);
+		bool changed = false;
+
+		changed |= ImGui::RadioButton("Cooked", &keyMode, 0);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Raw", &keyMode, 1);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Full Raw", &keyMode, 2);
+
+		if (changed) {
+			g_kbdOpts.mbRawKeys = (keyMode >= 1);
+			g_kbdOpts.mbFullRawKeys = (keyMode >= 2);
+		}
+	}
+
+	// Arrow key mode
+	if (ImGui::CollapsingHeader("Arrow Key Mode", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int arrowMode = (int)g_kbdOpts.mArrowKeyMode;
+		bool changed = false;
+
+		changed |= ImGui::RadioButton("Invert Ctrl", &arrowMode, ATUIKeyboardOptions::kAKM_InvertCtrl);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Auto Ctrl", &arrowMode, ATUIKeyboardOptions::kAKM_AutoCtrl);
+		ImGui::SameLine();
+		changed |= ImGui::RadioButton("Default Ctrl", &arrowMode, ATUIKeyboardOptions::kAKM_DefaultCtrl);
+
+		if (changed) {
+			g_kbdOpts.mArrowKeyMode = (ATUIKeyboardOptions::ArrowKeyMode)arrowMode;
+			ATUIInitVirtualKeyMap(g_kbdOpts);
+		}
+	}
+
+	// Toggles
+	if (ImGui::CollapsingHeader("Options", ImGuiTreeNodeFlags_DefaultOpen)) {
+		if (ImGui::Checkbox("1200XL function keys (F1-F4)", &g_kbdOpts.mbEnableFunctionKeys))
+			ATUIInitVirtualKeyMap(g_kbdOpts);
+
+		ImGui::Checkbox("Allow Shift on cold reset", &g_kbdOpts.mbAllowShiftOnColdReset);
+		ImGui::Checkbox("Allow input map keyboard overlap", &g_kbdOpts.mbAllowInputMapOverlap);
+		ImGui::Checkbox("Allow input map modifier overlap", &g_kbdOpts.mbAllowInputMapModifierOverlap);
+	}
+
+	ImGui::End();
+}
+
 // ============= Video Configuration Window =============
 
 static void DrawVideoConfig() {
@@ -1570,6 +1660,7 @@ void ATImGuiEmulatorDraw() {
 	DrawFirmwareManager();
 	DrawAudioOptions();
 	DrawVideoConfig();
+	DrawKeyboardConfig();
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
