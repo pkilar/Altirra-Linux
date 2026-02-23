@@ -325,7 +325,11 @@ void ATUIShowError(const VDException& e) {
 
 void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *, const wchar_t *) {}
 
-bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode, bool) { return false; }
+bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
+	extern ATSimulator g_sim;
+	g_sim.SetHardwareMode(mode);
+	return true;
+}
 bool ATUISwitchKernel(VDGUIHandle, uint64) { return false; }
 
 void ATUITemporarilyMountVHDImageW32(VDGUIHandle, const wchar_t *, bool) {}

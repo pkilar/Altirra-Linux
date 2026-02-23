@@ -82,6 +82,7 @@ static bool s_showVideoConfig = false;
 static bool s_showKeyboardConfig = false;
 static bool s_showDeviceManager = false;
 static bool s_showCassetteControl = false;
+static bool s_showBootOptions = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -341,6 +342,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Devices...")) {
 			s_showDeviceManager = true;
+		}
+		if (ImGui::MenuItem("Boot & Acceleration...")) {
+			s_showBootOptions = true;
 		}
 
 		ImGui::Separator();
@@ -1727,6 +1731,104 @@ static void DrawKeyboardConfig() {
 	ImGui::End();
 }
 
+// ============= Boot & Acceleration Options =============
+
+static void DrawBootOptions() {
+	if (!s_showBootOptions)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(400, 420), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Boot & Acceleration", &s_showBootOptions)) {
+		ImGui::End();
+		return;
+	}
+
+	// Boot options
+	if (ImGui::CollapsingHeader("Boot Options", ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool fastBoot = g_sim.IsFastBootEnabled();
+		if (ImGui::Checkbox("Fast boot", &fastBoot))
+			g_sim.SetFastBootEnabled(fastBoot);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Skip memory test and OS initialization delay");
+
+		bool selfTest = g_sim.IsForcedSelfTest();
+		if (ImGui::Checkbox("Force self-test on cold reset", &selfTest))
+			g_sim.SetForcedSelfTest(selfTest);
+
+		bool kbdPresent = g_sim.IsKeyboardPresent();
+		if (ImGui::Checkbox("Keyboard present", &kbdPresent))
+			g_sim.SetKeyboardPresent(kbdPresent);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Force keyboard present line (needed for some 5200 games)");
+	}
+
+	// SIO acceleration
+	if (ImGui::CollapsingHeader("SIO Acceleration", ImGuiTreeNodeFlags_DefaultOpen)) {
+		bool sioPatch = g_sim.IsSIOPatchEnabled();
+		if (ImGui::Checkbox("SIO patch (OS acceleration)", &sioPatch))
+			g_sim.SetSIOPatchEnabled(sioPatch);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Accelerate SIO transfers through OS hooks");
+
+		bool diskSIO = g_sim.IsDiskSIOPatchEnabled();
+		if (ImGui::Checkbox("Disk SIO patch", &diskSIO))
+			g_sim.SetDiskSIOPatchEnabled(diskSIO);
+
+		bool diskBurst = g_sim.GetDiskBurstTransfersEnabled();
+		if (ImGui::Checkbox("Disk burst transfers", &diskBurst))
+			g_sim.SetDiskBurstTransfersEnabled(diskBurst);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Use burst mode for faster disk access");
+
+		bool diskAccurate = g_sim.IsDiskAccurateTimingEnabled();
+		if (ImGui::Checkbox("Accurate disk timing", &diskAccurate))
+			g_sim.SetDiskAccurateTimingEnabled(diskAccurate);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Enable cycle-accurate disk drive timing");
+
+		bool sioOverride = g_sim.IsDiskSIOOverrideDetectEnabled();
+		if (ImGui::Checkbox("SIO override detection", &sioOverride))
+			g_sim.SetDiskSIOOverrideDetectEnabled(sioOverride);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Detect when programs hook SIO and disable acceleration");
+	}
+
+	// Other patches
+	if (ImGui::CollapsingHeader("Acceleration Patches")) {
+		bool fpPatch = g_sim.IsFPPatchEnabled();
+		if (ImGui::Checkbox("Floating-point acceleration", &fpPatch))
+			g_sim.SetFPPatchEnabled(fpPatch);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Accelerate math pack routines");
+
+		bool cioPBI = g_sim.IsCIOPBIPatchEnabled();
+		if (ImGui::Checkbox("CIO PBI patch", &cioPBI))
+			g_sim.SetCIOPBIPatchEnabled(cioPBI);
+
+		bool sioPBI = g_sim.IsSIOPBIPatchEnabled();
+		if (ImGui::Checkbox("SIO PBI patch", &sioPBI))
+			g_sim.SetSIOPBIPatchEnabled(sioPBI);
+
+		bool devSIO = g_sim.GetDeviceSIOPatchEnabled();
+		if (ImGui::Checkbox("Device SIO patch", &devSIO))
+			g_sim.SetDeviceSIOPatchEnabled(devSIO);
+
+		bool devCIOBurst = g_sim.GetDeviceCIOBurstTransfersEnabled();
+		if (ImGui::Checkbox("Device CIO burst transfers", &devCIOBurst))
+			g_sim.SetDeviceCIOBurstTransfersEnabled(devCIOBurst);
+
+		bool devSIOBurst = g_sim.GetDeviceSIOBurstTransfersEnabled();
+		if (ImGui::Checkbox("Device SIO burst transfers", &devSIOBurst))
+			g_sim.SetDeviceSIOBurstTransfersEnabled(devSIOBurst);
+
+		bool sectorCounter = g_sim.IsDiskSectorCounterEnabled();
+		if (ImGui::Checkbox("Disk sector counter", &sectorCounter))
+			g_sim.SetDiskSectorCounterEnabled(sectorCounter);
+	}
+
+	ImGui::End();
+}
+
 // ============= Cassette Control Window =============
 
 static void FormatTapeTime(char *buf, size_t bufLen, float seconds) {
@@ -2133,6 +2235,7 @@ void ATImGuiEmulatorInit() {
 void ATImGuiEmulatorDraw() {
 	DrawMenuBar();
 	DrawSystemConfig();
+	DrawBootOptions();
 	DrawCassetteControl();
 	DrawCartridgeBrowser();
 	DrawFirmwareManager();
