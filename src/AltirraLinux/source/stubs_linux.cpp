@@ -71,6 +71,7 @@
 #include "uirender.h"
 #include "uiconfirm.h"
 #include "debugger.h"
+#include <at/atdebugger/target.h>
 #include "devicemanager.h"
 #include "directorywatcher.h"
 #include "idephysdisk.h"
@@ -315,7 +316,21 @@ void ATSetWindowSize(int w, int h) {
 		s_pfnSetWindowSize(w, h);
 }
 void ATUIUpdateSpeedTiming() {}
-void ATSyncCPUHistoryState() {}
+void ATSyncCPUHistoryState() {
+	extern ATSimulator g_sim;
+	const bool historyEnabled = g_sim.GetCPU().IsHistoryEnabled();
+
+	for (IATDeviceDebugTarget *devtarget : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceDebugTarget>(false, false, false)) {
+		uint32 index = 0;
+
+		while (IATDebugTarget *target = devtarget->GetDebugTarget(index++)) {
+			auto *thist = vdpoly_cast<IATDebugTargetHistory *>(target);
+
+			if (thist)
+				thist->SetHistoryEnabled(historyEnabled);
+		}
+	}
+}
 
 static bool s_appActive = true;
 bool ATUIGetAppActive() { return s_appActive; }
