@@ -128,7 +128,9 @@ static enum class PendingDialog {
 	kMountDisk3,
 	kMountDisk4,
 	kSaveState,
-	kLoadState
+	kLoadState,
+	kLoadTape,
+	kSaveTape
 } s_pendingDialog = PendingDialog::kNone;
 
 static const char *kDiskFilters =
@@ -812,6 +814,20 @@ static void PollFileDialogFallback() {
 				if (!result.empty()) {
 					try { g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr); }
 					catch (...) { fprintf(stderr, "Load state failed\n"); }
+				}
+				break;
+			case PendingDialog::kLoadTape:
+				if (!result.empty()) {
+					try { g_sim.GetCassette().Load(result.c_str()); }
+					catch (...) { fprintf(stderr, "Load tape failed\n"); }
+				}
+				break;
+			case PendingDialog::kSaveTape:
+				if (!result.empty()) {
+					try {
+						g_sim.GetCassette().SetImagePersistent(result.c_str());
+						g_sim.GetCassette().SetImageClean();
+					} catch (...) { fprintf(stderr, "Save tape failed\n"); }
 				}
 				break;
 			default:
@@ -1959,6 +1975,8 @@ static void DrawCassetteControl() {
 			} catch (...) {
 				fprintf(stderr, "Failed to load tape image\n");
 			}
+		} else if (ATLinuxFileDialogIsFallbackOpen()) {
+			s_pendingDialog = PendingDialog::kLoadTape;
 		}
 	}
 
@@ -1985,6 +2003,8 @@ static void DrawCassetteControl() {
 			} catch (...) {
 				fprintf(stderr, "Failed to save tape image\n");
 			}
+		} else if (ATLinuxFileDialogIsFallbackOpen()) {
+			s_pendingDialog = PendingDialog::kSaveTape;
 		}
 	}
 
