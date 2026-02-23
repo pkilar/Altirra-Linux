@@ -24,6 +24,7 @@
 #include <at/ataudio/pokey.h>
 
 #include <vd2/system/filesys.h>
+#include <vd2/system/strutil.h>
 
 #include <imgui.h>
 #include <emulator_imgui.h>
@@ -672,6 +673,33 @@ static void DrawMenuBar() {
 								try { di.SaveDisk(); } catch (...) {}
 							}
 						}
+
+						snprintf(label, sizeof(label), "Save D%d As...", i + 1);
+						if (ImGui::MenuItem(label)) {
+							VDStringW path = ATLinuxSaveFileDialog("Save Disk As",
+								"ATR Disk Images|*.atr|XFD Disk Images|*.xfd|All Files|*");
+							if (!path.empty()) {
+								try {
+									ATDiskImageFormat fmt = kATDiskImageFormat_ATR;
+									const wchar_t *ext = VDFileSplitExt(path.c_str());
+									if (ext && !vdwcsicmp(ext, L".xfd"))
+										fmt = kATDiskImageFormat_XFD;
+									di.SaveDiskAs(path.c_str(), fmt);
+								} catch (...) {
+									fprintf(stderr, "Failed to save disk\n");
+								}
+							}
+						}
+
+						ImGui::Separator();
+
+						ATMediaWriteMode wm = di.GetWriteMode();
+						bool readOnly = (wm == kATMediaWriteMode_RO);
+						if (ImGui::MenuItem("Read Only", nullptr, readOnly)) {
+							di.SetWriteMode(readOnly ? kATMediaWriteMode_VRW : kATMediaWriteMode_RO);
+						}
+
+						ImGui::Separator();
 
 						snprintf(label, sizeof(label), "Unmount D%d", i + 1);
 						if (ImGui::MenuItem(label)) {
