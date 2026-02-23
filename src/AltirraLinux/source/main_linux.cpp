@@ -48,6 +48,7 @@
 #include "cassette.h"
 #include "cartridge.h"
 #include "inputmanager.h"
+#include "uiaccessors.h"
 #include "inputmap.h"
 
 #include <display_sdl2.h>
@@ -571,6 +572,14 @@ static void ProcessEvents(SDL_Window *window) {
 					ATImGuiRequestQuit();
 					if (g_pImGui && !g_pImGui->IsVisible())
 						g_pImGui->ToggleVisible();
+				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+					ATUISetAppActive(false);
+					if (ATUIGetPauseWhenInactive() && !g_sim.IsPaused())
+						g_sim.Pause();
+				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
+					ATUISetAppActive(true);
+					if (ATUIGetPauseWhenInactive() && g_sim.IsPaused())
+						g_sim.Resume();
 				}
 				break;
 

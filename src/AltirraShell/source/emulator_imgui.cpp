@@ -1247,6 +1247,14 @@ static void DrawMenuBar() {
 			}
 		}
 
+		ImGui::Separator();
+
+		{
+			bool pauseInactive = ATUIGetPauseWhenInactive();
+			if (ImGui::MenuItem("Pause When Inactive", nullptr, &pauseInactive))
+				ATUISetPauseWhenInactive(pauseInactive);
+		}
+
 		ImGui::EndMenu();
 	}
 

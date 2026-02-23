@@ -289,6 +289,10 @@ void ATSetWindowSize(int w, int h) {
 void ATUIUpdateSpeedTiming() {}
 void ATSyncCPUHistoryState() {}
 
+static bool s_appActive = true;
+bool ATUIGetAppActive() { return s_appActive; }
+void ATUISetAppActive(bool active) { s_appActive = active; }
+
 bool ATUIClipIsTextAvailable() {
 	return SDL_HasClipboardText() == SDL_TRUE;
 }
