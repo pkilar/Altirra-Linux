@@ -873,8 +873,12 @@ static void DrawMenuBar() {
 			if (!path.empty()) {
 				try {
 					g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+				} catch (const std::exception& e) {
+					char msg[512];
+					snprintf(msg, sizeof(msg), "Load state failed: %s", e.what());
+					ShowToast(msg);
 				} catch (...) {
-					fprintf(stderr, "Load state failed\n");
+					ShowToast("Load state failed");
 				}
 			} else if (ATLinuxFileDialogIsFallbackOpen()) {
 				s_pendingDialog = PendingDialog::kLoadState;
@@ -1040,8 +1044,12 @@ static void DrawMenuBar() {
 						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
 							path += L".png";
 						ATSaveFrame(px, path.c_str());
+					} catch (const std::exception& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Screenshot failed: %s", e.what());
+						ShowToast(msg);
 					} catch (...) {
-						fprintf(stderr, "Failed to save screenshot\n");
+						ShowToast("Failed to save screenshot");
 					}
 				}
 			}
@@ -1060,9 +1068,14 @@ static void DrawMenuBar() {
 							path += L".wav";
 						s_pAudioWriter = new ATAudioWriter(path.c_str(), false, isStereo, isPAL, nullptr);
 						g_sim.GetAudioOutput()->SetAudioTap(s_pAudioWriter);
+					} catch (const std::exception& e) {
+						s_pAudioWriter.reset();
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Audio recording failed: %s", e.what());
+						ShowToast(msg);
 					} catch (...) {
 						s_pAudioWriter.reset();
-						fprintf(stderr, "Failed to start audio recording\n");
+						ShowToast("Failed to start audio recording");
 					}
 				}
 			}
@@ -1076,9 +1089,14 @@ static void DrawMenuBar() {
 							path += L".pcm";
 						s_pAudioWriter = new ATAudioWriter(path.c_str(), true, isStereo, isPAL, nullptr);
 						g_sim.GetAudioOutput()->SetAudioTap(s_pAudioWriter);
+					} catch (const std::exception& e) {
+						s_pAudioWriter.reset();
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Raw audio recording failed: %s", e.what());
+						ShowToast(msg);
 					} catch (...) {
 						s_pAudioWriter.reset();
-						fprintf(stderr, "Failed to start raw audio recording\n");
+						ShowToast("Failed to start raw audio recording");
 					}
 				}
 			}
@@ -1096,9 +1114,14 @@ static void DrawMenuBar() {
 							nullptr,
 							path.c_str(),
 							isPAL);
+					} catch (const std::exception& e) {
+						s_pSapWriter.reset();
+						char msg[512];
+						snprintf(msg, sizeof(msg), "SAP recording failed: %s", e.what());
+						ShowToast(msg);
 					} catch (...) {
 						s_pSapWriter.reset();
-						fprintf(stderr, "Failed to start SAP recording\n");
+						ShowToast("Failed to start SAP recording");
 					}
 				}
 			}
@@ -1111,9 +1134,14 @@ static void DrawMenuBar() {
 							path += L".vgm";
 						s_pVgmWriter = ATCreateVgmWriter();
 						s_pVgmWriter->Init(path.c_str(), g_sim);
+					} catch (const std::exception& e) {
+						s_pVgmWriter.clear();
+						char msg[512];
+						snprintf(msg, sizeof(msg), "VGM recording failed: %s", e.what());
+						ShowToast(msg);
 					} catch (...) {
 						s_pVgmWriter.clear();
-						fprintf(stderr, "Failed to start VGM recording\n");
+						ShowToast("Failed to start VGM recording");
 					}
 				}
 			}
@@ -1670,20 +1698,23 @@ static void PollFileDialogFallback() {
 				break;
 			case PendingDialog::kSaveState:
 				if (!result.empty()) {
-					try { g_sim.SaveState(result.c_str()); }
-					catch (...) { fprintf(stderr, "Save state failed\n"); }
+					try { g_sim.SaveState(result.c_str()); ShowToast("State saved"); }
+					catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Save state failed: %s", e.what()); ShowToast(m); }
+					catch (...) { ShowToast("Save state failed"); }
 				}
 				break;
 			case PendingDialog::kLoadState:
 				if (!result.empty()) {
-					try { g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr); }
-					catch (...) { fprintf(stderr, "Load state failed\n"); }
+					try { g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr); ShowToast("State loaded"); }
+					catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Load state failed: %s", e.what()); ShowToast(m); }
+					catch (...) { ShowToast("Load state failed"); }
 				}
 				break;
 			case PendingDialog::kLoadTape:
 				if (!result.empty()) {
-					try { g_sim.GetCassette().Load(result.c_str()); }
-					catch (...) { fprintf(stderr, "Load tape failed\n"); }
+					try { g_sim.GetCassette().Load(result.c_str()); ShowToast("Tape loaded"); }
+					catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Load tape failed: %s", e.what()); ShowToast(m); }
+					catch (...) { ShowToast("Load tape failed"); }
 				}
 				break;
 			case PendingDialog::kSaveTape:
@@ -1691,7 +1722,9 @@ static void PollFileDialogFallback() {
 					try {
 						g_sim.GetCassette().SetImagePersistent(result.c_str());
 						g_sim.GetCassette().SetImageClean();
-					} catch (...) { fprintf(stderr, "Save tape failed\n"); }
+						ShowToast("Tape saved");
+					} catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Save tape failed: %s", e.what()); ShowToast(m); }
+					catch (...) { ShowToast("Save tape failed"); }
 				}
 				break;
 			case PendingDialog::kBootImage:
@@ -1846,8 +1879,12 @@ static void DrawCartridgeBrowser() {
 						s_cartMapperActive = true;
 					}
 				}
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Load cartridge failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to load cartridge\n");
+				ShowToast("Failed to load cartridge");
 			}
 		}
 	}
@@ -1873,8 +1910,12 @@ static void DrawCartridgeBrowser() {
 					s_cartSelectedMapper = s_cartDisplayModes.empty() ? -1 : 0;
 					s_cartMapperActive = true;
 				}
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Read binary failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to read binary file\n");
+				ShowToast("Failed to read binary file");
 			}
 		}
 	}
@@ -1927,8 +1968,12 @@ static void DrawCartridgeBrowser() {
 				ATCartLoadContext loadCtx {};
 				loadCtx.mCartMapper = s_cartDisplayModes[s_cartSelectedMapper];
 				g_sim.LoadCartridge(0, s_cartLoadPath.c_str(), &loadCtx);
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Load cartridge failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to load cartridge with selected mapper\n");
+				ShowToast("Failed to load cartridge with selected mapper");
 			}
 
 			s_cartMapperActive = false;
@@ -2077,8 +2122,12 @@ static void DrawFirmwareManager() {
 				if (fwMgr)
 					fwMgr->AddFirmware(info);
 				s_fwListDirty = true;
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Add firmware failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to add firmware file\n");
+				ShowToast("Failed to add firmware file");
 			}
 		}
 	}
@@ -3027,8 +3076,13 @@ static void DrawCassetteControl() {
 		if (!path.empty()) {
 			try {
 				cas.Load(path.c_str());
+				ShowToast("Tape loaded");
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Load tape failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to load tape image\n");
+				ShowToast("Failed to load tape image");
 			}
 		} else if (ATLinuxFileDialogIsFallbackOpen()) {
 			s_pendingDialog = PendingDialog::kLoadTape;
@@ -3055,8 +3109,13 @@ static void DrawCassetteControl() {
 			try {
 				cas.SetImagePersistent(path.c_str());
 				cas.SetImageClean();
+				ShowToast("Tape saved");
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Save tape failed: %s", e.what());
+				ShowToast(msg);
 			} catch (...) {
-				fprintf(stderr, "Failed to save tape image\n");
+				ShowToast("Failed to save tape image");
 			}
 		} else if (ATLinuxFileDialogIsFallbackOpen()) {
 			s_pendingDialog = PendingDialog::kSaveTape;
