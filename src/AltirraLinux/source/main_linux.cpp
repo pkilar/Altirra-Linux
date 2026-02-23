@@ -177,6 +177,15 @@ static void ATScanLinuxFirmwarePaths(const VDStringW& configDir) {
 	}
 }
 
+void ATGetFirmwareSearchPaths(vdvector<VDStringW>& outPaths) {
+	VDStringW configDir = ATGetLinuxConfigDir();
+	outPaths.clear();
+	outPaths.push_back(VDMakePath(configDir.c_str(), L"firmware"));
+	outPaths.push_back(VDMakePath(VDGetProgramPath().c_str(), L"firmware"));
+	outPaths.push_back(VDStringW(L"/usr/share/altirra/firmware"));
+	outPaths.push_back(VDStringW(L"/usr/local/share/altirra/firmware"));
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // CLI argument parsing
 ///////////////////////////////////////////////////////////////////////////

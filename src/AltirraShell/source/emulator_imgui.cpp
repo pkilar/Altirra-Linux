@@ -11,11 +11,13 @@
 #include <vd2/system/VDString.h>
 #include <vd2/system/text.h>
 #include <vd2/system/refcount.h>
+#include <vd2/system/file.h>
 #include <vd2/VDDisplay/display.h>
 #include <at/atdebugger/target.h>
 #include <at/atcore/media.h>
 #include <at/atcore/serializable.h>
 #include <at/atio/image.h>
+#include <at/atio/cartridgeimage.h>
 
 #include <vd2/system/filesys.h>
 
@@ -25,6 +27,8 @@
 #include <display_sdl2.h>
 #include <filedialog_linux.h>
 #include <error_imgui.h>
+#include <cartridge_names.h>
+#include <firmware_names.h>
 
 // Forward declarations needed by simulator.h transitives
 class ATIRQController;
@@ -32,6 +36,9 @@ class ATIRQController;
 #include "simulator.h"
 #include "constants.h"
 #include "diskinterface.h"
+#include "cartridge.h"
+#include "firmwaremanager.h"
+#include "firmwaredetect.h"
 #include "uiaccessors.h"
 #include "uitypes.h"
 #include "debugger.h"
@@ -40,6 +47,13 @@ class ATIRQController;
 
 #include <cstdio>
 #include <cstring>
+#include <algorithm>
+
+// Forward declarations for functions defined in cartdetect.cpp (compiled in Linux build)
+uint32 ATCartridgeAutodetectMode(const void *data, uint32 size, vdfastvector<int>& cartModes);
+
+// Firmware search path accessor (defined in main_linux.cpp)
+void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
 
 extern ATSimulator g_sim;
 
@@ -52,6 +66,25 @@ static vdrefptr<IATSerializable> s_pQuickState;
 // Window visibility
 static bool s_showSystemConfig = false;
 static bool s_showAbout = false;
+static bool s_showCartridgeBrowser = false;
+static bool s_showFirmwareManager = false;
+
+// Cartridge browser state
+static bool s_cartMapperActive = false;
+static vdfastvector<uint8> s_cartLoadBuffer;
+static VDStringW s_cartLoadPath;
+static vdfastvector<int> s_cartDetectedModes;
+static vdfastvector<int> s_cartDisplayModes;
+static int s_cartSelectedMapper = -1;
+static bool s_cartShowAll = false;
+static uint32 s_cartRecommendedIdx = 0;
+
+// Firmware manager state
+static vdvector<ATFirmwareInfo> s_fwList;
+static bool s_fwListDirty = true;
+static uint64 s_fwSelectedId = 0;
+static std::string s_fwScanResult;
+static bool s_fwShowScanResult = false;
 
 // FPS counter state
 static double s_lastFpsTime = 0;
@@ -87,6 +120,14 @@ static const char *kDiskOnlyFilters =
 
 static const char *kSaveStateFilters =
 	"Save States|*.atstate2;*.altstate"
+	"|All Files|*";
+
+static const char *kCartFilters =
+	"Cartridge Images|*.car;*.bin;*.rom"
+	"|All Files|*";
+
+static const char *kFirmwareFilters =
+	"ROM Images|*.rom;*.bin;*.epr;*.epm"
 	"|All Files|*";
 
 // ============= Hardware mode names =============
@@ -214,6 +255,13 @@ static void DrawMenuBar() {
 
 		if (ImGui::MenuItem("System Settings...")) {
 			s_showSystemConfig = true;
+		}
+		if (ImGui::MenuItem("Cartridge...")) {
+			s_showCartridgeBrowser = true;
+		}
+		if (ImGui::MenuItem("Firmware Manager...")) {
+			s_showFirmwareManager = true;
+			s_fwListDirty = true;
 		}
 
 		ImGui::Separator();
@@ -558,6 +606,12 @@ static void DrawStatusBar() {
 			}
 		}
 
+		// Cartridge indicator
+		if (g_sim.IsCartridgeAttached(0)) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+		}
+
 		// Turbo indicator
 		if (ATUIGetTurbo()) {
 			ImGui::SameLine(0, 16);
@@ -694,6 +748,461 @@ static void DrawErrorPopup() {
 	}
 }
 
+// ============= Cartridge Browser Window =============
+
+static void CartBuildDisplayModes() {
+	s_cartDisplayModes = s_cartDetectedModes;
+
+	if (s_cartShowAll) {
+		vdfastvector<bool> present(kATCartridgeModeCount, false);
+
+		present[kATCartridgeMode_None] = true;
+		present[kATCartridgeMode_SuperCharger3D] = true;
+
+		for (int m : s_cartDisplayModes) {
+			if (m >= 0 && m < (int)kATCartridgeModeCount)
+				present[m] = true;
+		}
+
+		for (int i = 0; i <= (int)kATCartridgeMapper_Max; ++i) {
+			ATCartridgeMode mode = ATGetCartridgeModeForMapper(i);
+			if (mode != kATCartridgeMode_None && !present[mode]) {
+				present[mode] = true;
+				s_cartDisplayModes.push_back(mode);
+			}
+		}
+
+		for (int i = 1; i < (int)kATCartridgeModeCount; ++i) {
+			if (!present[i])
+				s_cartDisplayModes.push_back(i);
+		}
+	}
+}
+
+static void DrawCartridgeBrowser() {
+	if (!s_showCartridgeBrowser)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(550, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Cartridge Browser", &s_showCartridgeBrowser)) {
+		ImGui::End();
+		return;
+	}
+
+	// Show current cartridge slots
+	for (uint32 slot = 0; slot < 2; ++slot) {
+		char slotLabel[64];
+
+		if (g_sim.IsCartridgeAttached(slot)) {
+			ATCartridgeEmulator *cart = g_sim.GetCartridge(slot);
+			const wchar_t *path = cart ? cart->GetPath() : nullptr;
+			const char *modeName = cart ? ATGetCartridgeModeName(cart->GetMode()) : "?";
+
+			if (path && *path) {
+				VDStringA u8name = VDTextWToU8(VDStringW(VDFileSplitPath(path)));
+				snprintf(slotLabel, sizeof(slotLabel), "Slot %u: %s - %s", slot + 1, modeName, u8name.c_str());
+			} else {
+				snprintf(slotLabel, sizeof(slotLabel), "Slot %u: %s", slot + 1, modeName);
+			}
+
+			ImGui::Text("%s", slotLabel);
+			ImGui::SameLine();
+
+			char btnId[32];
+			snprintf(btnId, sizeof(btnId), "Unload##slot%u", slot);
+			if (ImGui::SmallButton(btnId)) {
+				g_sim.UnloadCartridge(slot);
+			}
+		} else {
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Slot %u: [empty]", slot + 1);
+		}
+	}
+
+	ImGui::Separator();
+
+	// Load buttons
+	if (ImGui::Button("Load Cartridge...")) {
+		VDStringW path = ATLinuxOpenFileDialog("Load Cartridge", kCartFilters);
+		if (!path.empty()) {
+			try {
+				ATCartLoadContext loadCtx {};
+				loadCtx.mbReturnOnUnknownMapper = true;
+
+				if (!g_sim.LoadCartridge(0, path.c_str(), &loadCtx)) {
+					if (loadCtx.mLoadStatus == kATCartLoadStatus_UnknownMapper && loadCtx.mpCaptureBuffer) {
+						// Raw file with unknown mapper — activate mapper selection
+						s_cartLoadBuffer = *loadCtx.mpCaptureBuffer;
+						s_cartLoadPath = path;
+						s_cartRecommendedIdx = ATCartridgeAutodetectMode(
+							s_cartLoadBuffer.data(), (uint32)s_cartLoadBuffer.size(), s_cartDetectedModes);
+						s_cartShowAll = false;
+						CartBuildDisplayModes();
+						s_cartSelectedMapper = s_cartDisplayModes.empty() ? -1 : 0;
+						s_cartMapperActive = true;
+					}
+				}
+			} catch (...) {
+				fprintf(stderr, "Failed to load cartridge\n");
+			}
+		}
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Load Raw Binary...")) {
+		VDStringW path = ATLinuxOpenFileDialog("Load Raw Binary", kCartFilters);
+		if (!path.empty()) {
+			try {
+				VDFile f(path.c_str());
+				sint64 fileSize = f.size();
+				if (fileSize > 0 && fileSize <= 128 * 1024 * 1024) {
+					s_cartLoadBuffer.resize((size_t)fileSize);
+					f.read(s_cartLoadBuffer.data(), (long)fileSize);
+					f.close();
+
+					s_cartLoadPath = path;
+					s_cartRecommendedIdx = ATCartridgeAutodetectMode(
+						s_cartLoadBuffer.data(), (uint32)s_cartLoadBuffer.size(), s_cartDetectedModes);
+					s_cartShowAll = false;
+					CartBuildDisplayModes();
+					s_cartSelectedMapper = s_cartDisplayModes.empty() ? -1 : 0;
+					s_cartMapperActive = true;
+				}
+			} catch (...) {
+				fprintf(stderr, "Failed to read binary file\n");
+			}
+		}
+	}
+
+	// Mapper selection panel
+	if (s_cartMapperActive) {
+		ImGui::Separator();
+		ImGui::Text("Mapper Selection");
+
+		if (ImGui::Checkbox("Show All Mappers", &s_cartShowAll)) {
+			CartBuildDisplayModes();
+			s_cartSelectedMapper = s_cartDisplayModes.empty() ? -1 : 0;
+		}
+
+		ImGui::BeginChild("##mapperlist", ImVec2(0, 200), ImGuiChildFlags_Borders);
+
+		for (int i = 0; i < (int)s_cartDisplayModes.size(); ++i) {
+			int mode = s_cartDisplayModes[i];
+			int mapper = ATGetCartridgeMapperForMode((ATCartridgeMode)mode, 0);
+			const char *name = ATGetCartridgeModeName(mode);
+			const char *desc = ATGetCartridgeModeDesc(mode);
+
+			char label[256];
+			if (mapper > 0) {
+				if ((uint32)i < s_cartRecommendedIdx && s_cartRecommendedIdx == 1)
+					snprintf(label, sizeof(label), "#%d  %s (recommended) - %s", mapper, name, desc);
+				else if ((uint32)i < s_cartRecommendedIdx)
+					snprintf(label, sizeof(label), "#%d  *%s - %s", mapper, name, desc);
+				else
+					snprintf(label, sizeof(label), "#%d  %s - %s", mapper, name, desc);
+			} else {
+				if ((uint32)i < s_cartRecommendedIdx && s_cartRecommendedIdx == 1)
+					snprintf(label, sizeof(label), "%s (recommended) - %s", name, desc);
+				else if ((uint32)i < s_cartRecommendedIdx)
+					snprintf(label, sizeof(label), "*%s - %s", name, desc);
+				else
+					snprintf(label, sizeof(label), "%s - %s", name, desc);
+			}
+
+			if (ImGui::Selectable(label, s_cartSelectedMapper == i))
+				s_cartSelectedMapper = i;
+		}
+
+		ImGui::EndChild();
+
+		if (ImGui::Button("OK", ImVec2(80, 0)) && s_cartSelectedMapper >= 0
+			&& s_cartSelectedMapper < (int)s_cartDisplayModes.size())
+		{
+			try {
+				ATCartLoadContext loadCtx {};
+				loadCtx.mCartMapper = s_cartDisplayModes[s_cartSelectedMapper];
+				g_sim.LoadCartridge(0, s_cartLoadPath.c_str(), &loadCtx);
+			} catch (...) {
+				fprintf(stderr, "Failed to load cartridge with selected mapper\n");
+			}
+
+			s_cartMapperActive = false;
+			s_cartLoadBuffer.clear();
+			s_cartDetectedModes.clear();
+			s_cartDisplayModes.clear();
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+			s_cartMapperActive = false;
+			s_cartLoadBuffer.clear();
+			s_cartDetectedModes.clear();
+			s_cartDisplayModes.clear();
+		}
+	}
+
+	ImGui::End();
+}
+
+// ============= Firmware Manager Window =============
+
+static void FirmwareRefreshList() {
+	ATFirmwareManager *fwMgr = g_sim.GetFirmwareManager();
+	if (fwMgr) {
+		s_fwList.clear();
+		fwMgr->GetFirmwareList(s_fwList);
+	}
+	s_fwListDirty = false;
+}
+
+static void DrawFirmwareManager() {
+	if (!s_showFirmwareManager)
+		return;
+
+	if (s_fwListDirty)
+		FirmwareRefreshList();
+
+	ImGui::SetNextWindowSize(ImVec2(650, 500), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Firmware Manager", &s_showFirmwareManager)) {
+		ImGui::End();
+		return;
+	}
+
+	ATFirmwareManager *fwMgr = g_sim.GetFirmwareManager();
+
+	// Toolbar
+	if (ImGui::Button("Scan Directories")) {
+		int addedCount = 0;
+		vdvector<VDStringW> searchPaths;
+		ATGetFirmwareSearchPaths(searchPaths);
+
+		for (const VDStringW& dirPath : searchPaths) {
+			VDStringA u8dir = VDTextWToU8(dirPath);
+
+			VDDirectoryIterator it(VDMakePath(dirPath.c_str(), L"*").c_str());
+			while (it.Next()) {
+				if (it.IsDirectory())
+					continue;
+
+				sint64 fileSize = it.GetSize();
+				if (!ATFirmwareAutodetectCheckSize(fileSize))
+					continue;
+
+				try {
+					VDStringW filePath = VDMakePath(dirPath.c_str(), it.GetName());
+					VDFile f(filePath.c_str());
+					vdfastvector<uint8> buf((size_t)fileSize);
+					f.read(buf.data(), (long)fileSize);
+					f.close();
+
+					ATFirmwareInfo info {};
+					ATSpecificFirmwareType specificType {};
+					sint32 knownIdx = -1;
+
+					ATFirmwareDetection detection = ATFirmwareAutodetect(
+						buf.data(), (uint32)buf.size(), info, specificType, knownIdx);
+
+					if (detection != ATFirmwareDetection::None) {
+						// Check if already registered
+						bool alreadyExists = false;
+						for (const ATFirmwareInfo& existing : s_fwList) {
+							if (existing.mPath == filePath) {
+								alreadyExists = true;
+								break;
+							}
+						}
+
+						if (!alreadyExists) {
+							info.mId = kATFirmwareId_Custom + (uint64)rand();
+							info.mPath = filePath;
+							info.mbVisible = true;
+							info.mbAutoselect = true;
+							if (info.mName.empty())
+								info.mName = VDStringW(it.GetName());
+
+							if (fwMgr)
+								fwMgr->AddFirmware(info);
+							++addedCount;
+						}
+					}
+				} catch (...) {
+					// Skip files that can't be read
+				}
+			}
+		}
+
+		char msg[128];
+		snprintf(msg, sizeof(msg), "Scan complete: %d new firmware image(s) found.", addedCount);
+		s_fwScanResult = msg;
+		s_fwShowScanResult = true;
+		s_fwListDirty = true;
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Add File...")) {
+		VDStringW path = ATLinuxOpenFileDialog("Add Firmware", kFirmwareFilters);
+		if (!path.empty()) {
+			try {
+				VDFile f(path.c_str());
+				sint64 fileSize = f.size();
+				vdfastvector<uint8> buf((size_t)fileSize);
+				f.read(buf.data(), (long)fileSize);
+				f.close();
+
+				ATFirmwareInfo info {};
+				ATSpecificFirmwareType specificType {};
+				sint32 knownIdx = -1;
+
+				ATFirmwareDetection detection = ATFirmwareAutodetect(
+					buf.data(), (uint32)buf.size(), info, specificType, knownIdx);
+
+				if (detection == ATFirmwareDetection::None) {
+					info.mType = kATFirmwareType_Unknown;
+				}
+
+				info.mId = kATFirmwareId_Custom + (uint64)rand();
+				info.mPath = path;
+				info.mbVisible = true;
+				info.mbAutoselect = true;
+				if (info.mName.empty())
+					info.mName = VDStringW(VDFileSplitPath(path.c_str()));
+
+				if (fwMgr)
+					fwMgr->AddFirmware(info);
+				s_fwListDirty = true;
+			} catch (...) {
+				fprintf(stderr, "Failed to add firmware file\n");
+			}
+		}
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Remove") && s_fwSelectedId != 0) {
+		if (fwMgr)
+			fwMgr->RemoveFirmware(s_fwSelectedId);
+		s_fwSelectedId = 0;
+		s_fwListDirty = true;
+	}
+
+	if (s_fwShowScanResult) {
+		ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%s", s_fwScanResult.c_str());
+	}
+
+	// Re-fetch if dirty after toolbar actions
+	if (s_fwListDirty)
+		FirmwareRefreshList();
+
+	// Firmware list table
+	ImGui::Separator();
+
+	if (ImGui::BeginTable("##fwtable", 3,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+		ImVec2(0, 200)))
+	{
+		ImGui::TableSetupColumn("Name", 0, 2.0f);
+		ImGui::TableSetupColumn("Type", 0, 1.0f);
+		ImGui::TableSetupColumn("Path", 0, 2.0f);
+		ImGui::TableHeadersRow();
+
+		for (const ATFirmwareInfo& fw : s_fwList) {
+			if (!fw.mbVisible)
+				continue;
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			VDStringA u8name = VDTextWToU8(fw.mName);
+			bool selected = (s_fwSelectedId == fw.mId);
+
+			if (ImGui::Selectable(u8name.c_str(), selected,
+				ImGuiSelectableFlags_SpanAllColumns))
+			{
+				s_fwSelectedId = fw.mId;
+			}
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%s", ATGetFirmwareTypeDisplayName(fw.mType));
+
+			ImGui::TableNextColumn();
+			VDStringA u8path = VDTextWToU8(fw.mPath);
+			ImGui::Text("%s", u8path.c_str());
+		}
+
+		ImGui::EndTable();
+	}
+
+	// Defaults section
+	ImGui::Separator();
+	ImGui::Text("Default Firmware:");
+
+	struct DefaultEntry {
+		const char *label;
+		ATFirmwareType type;
+	};
+
+	static const DefaultEntry kDefaults[] = {
+		{ "400/800 Kernel", kATFirmwareType_Kernel800_OSB },
+		{ "XL/XE Kernel",   kATFirmwareType_KernelXL },
+		{ "BASIC",          kATFirmwareType_Basic },
+		{ "5200 OS",        kATFirmwareType_Kernel5200 },
+		{ "XEGS OS",        kATFirmwareType_KernelXEGS },
+	};
+
+	for (const DefaultEntry& def : kDefaults) {
+		uint64 currentDefault = fwMgr ? fwMgr->GetDefaultFirmware(def.type) : 0;
+
+		ImGui::Text("%s:", def.label);
+		ImGui::SameLine(140);
+		ImGui::SetNextItemWidth(300);
+
+		// Build combo items: "Built-in" + matching firmware
+		char comboId[64];
+		snprintf(comboId, sizeof(comboId), "##fwdef_%u", (unsigned)def.type);
+
+		// Find current display name
+		const char *currentName = "Built-in HLE";
+		for (const ATFirmwareInfo& fw : s_fwList) {
+			if (fw.mId == currentDefault) {
+				// Use a static buffer for the preview
+				static VDStringA s_previewBuf;
+				s_previewBuf = VDTextWToU8(fw.mName);
+				currentName = s_previewBuf.c_str();
+				break;
+			}
+		}
+
+		if (ImGui::BeginCombo(comboId, currentName)) {
+			// Built-in option
+			if (ImGui::Selectable("Built-in HLE", currentDefault == 0)) {
+				if (fwMgr)
+					fwMgr->SetDefaultFirmware(def.type, 0);
+			}
+
+			// Matching firmware entries
+			for (const ATFirmwareInfo& fw : s_fwList) {
+				if (fw.mType != def.type || !fw.mbVisible)
+					continue;
+
+				VDStringA u8name = VDTextWToU8(fw.mName);
+				bool isSelected = (fw.mId == currentDefault);
+
+				if (ImGui::Selectable(u8name.c_str(), isSelected)) {
+					if (fwMgr)
+						fwMgr->SetDefaultFirmware(def.type, fw.mId);
+				}
+			}
+
+			ImGui::EndCombo();
+		}
+	}
+
+	ImGui::End();
+}
+
 // ============= Public API =============
 
 void ATImGuiEmulatorInit() {
@@ -703,6 +1212,8 @@ void ATImGuiEmulatorInit() {
 void ATImGuiEmulatorDraw() {
 	DrawMenuBar();
 	DrawSystemConfig();
+	DrawCartridgeBrowser();
+	DrawFirmwareManager();
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
@@ -715,4 +1226,8 @@ void ATImGuiEmulatorDraw() {
 
 void ATImGuiEmulatorShutdown() {
 	s_pQuickState.clear();
+	s_cartLoadBuffer.clear();
+	s_cartDetectedModes.clear();
+	s_cartDisplayModes.clear();
+	s_fwList.clear();
 }
