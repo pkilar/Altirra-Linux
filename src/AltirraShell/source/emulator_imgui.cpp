@@ -58,6 +58,7 @@ class ATIRQController;
 #include "vgmwriter.h"
 #include "inputmap.h"
 #include "joystick.h"
+#include "autosavemanager.h"
 
 #include <SDL.h>
 
@@ -512,6 +513,17 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Warm Reset")) {
 			g_sim.WarmReset();
+		}
+
+		ImGui::Separator();
+
+		{
+			IATAutoSaveManager& asMgr = g_sim.GetAutoSaveManager();
+			bool rewindEnabled = asMgr.GetRewindEnabled();
+			if (ImGui::MenuItem("Enable Rewind", nullptr, &rewindEnabled))
+				asMgr.SetRewindEnabled(rewindEnabled);
+			if (ImGui::MenuItem("Rewind", nullptr, false, rewindEnabled))
+				asMgr.Rewind();
 		}
 
 		ImGui::EndMenu();
