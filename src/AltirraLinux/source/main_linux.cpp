@@ -40,6 +40,9 @@
 #include "debugger.h"
 #include "settings.h"
 #include "firmwaremanager.h"
+#include "diskinterface.h"
+#include "cassette.h"
+#include "cartridge.h"
 
 #include <display_sdl2.h>
 #include <input_sdl2.h>
@@ -450,7 +453,52 @@ static void ProcessEvents(SDL_Window *window) {
 	}
 }
 
+static uint32 s_titleUpdateCounter = 0;
+
+static void UpdateWindowTitle(SDL_Window *window) {
+	// Update every ~60 frames (roughly once per second)
+	if (++s_titleUpdateCounter < 60)
+		return;
+	s_titleUpdateCounter = 0;
+
+	char title[256] = "Altirra (Linux)";
+	int off = 15;
+
+	// Show first loaded disk
+	for (int i = 0; i < 4; ++i) {
+		ATDiskInterface& di = g_sim.GetDiskInterface(i);
+		if (di.IsDiskLoaded()) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(di.GetPath())));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+			break;
+		}
+	}
+
+	// Show cartridge
+	if (off == 15 && g_sim.IsCartridgeAttached(0)) {
+		ATCartridgeEmulator *cart = g_sim.GetCartridge(0);
+		if (cart && cart->GetPath() && *cart->GetPath()) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(cart->GetPath())));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+		}
+	}
+
+	// Show cassette
+	if (off == 15 && g_sim.GetCassette().IsLoaded()) {
+		const wchar_t *tapePath = g_sim.GetCassette().GetPath();
+		if (tapePath && *tapePath) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(tapePath)));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+		}
+	}
+
+	SDL_SetWindowTitle(window, title);
+}
+
 static void RenderAndSwap(SDL_Window *window) {
+	// Update window title periodically
+	UpdateWindowTitle(window);
+
 	// Render emulation frame (upload texture + draw quad)
 	g_pDisplay->RenderFrame();
 
