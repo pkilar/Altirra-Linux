@@ -636,8 +636,20 @@ static void UpdateWindowTitle(SDL_Window *window) {
 		return;
 	s_titleUpdateCounter = 0;
 
-	char title[256] = "Altirra (Linux)";
-	int off = 15;
+	const char *hwName = "";
+	switch (g_sim.GetHardwareMode()) {
+		case kATHardwareMode_800:    hwName = "800"; break;
+		case kATHardwareMode_800XL:  hwName = "800XL"; break;
+		case kATHardwareMode_5200:   hwName = "5200"; break;
+		case kATHardwareMode_XEGS:   hwName = "XEGS"; break;
+		case kATHardwareMode_1200XL: hwName = "1200XL"; break;
+		case kATHardwareMode_130XE:  hwName = "130XE"; break;
+		default: hwName = "Atari"; break;
+	}
+
+	char title[256];
+	int off = snprintf(title, sizeof(title), "Altirra %s", hwName);
+	int baseOff = off;
 
 	// Show first loaded disk
 	for (int i = 0; i < 4; ++i) {
@@ -649,8 +661,8 @@ static void UpdateWindowTitle(SDL_Window *window) {
 		}
 	}
 
-	// Show cartridge
-	if (off == 15 && g_sim.IsCartridgeAttached(0)) {
+	// Show cartridge (if no disk shown)
+	if (off == baseOff && g_sim.IsCartridgeAttached(0)) {
 		ATCartridgeEmulator *cart = g_sim.GetCartridge(0);
 		if (cart && cart->GetPath() && *cart->GetPath()) {
 			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(cart->GetPath())));
@@ -658,8 +670,8 @@ static void UpdateWindowTitle(SDL_Window *window) {
 		}
 	}
 
-	// Show cassette
-	if (off == 15 && g_sim.GetCassette().IsLoaded()) {
+	// Show cassette (if no disk or cartridge shown)
+	if (off == baseOff && g_sim.GetCassette().IsLoaded()) {
 		const wchar_t *tapePath = g_sim.GetCassette().GetPath();
 		if (tapePath && *tapePath) {
 			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(tapePath)));
