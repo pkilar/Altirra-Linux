@@ -24,6 +24,9 @@
 #include <vd2/system/VDString.h>
 #include <vd2/Kasumi/pixmap.h>
 #include <vd2/Kasumi/pixmaputils.h>
+#include <vd2/Kasumi/pixmapops.h>
+#include <vd2/system/file.h>
+#include "encode_png.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -90,6 +93,16 @@ void ATLoadFrameFromMemory(VDPixmapBuffer& px, const void *mem, size_t len) {
 }
 
 void ATSaveFrame(const VDPixmap& px, const wchar_t *filename) {
+	VDPixmapBuffer pxbuf(px.w, px.h, nsVDPixmap::kPixFormat_RGB888);
+	VDPixmapBlt(pxbuf, px);
+
+	vdautoptr<IVDImageEncoderPNG> encoder(VDCreateImageEncoderPNG());
+	const void *mem;
+	uint32 len;
+	encoder->Encode(pxbuf, mem, len, false);
+
+	VDFile f(filename, nsVDFile::kWrite | nsVDFile::kDenyRead | nsVDFile::kCreateAlways);
+	f.write(mem, len);
 }
 
 // Window placement — not applicable on Linux (window manager handles this)

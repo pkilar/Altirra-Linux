@@ -40,6 +40,10 @@
 #include "debugger.h"
 #include "settings.h"
 #include "firmwaremanager.h"
+#include <vd2/Kasumi/pixmap.h>
+#include <vd2/Kasumi/pixmaputils.h>
+#include "oshelper.h"
+#include "gtia.h"
 #include "diskinterface.h"
 #include "cassette.h"
 #include "cartridge.h"
@@ -351,6 +355,32 @@ static void HandleShortcuts(const SDL_Event& event) {
 			return;
 		}
 
+		// F9: save screenshot (auto-named)
+		case SDL_SCANCODE_F9: {
+			VDPixmapBuffer pxbuf;
+			VDPixmap px;
+			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+				// Generate timestamped filename in ~/Pictures/
+				char fname[256];
+				time_t now = time(nullptr);
+				struct tm tm;
+				localtime_r(&now, &tm);
+				const char *home = getenv("HOME");
+				snprintf(fname, sizeof(fname), "%s/altirra_%04d%02d%02d_%02d%02d%02d.png",
+					home ? home : "/tmp",
+					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+					tm.tm_hour, tm.tm_min, tm.tm_sec);
+				try {
+					VDStringW wpath = VDTextU8ToW(VDStringA(fname));
+					ATSaveFrame(px, wpath.c_str());
+					fprintf(stderr, "Screenshot saved: %s\n", fname);
+				} catch (...) {
+					fprintf(stderr, "Screenshot failed\n");
+				}
+			}
+			return;
+		}
+
 		default:
 			break;
 	}
@@ -403,10 +433,11 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F7/F8 quick save/load always active
+		// F7/F8/F9 quick save/load/screenshot always active
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F7
-				|| event.key.keysym.scancode == SDL_SCANCODE_F8) {
+				|| event.key.keysym.scancode == SDL_SCANCODE_F8
+				|| event.key.keysym.scancode == SDL_SCANCODE_F9) {
 				HandleShortcuts(event);
 				continue;
 			}

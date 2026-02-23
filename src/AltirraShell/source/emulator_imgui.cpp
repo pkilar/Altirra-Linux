@@ -52,6 +52,7 @@ class ATIRQController;
 #include "cpu.h"
 #include "debugger.h"
 #include "inputmanager.h"
+#include "oshelper.h"
 #include "inputmap.h"
 #include "joystick.h"
 
@@ -600,6 +601,27 @@ static void DrawMenuBar() {
 				}
 			}
 			ImGui::EndMenu();
+		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Save Screenshot...", "F9")) {
+			VDPixmapBuffer pxbuf;
+			VDPixmap px;
+			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+				VDStringW path = ATLinuxSaveFileDialog("Save Screenshot",
+					"PNG Images|*.png|All Files|*");
+				if (!path.empty()) {
+					try {
+						// Ensure .png extension
+						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+							path += L".png";
+						ATSaveFrame(px, path.c_str());
+					} catch (...) {
+						fprintf(stderr, "Failed to save screenshot\n");
+					}
+				}
+			}
 		}
 
 		ImGui::Separator();
