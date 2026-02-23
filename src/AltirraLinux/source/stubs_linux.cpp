@@ -770,6 +770,125 @@ IVDFileAsync *VDCreateFileAsync(IVDFileAsync::Mode) {
 // 19. VDUIGetAcceleratorString (Windows virtual key name lookup)
 ///////////////////////////////////////////////////////////////////////////
 
-void VDUIGetAcceleratorString(const VDUIAccelerator&, VDStringW& s) {
+static const wchar_t *VDUIGetVKKeyName(uint32 vk) {
+	// Map Windows virtual key codes to human-readable names.
+	// Letters and digits handled separately; this covers special keys.
+	switch (vk) {
+		case 0x08: return L"Backspace";
+		case 0x09: return L"Tab";
+		case 0x0D: return L"Enter";
+		case 0x10: return L"Shift";
+		case 0x11: return L"Ctrl";
+		case 0x12: return L"Alt";
+		case 0x13: return L"Pause";
+		case 0x14: return L"Caps Lock";
+		case 0x1B: return L"Esc";
+		case 0x20: return L"Space";
+		case 0x21: return L"Page Up";
+		case 0x22: return L"Page Down";
+		case 0x23: return L"End";
+		case 0x24: return L"Home";
+		case 0x25: return L"Left";
+		case 0x26: return L"Up";
+		case 0x27: return L"Right";
+		case 0x28: return L"Down";
+		case 0x2C: return L"Print Screen";
+		case 0x2D: return L"Insert";
+		case 0x2E: return L"Delete";
+		case 0x5B: return L"Left Win";
+		case 0x5C: return L"Right Win";
+		case 0x5D: return L"Apps";
+		case 0x60: return L"Num 0";
+		case 0x61: return L"Num 1";
+		case 0x62: return L"Num 2";
+		case 0x63: return L"Num 3";
+		case 0x64: return L"Num 4";
+		case 0x65: return L"Num 5";
+		case 0x66: return L"Num 6";
+		case 0x67: return L"Num 7";
+		case 0x68: return L"Num 8";
+		case 0x69: return L"Num 9";
+		case 0x6A: return L"Num *";
+		case 0x6B: return L"Num +";
+		case 0x6D: return L"Num -";
+		case 0x6E: return L"Num .";
+		case 0x6F: return L"Num /";
+		case 0x70: return L"F1";
+		case 0x71: return L"F2";
+		case 0x72: return L"F3";
+		case 0x73: return L"F4";
+		case 0x74: return L"F5";
+		case 0x75: return L"F6";
+		case 0x76: return L"F7";
+		case 0x77: return L"F8";
+		case 0x78: return L"F9";
+		case 0x79: return L"F10";
+		case 0x7A: return L"F11";
+		case 0x7B: return L"F12";
+		case 0x90: return L"Num Lock";
+		case 0x91: return L"Scroll Lock";
+		case 0xA0: return L"Left Shift";
+		case 0xA1: return L"Right Shift";
+		case 0xA2: return L"Left Ctrl";
+		case 0xA3: return L"Right Ctrl";
+		case 0xBA: return L";";
+		case 0xBB: return L"=";
+		case 0xBC: return L",";
+		case 0xBD: return L"-";
+		case 0xBE: return L".";
+		case 0xBF: return L"/";
+		case 0xC0: return L"`";
+		case 0xDB: return L"[";
+		case 0xDC: return L"\\";
+		case 0xDD: return L"]";
+		case 0xDE: return L"'";
+		default:   return nullptr;
+	}
+}
+
+void VDUIGetAcceleratorString(const VDUIAccelerator& accel, VDStringW& s) {
 	s.clear();
+
+	if (accel.mModifiers & VDUIAccelerator::kModUp)
+		s = L"^";
+
+	if (accel.mModifiers & VDUIAccelerator::kModCooked) {
+		s += L"\"";
+		const wchar_t c = (wchar_t)accel.mVirtKey;
+		const wchar_t *name = VDUIGetVKKeyName(accel.mVirtKey);
+		if (name)
+			s += name;
+		else
+			s += c;
+		s += L"\"";
+	} else {
+		if (accel.mModifiers & VDUIAccelerator::kModCtrl)
+			s += L"Ctrl+";
+
+		if (accel.mModifiers & VDUIAccelerator::kModAlt)
+			s += L"Alt+";
+
+		if (accel.mModifiers & VDUIAccelerator::kModShift)
+			s += L"Shift+";
+
+		// Letters A-Z
+		if (accel.mVirtKey >= 0x41 && accel.mVirtKey <= 0x5A) {
+			s += (wchar_t)accel.mVirtKey;
+		}
+		// Digits 0-9
+		else if (accel.mVirtKey >= 0x30 && accel.mVirtKey <= 0x39) {
+			s += (wchar_t)accel.mVirtKey;
+		}
+		// Named keys
+		else {
+			const wchar_t *name = VDUIGetVKKeyName(accel.mVirtKey);
+			if (name)
+				s += name;
+			else {
+				wchar_t buf[16];
+				swprintf(buf, sizeof(buf)/sizeof(buf[0]), L"Key 0x%02X", accel.mVirtKey);
+				s += buf;
+			}
+		}
+	}
 }
