@@ -1015,7 +1015,7 @@ static void DrawStatusBar() {
 
 		ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s %s", hwName, vsName);
 
-		// Disk status
+		// Disk status (show dirty indicator when disk has unsaved changes)
 		for (int i = 0; i < 4; ++i) {
 			ATDiskInterface& di = g_sim.GetDiskInterface(i);
 			ImGui::SameLine(0, 16);
@@ -1023,7 +1023,10 @@ static void DrawStatusBar() {
 			if (di.IsDiskLoaded()) {
 				const wchar_t *filename = VDFileSplitPath(di.GetPath());
 				VDStringA u8 = VDTextWToU8(VDStringW(filename));
-				ImGui::Text("D%d: %s", i + 1, u8.c_str());
+				if (di.IsDirty())
+					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "D%d: %s*", i + 1, u8.c_str());
+				else
+					ImGui::Text("D%d: %s", i + 1, u8.c_str());
 			} else {
 				ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "D%d: -", i + 1);
 			}
