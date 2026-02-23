@@ -1306,10 +1306,17 @@ static void DrawStatusBar() {
 			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), "PAUSED");
 		}
 
-		// Turbo indicator
+		// Turbo/speed indicator
 		if (ATUIGetTurbo()) {
 			ImGui::SameLine(0, 16);
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[TURBO]");
+		} else {
+			float speed = ATUIGetSpeedModifier();
+			int pct = (int)(speed * 100.0f + 0.5f);
+			if (pct != 100) {
+				ImGui::SameLine(0, 16);
+				ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%d%%", pct);
+			}
 		}
 
 		// Recording indicator
