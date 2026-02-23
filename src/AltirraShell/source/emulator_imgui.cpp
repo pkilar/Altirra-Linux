@@ -105,6 +105,7 @@ static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
 static bool s_quitRequested = false;
 static bool s_quitConfirmed = false;
+static bool s_showStatusBar = true;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -959,6 +960,8 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Fullscreen", "F11", &fullscreen))
 			ATSetFullscreen(fullscreen);
 
+		ImGui::MenuItem("Status Bar", nullptr, &s_showStatusBar);
+
 		ImGui::EndMenu();
 	}
 
@@ -1154,6 +1157,9 @@ static void DrawSystemConfig() {
 // ============= Status Bar =============
 
 static void DrawStatusBar() {
+	if (!s_showStatusBar)
+		return;
+
 	ImGuiIO& io = ImGui::GetIO();
 	float barHeight = ImGui::GetFrameHeight() + 4.0f;
 
