@@ -508,10 +508,10 @@ static void DrawMenuBar() {
 
 		ImGui::Separator();
 
-		if (ImGui::MenuItem("Cold Reset")) {
+		if (ImGui::MenuItem("Cold Reset", "Shift+F6")) {
 			g_sim.ColdReset();
 		}
-		if (ImGui::MenuItem("Warm Reset")) {
+		if (ImGui::MenuItem("Warm Reset", "F6")) {
 			g_sim.WarmReset();
 		}
 

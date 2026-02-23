@@ -383,6 +383,16 @@ static void HandleShortcuts(const SDL_Event& event) {
 			return;
 		}
 
+		// F6: warm reset (Shift+F6: cold reset)
+		case SDL_SCANCODE_F6: {
+			bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
+			if (shift)
+				g_sim.ColdReset();
+			else
+				g_sim.WarmReset();
+			return;
+		}
+
 		// Pause key: toggle emulation pause
 		case SDL_SCANCODE_PAUSE: {
 			if (g_sim.IsPaused())
@@ -444,9 +454,10 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F7/F8/F9/Pause always active (quick save/load/screenshot/pause)
+		// F6/F7/F8/F9/Pause always active (reset/save/load/screenshot/pause)
 		if (event.type == SDL_KEYDOWN) {
-			if (event.key.keysym.scancode == SDL_SCANCODE_F7
+			if (event.key.keysym.scancode == SDL_SCANCODE_F6
+				|| event.key.keysym.scancode == SDL_SCANCODE_F7
 				|| event.key.keysym.scancode == SDL_SCANCODE_F8
 				|| event.key.keysym.scancode == SDL_SCANCODE_F9
 				|| event.key.keysym.scancode == SDL_SCANCODE_PAUSE) {
