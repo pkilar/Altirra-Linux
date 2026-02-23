@@ -1035,17 +1035,20 @@ static void DrawStatusBar() {
 			ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
 		}
 
-		// Tape indicator
+		// Tape indicator with position
 		{
 			ATCassetteEmulator& cas = g_sim.GetCassette();
 			if (cas.IsLoaded()) {
 				ImGui::SameLine(0, 16);
+				float pos = cas.GetPosition();
+				int posMin = (int)(pos / 60.0f);
+				int posSec = (int)pos % 60;
 				if (cas.IsPlayEnabled() && !cas.IsPaused())
-					ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "TAPE>");
+					ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "TAPE> %d:%02d", posMin, posSec);
 				else if (cas.IsRecordEnabled() && !cas.IsPaused())
-					ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "TAPE*");
+					ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "TAPE* %d:%02d", posMin, posSec);
 				else
-					ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "TAPE");
+					ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "TAPE %d:%02d", posMin, posSec);
 			}
 		}
 
