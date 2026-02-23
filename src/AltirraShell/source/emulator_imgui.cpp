@@ -795,6 +795,14 @@ static void DrawMenuBar() {
 
 	// --- Speed menu ---
 	if (ImGui::BeginMenu("Speed")) {
+		bool paused = g_sim.IsPaused();
+		if (ImGui::MenuItem(paused ? "Resume" : "Pause", "Pause")) {
+			if (paused)
+				g_sim.Resume();
+			else
+				g_sim.Pause();
+		}
+
 		bool turbo = ATUIGetTurbo();
 		if (ImGui::MenuItem("Turbo", nullptr, &turbo))
 			ATUISetTurbo(turbo);

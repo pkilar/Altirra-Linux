@@ -381,6 +381,15 @@ static void HandleShortcuts(const SDL_Event& event) {
 			return;
 		}
 
+		// Pause key: toggle emulation pause
+		case SDL_SCANCODE_PAUSE: {
+			if (g_sim.IsPaused())
+				g_sim.Resume();
+			else
+				g_sim.Pause();
+			return;
+		}
+
 		default:
 			break;
 	}
