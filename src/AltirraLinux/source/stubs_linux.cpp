@@ -211,7 +211,8 @@ float ATUIGetSpeedModifier() { return s_speedModifier; }
 static int s_viewFilterSharpness = 0;
 int ATUIGetViewFilterSharpness() { return s_viewFilterSharpness; }
 
-vdfloat2 ATUIGetDisplayPanOffset() { return vdfloat2{0, 0}; }
+static vdfloat2 s_displayPanOffset{0, 0};
+vdfloat2 ATUIGetDisplayPanOffset() { return s_displayPanOffset; }
 
 const char *ATUIGetCurrentAltOutputName() { return ""; }
 const char *ATUIGetWindowCaptionTemplate() { return ""; }
@@ -236,7 +237,7 @@ void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; }
 void ATUISetDisplayIndicators(bool v) { s_displayIndicators = v; }
 void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
-void ATUISetDisplayPanOffset(const vdfloat2&) {}
+void ATUISetDisplayPanOffset(const vdfloat2& v) { s_displayPanOffset = v; }
 void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	s_displayStretchMode = m;
 	extern ATDisplaySDL2 *ATGetLinuxDisplay();
