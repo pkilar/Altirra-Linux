@@ -1036,6 +1036,12 @@ static void DrawStatusBar() {
 			}
 		}
 
+		// Pause indicator
+		if (g_sim.IsPaused()) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), "PAUSED");
+		}
+
 		// Turbo indicator
 		if (ATUIGetTurbo()) {
 			ImGui::SameLine(0, 16);
