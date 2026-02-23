@@ -59,6 +59,10 @@
 #include <utility>
 #include <vector>
 
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
 // Forward declaration: simulator from main_linux.cpp
 #include "simulator.h"
 
@@ -768,29 +772,117 @@ void VDDSetBloomV2Settings(const VDDBloomV2Settings&) {
 // 18. VDCreateFileAsync (Windows async file I/O)
 ///////////////////////////////////////////////////////////////////////////
 
-// Minimal synchronous implementation for Linux
+// Synchronous implementation using POSIX file I/O
 namespace {
-	class VDFileAsyncStub final : public IVDFileAsync {
+	class VDFileAsyncLinux final : public IVDFileAsync {
 	public:
-		void SetPreemptiveExtend(bool) override {}
-		bool IsPreemptiveExtendActive() override { return false; }
-		bool IsOpen() override { return false; }
-		void Open(const wchar_t *, uint32, uint32) override {}
-		void Open(VDFileHandle, uint32, uint32) override {}
-		void Close() override {}
-		void FastWrite(const void *, uint32) override {}
+		~VDFileAsyncLinux() override { Close(); }
+
+		void SetPreemptiveExtend(bool b) override { mbPreemptiveExtend = b; }
+		bool IsPreemptiveExtendActive() override { return mbPreemptiveExtend; }
+		bool IsOpen() override { return mFD >= 0; }
+
+		void Open(const wchar_t *path, uint32, uint32) override {
+			Close();
+			VDStringA u8path = VDTextWToU8(VDStringW(path));
+			mFD = ::open(u8path.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
+			if (mFD < 0)
+				throw MyWin32Error("Cannot open file: %%s", errno);
+			mbOwned = true;
+			mFastWritePos = 0;
+		}
+
+		void Open(VDFileHandle h, uint32, uint32) override {
+			Close();
+			mFD = h;
+			mbOwned = false;
+			mFastWritePos = ::lseek(mFD, 0, SEEK_CUR);
+			if (mFastWritePos < 0)
+				mFastWritePos = 0;
+		}
+
+		void Close() override {
+			if (mFD >= 0 && mbOwned)
+				::close(mFD);
+			mFD = -1;
+			mbOwned = false;
+			mFastWritePos = 0;
+		}
+
+		void FastWrite(const void *data, uint32 bytes) override {
+			if (mFD < 0) return;
+			const uint8 *p = (const uint8 *)data;
+			uint32 remaining = bytes;
+			while (remaining > 0) {
+				ssize_t written = ::write(mFD, p, remaining);
+				if (written < 0) {
+					if (errno == EINTR) continue;
+					throw MyWin32Error("Write error: %%s", errno);
+				}
+				p += written;
+				remaining -= (uint32)written;
+			}
+			mFastWritePos += bytes;
+		}
+
 		void FastWriteEnd() override {}
-		void Write(sint64, const void *, uint32) override {}
-		bool Extend(sint64) override { return false; }
-		void Truncate(sint64) override {}
-		void SafeTruncateAndClose(sint64) override {}
-		sint64 GetFastWritePos() override { return 0; }
-		sint64 GetSize() override { return 0; }
+
+		void Write(sint64 pos, const void *data, uint32 bytes) override {
+			if (mFD < 0) return;
+			const uint8 *p = (const uint8 *)data;
+			uint32 remaining = bytes;
+			sint64 offset = pos;
+			while (remaining > 0) {
+				ssize_t written = ::pwrite(mFD, p, remaining, offset);
+				if (written < 0) {
+					if (errno == EINTR) continue;
+					throw MyWin32Error("Write error: %%s", errno);
+				}
+				p += written;
+				remaining -= (uint32)written;
+				offset += written;
+			}
+		}
+
+		bool Extend(sint64 pos) override {
+			if (mFD < 0) return false;
+			return ::ftruncate(mFD, pos) == 0;
+		}
+
+		void Truncate(sint64 pos) override {
+			if (mFD < 0) return;
+			::ftruncate(mFD, pos);
+		}
+
+		void SafeTruncateAndClose(sint64 pos) override {
+			if (mFD >= 0) {
+				::ftruncate(mFD, pos);
+				if (mbOwned)
+					::close(mFD);
+				mFD = -1;
+				mbOwned = false;
+			}
+		}
+
+		sint64 GetFastWritePos() override { return mFastWritePos; }
+
+		sint64 GetSize() override {
+			if (mFD < 0) return 0;
+			struct stat st;
+			if (::fstat(mFD, &st) < 0) return 0;
+			return st.st_size;
+		}
+
+	private:
+		int mFD = -1;
+		bool mbOwned = false;
+		bool mbPreemptiveExtend = false;
+		sint64 mFastWritePos = 0;
 	};
 }
 
 IVDFileAsync *VDCreateFileAsync(IVDFileAsync::Mode) {
-	return new VDFileAsyncStub;
+	return new VDFileAsyncLinux;
 }
 
 ///////////////////////////////////////////////////////////////////////////
