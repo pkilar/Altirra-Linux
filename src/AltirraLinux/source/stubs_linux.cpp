@@ -143,7 +143,8 @@ ATUIQueue& ATUIGetQueue() {
 
 bool ATUIGetAltViewAutoswitchingEnabled() { return false; }
 bool ATUIGetAltViewEnabled() { return false; }
-bool ATUIGetConstrainMouseFullScreen() { return false; }
+static bool s_constrainMouseFS = true;
+bool ATUIGetConstrainMouseFullScreen() { return s_constrainMouseFS; }
 bool ATUIGetDisplayIndicators() { return false; }
 bool ATUIGetDisplayPadIndicators() { return false; }
 bool ATUIGetDrawPadBoundsEnabled() { return false; }
@@ -206,7 +207,13 @@ VDGUIHandle ATUIGetNewPopupOwner() { return nullptr; }
 void ATUISetAltViewAutoswitchingEnabled(bool) {}
 void ATUISetAltViewEnabled(bool) {}
 void ATUISetBootUnloadStorageMask(uint32) {}
-void ATUISetConstrainMouseFullScreen(bool) {}
+void ATUISetConstrainMouseFullScreen(bool v) {
+	s_constrainMouseFS = v;
+	extern SDL_Window *ATGetLinuxWindow();
+	SDL_Window *w = ATGetLinuxWindow();
+	if (w && ATUIGetFullscreen())
+		SDL_SetWindowGrab(w, v ? SDL_TRUE : SDL_FALSE);
+}
 void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; }
 void ATUISetDisplayIndicators(bool) {}

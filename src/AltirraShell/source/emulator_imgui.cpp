@@ -1207,6 +1207,12 @@ static void DrawMenuBar() {
 				ATUISetPointerAutoHide(autoHide);
 		}
 
+		{
+			bool confine = ATUIGetConstrainMouseFullScreen();
+			if (ImGui::MenuItem("Confine Mouse in Fullscreen", nullptr, &confine))
+				ATUISetConstrainMouseFullScreen(confine);
+		}
+
 		ImGui::EndMenu();
 	}
 

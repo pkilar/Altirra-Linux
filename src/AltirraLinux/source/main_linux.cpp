@@ -113,9 +113,14 @@ ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
 // SDL window pointer for fullscreen toggle callback
 static SDL_Window *g_pWindow = nullptr;
 
+// Public accessor for SDL window — used by stubs_linux.cpp (mouse grab etc.)
+SDL_Window *ATGetLinuxWindow() { return g_pWindow; }
+
 static void SetFullscreenImpl(bool fs) {
-	if (g_pWindow)
+	if (g_pWindow) {
 		SDL_SetWindowFullscreen(g_pWindow, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+		SDL_SetWindowGrab(g_pWindow, (fs && ATUIGetConstrainMouseFullScreen()) ? SDL_TRUE : SDL_FALSE);
+	}
 }
 
 static void SetWindowSizeImpl(int w, int h) {
