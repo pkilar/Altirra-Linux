@@ -101,6 +101,8 @@ static bool s_showBootOptions = false;
 static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
+static bool s_quitRequested = false;
+static bool s_quitConfirmed = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -525,6 +527,11 @@ static void DrawMenuBar() {
 				asMgr.SetRewindEnabled(rewindEnabled);
 			if (ImGui::MenuItem("Rewind", nullptr, false, rewindEnabled))
 				asMgr.Rewind();
+		}
+
+		ImGui::Separator();
+		if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
+			ATImGuiRequestQuit();
 		}
 
 		ImGui::EndMenu();
@@ -2910,6 +2917,69 @@ static void DrawVideoConfig() {
 	ImGui::End();
 }
 
+// ============= Quit Confirmation =============
+
+static bool HasDirtyDisks() {
+	for (int i = 0; i < 15; ++i) {
+		ATDiskInterface& di = g_sim.GetDiskInterface(i);
+		if (di.IsDiskLoaded() && di.IsDirty())
+			return true;
+	}
+	return false;
+}
+
+static void DrawQuitConfirmation() {
+	if (!s_quitRequested)
+		return;
+
+	ImGui::OpenPopup("Quit Altirra?");
+	s_quitRequested = false;
+
+	ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+	ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+	if (ImGui::BeginPopupModal("Quit Altirra?", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::Text("The following disks have unsaved changes:");
+		ImGui::Separator();
+
+		for (int i = 0; i < 15; ++i) {
+			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+			if (di.IsDiskLoaded() && di.IsDirty()) {
+				const wchar_t *filename = VDFileSplitPath(di.GetPath());
+				VDStringA u8 = VDTextWToU8(VDStringW(filename));
+				ImGui::BulletText("D%d: %s", i + 1, u8.c_str());
+			}
+		}
+
+		ImGui::Separator();
+		ImGui::Spacing();
+
+		if (ImGui::Button("Save All & Quit", ImVec2(140, 0))) {
+			for (int i = 0; i < 15; ++i) {
+				ATDiskInterface& di = g_sim.GetDiskInterface(i);
+				if (di.IsDiskLoaded() && di.IsDirty()) {
+					try { di.SaveDisk(); } catch (...) {}
+				}
+			}
+			s_quitConfirmed = true;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Quit Without Saving", ImVec2(160, 0))) {
+			s_quitConfirmed = true;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+}
+
 // ============= Public API =============
 
 void ATImGuiEmulatorInit() {
@@ -2932,6 +3002,7 @@ void ATImGuiEmulatorDraw() {
 	DrawStatusBar();
 	DrawAbout();
 	DrawShortcuts();
+	DrawQuitConfirmation();
 	PollFileDialogFallback();
 	CheckPendingErrors();
 	DrawErrorPopup();
@@ -2949,4 +3020,21 @@ void ATImGuiEmulatorShutdown() {
 	s_fwList.clear();
 	s_devSelectedDevice = nullptr;
 	s_devEditProps.Clear();
+}
+
+void ATImGuiRequestQuit() {
+	if (HasDirtyDisks()) {
+		s_quitRequested = true;
+		s_quitConfirmed = false;
+	} else {
+		s_quitConfirmed = true;
+	}
+}
+
+bool ATImGuiIsQuitConfirmed() {
+	if (s_quitConfirmed) {
+		s_quitConfirmed = false;
+		return true;
+	}
+	return false;
 }

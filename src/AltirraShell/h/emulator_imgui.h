@@ -13,4 +13,8 @@ void ATImGuiEmulatorInit();
 void ATImGuiEmulatorDraw();      // Call every frame when overlay visible
 void ATImGuiEmulatorShutdown();
 
+// Quit confirmation — returns true if quit should proceed
+void ATImGuiRequestQuit();
+bool ATImGuiIsQuitConfirmed();
+
 #endif

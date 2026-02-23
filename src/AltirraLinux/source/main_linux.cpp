@@ -471,6 +471,15 @@ static void ProcessEvents(SDL_Window *window) {
 				ATSetFullscreen(!ATUIGetFullscreen());
 				continue;
 			}
+
+			// Ctrl+Q = quit
+			if (event.key.keysym.scancode == SDL_SCANCODE_Q
+				&& (event.key.keysym.mod & KMOD_CTRL)) {
+				ATImGuiRequestQuit();
+				if (g_pImGui && !g_pImGui->IsVisible())
+					g_pImGui->ToggleVisible();
+				continue;
+			}
 		}
 
 		// When overlay is visible, handle debug shortcuts
@@ -488,12 +497,17 @@ static void ProcessEvents(SDL_Window *window) {
 
 		switch (event.type) {
 			case SDL_QUIT:
-				g_running = false;
+				ATImGuiRequestQuit();
+				if (g_pImGui && !g_pImGui->IsVisible())
+					g_pImGui->ToggleVisible();
 				break;
 
 			case SDL_WINDOWEVENT:
-				if (event.window.event == SDL_WINDOWEVENT_CLOSE)
-					g_running = false;
+				if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+					ATImGuiRequestQuit();
+					if (g_pImGui && !g_pImGui->IsVisible())
+						g_pImGui->ToggleVisible();
+				}
 				break;
 
 			case SDL_DROPFILE: {
@@ -751,6 +765,12 @@ int main(int argc, char *argv[]) {
 	// Main loop
 	while (g_running) {
 		ProcessEvents(window);
+
+		// Check if quit was confirmed (after dirty disk dialog)
+		if (ATImGuiIsQuitConfirmed()) {
+			g_running = false;
+			break;
+		}
 
 		// Tick debugger (processes queued commands)
 		IATDebugger *dbg = ATGetDebugger();
