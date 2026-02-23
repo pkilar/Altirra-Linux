@@ -11,6 +11,7 @@
 #include <vd2/system/VDString.h>
 #include <vd2/system/text.h>
 #include <vd2/system/refcount.h>
+#include <vd2/system/registry.h>
 #include <vd2/system/file.h>
 #include <vd2/VDDisplay/display.h>
 #include <at/atdebugger/target.h>
@@ -288,12 +289,15 @@ static const char *ATGetControllerTypeName(ATInputControllerType type) {
 
 // ============= Helper: load file via dialog =============
 
+static void MRUAdd(const wchar_t *path);  // forward declaration
+
 static void TryLoadImage(const VDStringW& path) {
 	if (path.empty())
 		return;
 
 	try {
 		g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+		MRUAdd(path.c_str());
 	} catch (...) {
 		VDStringA u8 = VDTextWToU8(path);
 		fprintf(stderr, "Failed to load image: %s\n", u8.c_str());
@@ -311,6 +315,72 @@ static void TryMountDisk(int index, const VDStringW& path) {
 		VDStringA u8 = VDTextWToU8(path);
 		fprintf(stderr, "Failed to mount disk D%d: %s\n", index + 1, u8.c_str());
 	}
+}
+
+// ============= MRU (Recent Files) helpers =============
+// Uses same registry format as Windows ATAddMRUListItem/ATGetMRUListItem
+
+static void MRUAdd(const wchar_t *path) {
+	VDRegistryAppKey key("MRU List", true);
+
+	VDStringW order;
+	key.getString("Order", order);
+
+	// Check if already present — if so, promote it
+	VDStringW existing;
+	for (size_t i = 0; i < order.size(); ++i) {
+		char keyname[2] = { (char)order[i], 0 };
+		key.getString(keyname, existing);
+		if (existing.comparei(path) == 0) {
+			// Promote to front
+			wchar_t c = order[i];
+			order.erase(i, 1);
+			order.insert(order.begin(), c);
+			key.setString("Order", order.c_str());
+			return;
+		}
+	}
+
+	// Add new entry
+	int slot = 0;
+	if (order.size() >= 10) {
+		wchar_t c = order.back();
+		if (c >= L'A' && c < L'A' + 10)
+			slot = c - L'A';
+		order.resize(9);
+	} else {
+		slot = (int)order.size();
+	}
+
+	order.insert(order.begin(), L'A' + slot);
+	char keyname[2] = { (char)('A' + slot), 0 };
+	key.setString(keyname, path);
+	key.setString("Order", order.c_str());
+}
+
+static VDStringW MRUGet(uint32 index) {
+	VDRegistryAppKey key("MRU List", false);
+	VDStringW order;
+	key.getString("Order", order);
+
+	VDStringW s;
+	if (index < order.size()) {
+		char keyname[2] = { (char)order[index], 0 };
+		key.getString(keyname, s);
+	}
+	return s;
+}
+
+static uint32 MRUCount() {
+	VDRegistryAppKey key("MRU List", false);
+	VDStringW order;
+	key.getString("Order", order);
+	return (uint32)order.size();
+}
+
+static void MRUClear() {
+	VDRegistryAppKey key("MRU List", true);
+	key.removeValue("Order");
 }
 
 // ============= Main Menu Bar =============
@@ -413,6 +483,37 @@ static void DrawMenuBar() {
 			} else if (ATLinuxFileDialogIsFallbackOpen()) {
 				s_pendingDialog = PendingDialog::kOpenImage;
 			}
+		}
+
+		// Recent files submenu
+		uint32 mruCount = MRUCount();
+		if (ImGui::BeginMenu("Recent Files", mruCount > 0)) {
+			for (uint32 i = 0; i < mruCount && i < 10; ++i) {
+				VDStringW wpath = MRUGet(i);
+				if (wpath.empty())
+					continue;
+
+				VDStringA u8path = VDTextWToU8(VDStringW(VDFileSplitPath(wpath.c_str())));
+				char label[256];
+				snprintf(label, sizeof(label), "%u. %s", i + 1, u8path.c_str());
+
+				if (ImGui::MenuItem(label)) {
+					TryLoadImage(wpath);
+				}
+
+				// Tooltip with full path
+				if (ImGui::IsItemHovered()) {
+					VDStringA fullU8 = VDTextWToU8(wpath);
+					ImGui::SetTooltip("%s", fullU8.c_str());
+				}
+			}
+
+			ImGui::Separator();
+			if (ImGui::MenuItem("Clear Recent Files")) {
+				MRUClear();
+			}
+
+			ImGui::EndMenu();
 		}
 
 		ImGui::Separator();
