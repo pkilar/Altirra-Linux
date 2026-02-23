@@ -408,6 +408,10 @@ static void TryLoadImage(const VDStringW& path) {
 		char msg[256];
 		snprintf(msg, sizeof(msg), "Loaded: %s", fname.c_str());
 		ShowToast(msg);
+	} catch (const std::exception& e) {
+		char msg[512];
+		snprintf(msg, sizeof(msg), "Load failed: %s", e.what());
+		ShowToast(msg);
 	} catch (...) {
 		ShowToast("Failed to load image");
 	}
@@ -423,6 +427,10 @@ static void TryMountDisk(int index, const VDStringW& path) {
 		VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 		char msg[128];
 		snprintf(msg, sizeof(msg), "D%d: %s", index + 1, fname.c_str());
+		ShowToast(msg);
+	} catch (const std::exception& e) {
+		char msg[256];
+		snprintf(msg, sizeof(msg), "D%d mount failed: %s", index + 1, e.what());
 		ShowToast(msg);
 	} catch (...) {
 		char msg[64];
