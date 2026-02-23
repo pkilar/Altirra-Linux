@@ -1175,17 +1175,19 @@ static void DrawMenuBar() {
 		}
 
 		if (ImGui::BeginMenu("Window Size")) {
-			// Base NTSC resolution: 456x262
-			static const struct { const char *label; int w; int h; } kZoomLevels[] = {
-				{ "1x (456x262)",   456,  262 },
-				{ "2x (912x524)",   912,  524 },
-				{ "3x (1368x786)", 1368,  786 },
-				{ "4x (1824x1048)", 1824, 1048 },
-			};
+			// Base resolution depends on video standard
+			bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL
+				|| g_sim.GetVideoStandard() == kATVideoStandard_SECAM;
+			int baseW = 456;
+			int baseH = isPAL ? 312 : 262;
 
-			for (auto& z : kZoomLevels) {
-				if (ImGui::MenuItem(z.label))
-					ATSetWindowSize(z.w, z.h);
+			for (int scale = 1; scale <= 4; ++scale) {
+				int w = baseW * scale;
+				int h = baseH * scale;
+				char label[48];
+				snprintf(label, sizeof(label), "%dx (%dx%d)", scale, w, h);
+				if (ImGui::MenuItem(label))
+					ATSetWindowSize(w, h);
 			}
 			ImGui::EndMenu();
 		}
