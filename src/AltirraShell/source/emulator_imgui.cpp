@@ -1058,6 +1058,18 @@ static void DrawMenuBar() {
 			ATUISetSpeedModifier((float)speedPct / 100.0f);
 		}
 
+		ImGui::Separator();
+
+		{
+			IATAudioOutput *audioOut = g_sim.GetAudioOutput();
+			if (audioOut) {
+				bool mute = audioOut->GetMute();
+				if (ImGui::MenuItem("Mute Audio", "F4", &mute)) {
+					audioOut->SetMute(mute);
+				}
+			}
+		}
+
 		ImGui::EndMenu();
 	}
 
@@ -1388,6 +1400,7 @@ static void DrawShortcuts() {
 		};
 
 		row("Shift+F1", "Cycle Quick Maps");
+		row("F4", "Toggle Mute");
 		row("F5", "Break / Run (debugger)");
 		row("F6", "Warm Reset");
 		row("Shift+F6", "Cold Reset");

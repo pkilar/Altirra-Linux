@@ -402,6 +402,17 @@ static void HandleShortcuts(const SDL_Event& event) {
 			return;
 		}
 
+		// F4: toggle mute
+		case SDL_SCANCODE_F4: {
+			IATAudioOutput *audioOut = g_sim.GetAudioOutput();
+			if (audioOut) {
+				bool mute = !audioOut->GetMute();
+				audioOut->SetMute(mute);
+				ATImGuiShowToast(mute ? "Audio muted" : "Audio unmuted");
+			}
+			return;
+		}
+
 		// Shift+F1: cycle quick maps
 		case SDL_SCANCODE_F1: {
 			if ((event.key.keysym.mod & KMOD_SHIFT) != 0) {
@@ -482,9 +493,10 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F1/F6/F7/F8/F9/Pause always active (quick maps/reset/save/load/screenshot/pause)
+		// F1/F4/F6/F7/F8/F9/Pause always active (quick maps/mute/reset/save/load/screenshot/pause)
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F1
+				|| event.key.keysym.scancode == SDL_SCANCODE_F4
 				|| event.key.keysym.scancode == SDL_SCANCODE_F6
 				|| event.key.keysym.scancode == SDL_SCANCODE_F7
 				|| event.key.keysym.scancode == SDL_SCANCODE_F8
