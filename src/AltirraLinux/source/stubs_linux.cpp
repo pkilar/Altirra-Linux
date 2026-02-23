@@ -153,6 +153,7 @@ static bool s_pauseWhenInactive = false;
 static bool s_pointerAutoHide = true;
 static bool s_rawInput = false;
 static bool s_targetPointerVisible = false;
+static bool s_frameRateVSyncAdaptive = false;
 static bool s_menuAutoHide = false;
 
 bool ATUIGetAltViewAutoswitchingEnabled() { return s_altViewAutoswitch; }
@@ -167,7 +168,7 @@ bool ATUIGetPauseWhenInactive() { return s_pauseWhenInactive; }
 bool ATUIGetPointerAutoHide() { return s_pointerAutoHide; }
 bool ATUIGetRawInputEnabled() { return s_rawInput; }
 bool ATUIGetTargetPointerVisible() { return s_targetPointerVisible; }
-bool ATUIGetFrameRateVSyncAdaptive() { return false; }
+bool ATUIGetFrameRateVSyncAdaptive() { return s_frameRateVSyncAdaptive; }
 bool ATUIIsMenuAutoHideEnabled() { return s_menuAutoHide; }
 bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 
@@ -188,8 +189,10 @@ bool ATUIGetFullscreen() { return s_fullscreen; }
 // 5. ATUI accessor getters (numeric / enum / string / pointer)
 ///////////////////////////////////////////////////////////////////////////
 
-uint32 ATUIGetBootUnloadStorageMask() { return 0; }
-uint32 ATUIGetResetFlags() { return 0; }
+static uint32 s_bootUnloadStorageMask = 0;
+static uint32 s_resetFlags = 0;
+uint32 ATUIGetBootUnloadStorageMask() { return s_bootUnloadStorageMask; }
+uint32 ATUIGetResetFlags() { return s_resetFlags; }
 
 static ATDisplayFilterMode s_displayFilterMode = (ATDisplayFilterMode)0;
 static ATDisplayStretchMode s_displayStretchMode = kATDisplayStretchMode_PreserveAspectRatio;
@@ -197,8 +200,10 @@ static float s_speedModifier = 1.0f;
 
 ATDisplayFilterMode ATUIGetDisplayFilterMode() { return s_displayFilterMode; }
 ATDisplayStretchMode ATUIGetDisplayStretchMode() { return s_displayStretchMode; }
-ATFrameRateMode ATUIGetFrameRateMode() { return (ATFrameRateMode)0; }
-ATUIEnhancedTextMode ATUIGetEnhancedTextMode() { return kATUIEnhancedTextMode_None; }
+static ATFrameRateMode s_frameRateMode = (ATFrameRateMode)0;
+static ATUIEnhancedTextMode s_enhancedTextMode = kATUIEnhancedTextMode_None;
+ATFrameRateMode ATUIGetFrameRateMode() { return s_frameRateMode; }
+ATUIEnhancedTextMode ATUIGetEnhancedTextMode() { return s_enhancedTextMode; }
 
 static float s_displayZoom = 1.0f;
 float ATUIGetDisplayZoom() { return s_displayZoom; }
@@ -219,7 +224,7 @@ VDGUIHandle ATUIGetNewPopupOwner() { return nullptr; }
 
 void ATUISetAltViewAutoswitchingEnabled(bool v) { s_altViewAutoswitch = v; }
 void ATUISetAltViewEnabled(bool v) { s_altViewEnabled = v; }
-void ATUISetBootUnloadStorageMask(uint32) {}
+void ATUISetBootUnloadStorageMask(uint32 v) { s_bootUnloadStorageMask = v; }
 void ATUISetConstrainMouseFullScreen(bool v) {
 	s_constrainMouseFS = v;
 	extern SDL_Window *ATGetLinuxWindow();
@@ -242,15 +247,15 @@ void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
 void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
-void ATUISetEnhancedTextMode(ATUIEnhancedTextMode) {}
-void ATUISetFrameRateMode(ATFrameRateMode) {}
-void ATUISetFrameRateVSyncAdaptive(bool) {}
+void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) { s_enhancedTextMode = v; }
+void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; }
+void ATUISetFrameRateVSyncAdaptive(bool v) { s_frameRateVSyncAdaptive = v; }
 void ATUISetMenuAutoHideEnabled(bool v) { s_menuAutoHide = v; }
 void ATUISetMouseAutoCapture(bool v) { s_mouseAutoCapture = v; }
 void ATUISetPauseWhenInactive(bool v) { s_pauseWhenInactive = v; }
 void ATUISetPointerAutoHide(bool v) { s_pointerAutoHide = v; }
 void ATUISetRawInputEnabled(bool v) { s_rawInput = v; }
-void ATUISetResetFlags(uint32) {}
+void ATUISetResetFlags(uint32 v) { s_resetFlags = v; }
 void ATUISetShowFPS(bool v) { s_showFPS = v; }
 void ATUISetSpeedModifier(float v) {
 	s_speedModifier = v;
