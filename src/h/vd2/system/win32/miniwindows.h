@@ -109,6 +109,25 @@ typedef void			VDZPAINTSTRUCT;
 
 typedef unsigned short	VDZATOM;
 
+// Stub for Windows LOGFONTW struct (used by console font functions)
+struct tagLOGFONTW {
+	long lfHeight;
+	long lfWidth;
+	long lfEscapement;
+	long lfOrientation;
+	long lfWeight;
+	unsigned char lfItalic;
+	unsigned char lfUnderline;
+	unsigned char lfStrikeOut;
+	unsigned char lfCharSet;
+	unsigned char lfOutPrecision;
+	unsigned char lfClipPrecision;
+	unsigned char lfQuality;
+	unsigned char lfPitchAndFamily;
+	wchar_t lfFaceName[32];
+};
+typedef struct tagLOGFONTW LOGFONTW;
+
 #endif // VD_PLATFORM_WINDOWS
 
 #endif

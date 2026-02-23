@@ -496,7 +496,9 @@ void ATIDEVHDImage::InitNew(const wchar_t *path, uint8 heads, uint8 spt, uint32 
 		mDynamicHeader.mBlockSize = mBlockSize;
 
 		// if this is a differencing disk, set the parent information
+#ifdef VD_PLATFORM_WINDOWS
 		static_assert(sizeof(wchar_t) == 2);
+#endif
 		VDStringW parentAbsPath;
 		VDStringW parentRelPath;
 

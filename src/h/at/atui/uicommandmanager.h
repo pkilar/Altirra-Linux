@@ -28,6 +28,7 @@
 struct VDAccelToCommandEntry;
 class VDStringW;
 struct ATUICommand;
+class ATUICommandManager;
 
 enum ATUICmdState {
 	kATUICmdState_None,

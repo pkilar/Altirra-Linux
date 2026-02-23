@@ -51,7 +51,9 @@
 #include "uiconfirm.h"
 #include "uikeyboard.h"
 #include "uimenu.h"
+#ifdef VD_PLATFORM_WINDOWS
 #include "uiportmenus.h"
+#endif
 #include "uitypes.h"
 
 extern ATSimulator g_sim;
@@ -1744,7 +1746,9 @@ void ATExchangeSettings(bool write, ATSettingsCategory mask) {
 void ATLoadSettings(ATSettingsCategory mask) {
 	ATExchangeSettings(false, mask);
 
+#ifdef VD_PLATFORM_WINDOWS
 	ATReloadPortMenus();
+#endif
 	ATUIUpdateSpeedTiming();
 }
 

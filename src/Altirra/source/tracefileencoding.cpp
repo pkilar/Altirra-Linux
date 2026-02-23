@@ -158,7 +158,7 @@ void ATSavedTraceCodecSparse::Encode(ATSaveStateMemoryBuffer& dst, const uint8 *
 
 	if (VDCheckAllExtensionsEnabled(VDCPUF_SUPPORTS_POPCNT | CPUF_SUPPORTS_SSSE3)) {
 		if (rowSize == 24) {
-			[=, this, &codecData, &outputSize] VD_CPU_TARGET_LAMBDA("ssse3, popcnt") {
+			[=, this, &codecData, &outputSize] VD_CPU_TARGET_LAMBDA("ssse3,popcnt") {
 				uint8 *dst = codecData.data();
 				__m128i vzero = _mm_setzero_si128();
 
