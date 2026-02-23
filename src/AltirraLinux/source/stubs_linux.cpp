@@ -150,7 +150,8 @@ bool ATUIGetDrawPadBoundsEnabled() { return false; }
 bool ATUIGetDrawPadPointersEnabled() { return false; }
 bool ATUIGetMouseAutoCapture() { return false; }
 bool ATUIGetPauseWhenInactive() { return false; }
-bool ATUIGetPointerAutoHide() { return false; }
+static bool s_pointerAutoHide = true;
+bool ATUIGetPointerAutoHide() { return s_pointerAutoHide; }
 bool ATUIGetRawInputEnabled() { return false; }
 bool ATUIGetTargetPointerVisible() { return false; }
 bool ATUIGetFrameRateVSyncAdaptive() { return false; }
@@ -226,7 +227,7 @@ void ATUISetFrameRateVSyncAdaptive(bool) {}
 void ATUISetMenuAutoHideEnabled(bool) {}
 void ATUISetMouseAutoCapture(bool) {}
 void ATUISetPauseWhenInactive(bool) {}
-void ATUISetPointerAutoHide(bool) {}
+void ATUISetPointerAutoHide(bool v) { s_pointerAutoHide = v; }
 void ATUISetRawInputEnabled(bool) {}
 void ATUISetResetFlags(uint32) {}
 void ATUISetShowFPS(bool v) { s_showFPS = v; }

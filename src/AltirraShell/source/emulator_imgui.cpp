@@ -1201,6 +1201,12 @@ static void DrawMenuBar() {
 
 		ImGui::MenuItem("Status Bar", nullptr, &s_showStatusBar);
 
+		{
+			bool autoHide = ATUIGetPointerAutoHide();
+			if (ImGui::MenuItem("Auto-Hide Cursor", nullptr, &autoHide))
+				ATUISetPointerAutoHide(autoHide);
+		}
+
 		ImGui::EndMenu();
 	}
 

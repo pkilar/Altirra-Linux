@@ -101,6 +101,11 @@ void ATSetWindowSizeCallback(void (*pfn)(int, int));
 
 static bool g_running = true;
 
+// Mouse pointer auto-hide state
+static Uint32 g_lastMouseMoveTime = 0;
+static bool g_cursorHidden = false;
+static const Uint32 kCursorHideDelayMs = 3000;
+
 // Global accessor for the display backend — used by emulator_imgui.cpp
 ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
 
@@ -493,6 +498,15 @@ static void ProcessEvents(SDL_Window *window) {
 		if (g_pImGui)
 			g_pImGui->ProcessEvent(event);
 
+		// Track mouse movement for auto-hide cursor
+		if (event.type == SDL_MOUSEMOTION) {
+			g_lastMouseMoveTime = SDL_GetTicks();
+			if (g_cursorHidden) {
+				SDL_ShowCursor(SDL_ENABLE);
+				g_cursorHidden = false;
+			}
+		}
+
 		// F12 toggles debugger overlay
 		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F12) {
 			if (g_pImGui)
@@ -848,6 +862,16 @@ int main(int argc, char *argv[]) {
 	// Main loop
 	while (g_running) {
 		ProcessEvents(window);
+
+		// Auto-hide mouse cursor after idle period
+		if (ATUIGetPointerAutoHide() && !g_cursorHidden
+			&& !(g_pImGui && g_pImGui->IsVisible())) {
+			Uint32 now = SDL_GetTicks();
+			if (now - g_lastMouseMoveTime > kCursorHideDelayMs) {
+				SDL_ShowCursor(SDL_DISABLE);
+				g_cursorHidden = true;
+			}
+		}
 
 		// Check if quit was confirmed (after dirty disk dialog)
 		if (ATImGuiIsQuitConfirmed()) {
