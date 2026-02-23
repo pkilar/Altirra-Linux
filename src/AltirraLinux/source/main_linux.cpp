@@ -64,6 +64,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <csignal>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -100,7 +101,11 @@ void ATSetFullscreen(bool);
 // Window resize callback (defined in stubs_linux.cpp)
 void ATSetWindowSizeCallback(void (*pfn)(int, int));
 
-static bool g_running = true;
+static volatile sig_atomic_t g_running = 1;
+
+static void SignalHandler(int) {
+	g_running = 0;
+}
 
 // Mouse pointer auto-hide state
 static Uint32 g_lastMouseMoveTime = 0;
@@ -797,6 +802,10 @@ int main(int argc, char *argv[]) {
 
 	// Detect CPU features (SSE2, AVX, etc.)
 	CPUCheckForExtensions();
+
+	// Install signal handlers for graceful shutdown
+	signal(SIGINT, SignalHandler);
+	signal(SIGTERM, SignalHandler);
 
 	// Init registry (in-memory, backed by INI file)
 	g_pRegistryMemory = new VDRegistryProviderMemory;
