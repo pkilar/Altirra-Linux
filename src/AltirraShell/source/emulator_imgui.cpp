@@ -2402,24 +2402,35 @@ static void DrawInputSetup() {
 				}
 				ImGui::SameLine();
 
-				// Selectable row
+				// Build inline summary of controller types and ports
+				char portInfo[128] = "";
+				{
+					uint32 ctrlCount = imap->GetControllerCount();
+					int pos = 0;
+					for (uint32 c = 0; c < ctrlCount && pos < 100; ++c) {
+						const ATInputMap::Controller& ctrl = imap->GetController(c);
+						if (c > 0)
+							pos += snprintf(portInfo + pos, sizeof(portInfo) - pos, ", ");
+						pos += snprintf(portInfo + pos, sizeof(portInfo) - pos, "%s P%u",
+							ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+					}
+				}
+
+				// Selectable row with port info
 				bool selected = (s_selectedMapIdx == (int)i);
-				if (ImGui::Selectable(u8name.c_str(), selected)) {
+				char label[256];
+				snprintf(label, sizeof(label), "%-30s  %s", u8name.c_str(), portInfo);
+				if (ImGui::Selectable(label, selected)) {
 					s_selectedMapIdx = (int)i;
 				}
 
-				// Tooltip with map details on hover
+				// Tooltip with full map details on hover
 				if (ImGui::IsItemHovered()) {
 					ImGui::BeginTooltip();
-					uint32 ctrlCount = imap->GetControllerCount();
-					for (uint32 c = 0; c < ctrlCount; ++c) {
-						const ATInputMap::Controller& ctrl = imap->GetController(c);
-						ImGui::Text("  %s (port %u)", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
-					}
 					uint32 mappingCount = imap->GetMappingCount();
-					ImGui::Text("  %u mapping(s)", mappingCount);
+					ImGui::Text("%u mapping(s)", mappingCount);
 					if (imap->IsQuickMap())
-						ImGui::Text("  [Quick Map]");
+						ImGui::Text("[Quick Map]");
 					ImGui::EndTooltip();
 				}
 
