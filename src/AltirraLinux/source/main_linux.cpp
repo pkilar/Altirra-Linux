@@ -47,6 +47,8 @@
 #include "diskinterface.h"
 #include "cassette.h"
 #include "cartridge.h"
+#include "inputmanager.h"
+#include "inputmap.h"
 
 #include <display_sdl2.h>
 #include <input_sdl2.h>
@@ -400,6 +402,25 @@ static void HandleShortcuts(const SDL_Event& event) {
 			return;
 		}
 
+		// Shift+F1: cycle quick maps
+		case SDL_SCANCODE_F1: {
+			if ((event.key.keysym.mod & KMOD_SHIFT) != 0) {
+				ATInputManager *inputMgr = g_sim.GetInputManager();
+				if (inputMgr) {
+					ATInputMap *pMap = inputMgr->CycleQuickMaps();
+					if (pMap) {
+						VDStringA name = VDTextWToU8(VDStringW(pMap->GetName()));
+						char msg[128];
+						snprintf(msg, sizeof(msg), "Quick map: %s", name.c_str());
+						ATImGuiShowToast(msg);
+					} else {
+						ATImGuiShowToast("Quick maps disabled");
+					}
+				}
+			}
+			return;
+		}
+
 		// Pause key: toggle emulation pause
 		case SDL_SCANCODE_PAUSE: {
 			if (g_sim.IsPaused())
@@ -461,9 +482,10 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F6/F7/F8/F9/Pause always active (reset/save/load/screenshot/pause)
+		// F1/F6/F7/F8/F9/Pause always active (quick maps/reset/save/load/screenshot/pause)
 		if (event.type == SDL_KEYDOWN) {
-			if (event.key.keysym.scancode == SDL_SCANCODE_F6
+			if (event.key.keysym.scancode == SDL_SCANCODE_F1
+				|| event.key.keysym.scancode == SDL_SCANCODE_F6
 				|| event.key.keysym.scancode == SDL_SCANCODE_F7
 				|| event.key.keysym.scancode == SDL_SCANCODE_F8
 				|| event.key.keysym.scancode == SDL_SCANCODE_F9

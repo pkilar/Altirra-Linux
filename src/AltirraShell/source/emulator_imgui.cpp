@@ -557,6 +557,20 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Input Setup...")) {
 			s_showInputSetup = true;
 		}
+		if (ImGui::MenuItem("Cycle Quick Maps", "Shift+F1")) {
+			ATInputManager *inputMgr = g_sim.GetInputManager();
+			if (inputMgr) {
+				ATInputMap *pMap = inputMgr->CycleQuickMaps();
+				if (pMap) {
+					VDStringA name = VDTextWToU8(VDStringW(pMap->GetName()));
+					char msg[128];
+					snprintf(msg, sizeof(msg), "Quick map: %s", name.c_str());
+					ShowToast(msg);
+				} else {
+					ShowToast("Quick maps disabled");
+				}
+			}
+		}
 		if (ImGui::MenuItem("Devices...")) {
 			s_showDeviceManager = true;
 		}
@@ -1341,6 +1355,7 @@ static void DrawShortcuts() {
 			ImGui::TextUnformatted(action);
 		};
 
+		row("Shift+F1", "Cycle Quick Maps");
 		row("F5", "Break / Run (debugger)");
 		row("F6", "Warm Reset");
 		row("Shift+F6", "Cold Reset");
