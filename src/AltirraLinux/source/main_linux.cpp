@@ -663,6 +663,20 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	// Apply display settings that were loaded before the display was created.
+	// Settings load runs ATUISet* stubs which store values but can't update
+	// the display (not created yet). Re-apply them now.
+	{
+		extern ATDisplayFilterMode ATUIGetDisplayFilterMode();
+		extern ATDisplayStretchMode ATUIGetDisplayStretchMode();
+		ATDisplayFilterMode fm = ATUIGetDisplayFilterMode();
+		g_pDisplay->SetFilterMode(
+			fm == kATDisplayFilterMode_Point
+				? IVDVideoDisplay::kFilterPoint
+				: IVDVideoDisplay::kFilterBilinear);
+		g_pDisplay->SetStretchMode(ATUIGetDisplayStretchMode());
+	}
+
 	fprintf(stderr, "Display backend initialized\n");
 
 	// Init ImGui
