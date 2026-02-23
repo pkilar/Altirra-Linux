@@ -558,13 +558,25 @@ static void DrawBreakpoints() {
 	ImGui::End();
 }
 
+// ============= Visibility accessors =============
+
+bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
+bool& ATImGuiDebuggerShowDisassembly() { return s_showDisassembly; }
+bool& ATImGuiDebuggerShowMemory() { return s_showMemory; }
+bool& ATImGuiDebuggerShowConsole() { return s_showConsole; }
+bool& ATImGuiDebuggerShowBreakpoints() { return s_showBreakpoints; }
+
 // ============= Main Draw =============
 
-void ATImGuiDebuggerDraw() {
-	DrawToolbar();
+void ATImGuiDebuggerDrawWindows() {
 	DrawRegisters();
 	DrawDisassembly();
 	DrawMemory();
 	DrawConsole();
 	DrawBreakpoints();
+}
+
+void ATImGuiDebuggerDraw() {
+	DrawToolbar();
+	ATImGuiDebuggerDrawWindows();
 }

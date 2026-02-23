@@ -9,6 +9,8 @@ set(ALTIRRASHELL_SOURCES
 	source/joystick_sdl2.cpp
 	source/imgui_manager.cpp
 	source/debugger_imgui.cpp
+	source/emulator_imgui.cpp
+	source/filedialog_linux.cpp
 )
 
 add_library(altirrashell STATIC ${ALTIRRASHELL_SOURCES})
@@ -28,6 +30,7 @@ target_link_libraries(altirrashell
 		atcore
 		atdebugger
 		ataudio
+		atio
 		SDL2::SDL2
 		OpenGL::GL
 		imgui

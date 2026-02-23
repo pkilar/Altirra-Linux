@@ -123,7 +123,7 @@ ATUIQueue& ATUIGetQueue() {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 4. ATUI accessor getters (bool)
+// 4. ATUI accessor getters (bool) — simple stubs
 ///////////////////////////////////////////////////////////////////////////
 
 bool ATUIGetAltViewAutoswitchingEnabled() { return false; }
@@ -133,17 +133,27 @@ bool ATUIGetDisplayIndicators() { return false; }
 bool ATUIGetDisplayPadIndicators() { return false; }
 bool ATUIGetDrawPadBoundsEnabled() { return false; }
 bool ATUIGetDrawPadPointersEnabled() { return false; }
-bool ATUIGetFullscreen() { return false; }
 bool ATUIGetMouseAutoCapture() { return false; }
 bool ATUIGetPauseWhenInactive() { return false; }
 bool ATUIGetPointerAutoHide() { return false; }
 bool ATUIGetRawInputEnabled() { return false; }
-bool ATUIGetShowFPS() { return false; }
 bool ATUIGetTargetPointerVisible() { return false; }
-bool ATUIGetTurbo() { return false; }
 bool ATUIGetFrameRateVSyncAdaptive() { return false; }
 bool ATUIIsMenuAutoHideEnabled() { return false; }
 bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
+
+///////////////////////////////////////////////////////////////////////////
+// 4b. ATUI accessor getters (bool) — backed by static variables
+//     These are read/written by the ImGui emulator UI.
+///////////////////////////////////////////////////////////////////////////
+
+static bool s_showFPS = false;
+static bool s_turbo = false;
+static bool s_fullscreen = false;
+
+bool ATUIGetShowFPS() { return s_showFPS; }
+bool ATUIGetTurbo() { return s_turbo; }
+bool ATUIGetFullscreen() { return s_fullscreen; }
 
 ///////////////////////////////////////////////////////////////////////////
 // 5. ATUI accessor getters (numeric / enum / string / pointer)
@@ -152,13 +162,16 @@ bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 uint32 ATUIGetBootUnloadStorageMask() { return 0; }
 uint32 ATUIGetResetFlags() { return 0; }
 
-ATDisplayFilterMode ATUIGetDisplayFilterMode() { return (ATDisplayFilterMode)0; }
+static ATDisplayFilterMode s_displayFilterMode = (ATDisplayFilterMode)0;
+static float s_speedModifier = 1.0f;
+
+ATDisplayFilterMode ATUIGetDisplayFilterMode() { return s_displayFilterMode; }
 ATDisplayStretchMode ATUIGetDisplayStretchMode() { return (ATDisplayStretchMode)0; }
 ATFrameRateMode ATUIGetFrameRateMode() { return (ATFrameRateMode)0; }
 ATUIEnhancedTextMode ATUIGetEnhancedTextMode() { return kATUIEnhancedTextMode_None; }
 
 float ATUIGetDisplayZoom() { return 1.0f; }
-float ATUIGetSpeedModifier() { return 1.0f; }
+float ATUIGetSpeedModifier() { return s_speedModifier; }
 int ATUIGetViewFilterSharpness() { return 0; }
 
 vdfloat2 ATUIGetDisplayPanOffset() { return vdfloat2{0, 0}; }
@@ -169,7 +182,7 @@ const char *ATUIGetWindowCaptionTemplate() { return ""; }
 VDGUIHandle ATUIGetNewPopupOwner() { return nullptr; }
 
 ///////////////////////////////////////////////////////////////////////////
-// 6. ATUI accessor setters (void, no-op)
+// 6. ATUI accessor setters
 ///////////////////////////////////////////////////////////////////////////
 
 void ATUISetAltViewAutoswitchingEnabled(bool) {}
@@ -177,7 +190,7 @@ void ATUISetAltViewEnabled(bool) {}
 void ATUISetBootUnloadStorageMask(uint32) {}
 void ATUISetConstrainMouseFullScreen(bool) {}
 void ATUISetCurrentAltOutputName(const char *) {}
-void ATUISetDisplayFilterMode(ATDisplayFilterMode) {}
+void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; }
 void ATUISetDisplayIndicators(bool) {}
 void ATUISetDisplayPadIndicators(bool) {}
 void ATUISetDisplayPanOffset(const vdfloat2&) {}
@@ -194,10 +207,10 @@ void ATUISetPauseWhenInactive(bool) {}
 void ATUISetPointerAutoHide(bool) {}
 void ATUISetRawInputEnabled(bool) {}
 void ATUISetResetFlags(uint32) {}
-void ATUISetShowFPS(bool) {}
-void ATUISetSpeedModifier(float) {}
+void ATUISetShowFPS(bool v) { s_showFPS = v; }
+void ATUISetSpeedModifier(float v) { s_speedModifier = v; }
 void ATUISetTargetPointerVisible(bool) {}
-void ATUISetTurbo(bool) {}
+void ATUISetTurbo(bool v) { s_turbo = v; }
 void ATUISetViewFilterSharpness(int) {}
 void ATUISetWindowCaptionTemplate(const char *) {}
 
@@ -213,7 +226,19 @@ void ATUISetCustomKeyMap(const uint32 *, size_t) {}
 // 8. ATUI miscellaneous functions
 ///////////////////////////////////////////////////////////////////////////
 
-void ATSetFullscreen(bool) {}
+// ATSetFullscreen is implemented via a callback from main_linux.cpp
+// so that SDL_Window* doesn't need to be exposed globally.
+static void (*s_pfnSetFullscreen)(bool) = nullptr;
+
+void ATSetFullscreenCallback(void (*pfn)(bool)) {
+	s_pfnSetFullscreen = pfn;
+}
+
+void ATSetFullscreen(bool fs) {
+	s_fullscreen = fs;
+	if (s_pfnSetFullscreen)
+		s_pfnSetFullscreen(fs);
+}
 void ATUIResizeDisplay() {}
 void ATUIUpdateSpeedTiming() {}
 void ATSyncCPUHistoryState() {}

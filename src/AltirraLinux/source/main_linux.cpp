@@ -43,6 +43,7 @@
 #include <input_sdl2.h>
 #include <imgui_manager.h>
 #include <debugger_imgui.h>
+#include <emulator_imgui.h>
 
 #include <SDL.h>
 #include <GL/gl.h>
@@ -78,7 +79,18 @@ ATImGuiManager *g_pImGui = nullptr;
 // Joystick manager factory (defined in joystick_sdl2.cpp)
 IATJoystickManager *ATCreateJoystickManagerSDL2();
 
+// Fullscreen callback (defined in stubs_linux.cpp)
+void ATSetFullscreenCallback(void (*pfn)(bool));
+
 static bool g_running = true;
+
+// SDL window pointer for fullscreen toggle callback
+static SDL_Window *g_pWindow = nullptr;
+
+static void SetFullscreenImpl(bool fs) {
+	if (g_pWindow)
+		SDL_SetWindowFullscreen(g_pWindow, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
 
 // Settings path (used at init and shutdown)
 static VDStringW g_settingsPath;
@@ -372,7 +384,7 @@ static void RenderAndSwap(SDL_Window *window) {
 	// Render ImGui overlay on top
 	if (g_pImGui && g_pImGui->IsVisible()) {
 		g_pImGui->NewFrame();
-		ATImGuiDebuggerDraw();
+		ATImGuiEmulatorDraw();
 		g_pImGui->Render();
 	}
 
@@ -456,6 +468,10 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	// Store window pointer and register fullscreen callback
+	g_pWindow = window;
+	ATSetFullscreenCallback(SetFullscreenImpl);
+
 	fprintf(stderr, "SDL2/OpenGL initialized\n");
 
 	// Init display backend
@@ -474,7 +490,7 @@ int main(int argc, char *argv[]) {
 		delete g_pImGui;
 		g_pImGui = nullptr;
 	} else {
-		fprintf(stderr, "ImGui initialized (F12 to toggle debugger)\n");
+		fprintf(stderr, "ImGui initialized (F12 to toggle overlay)\n");
 	}
 
 	// Init simulator
@@ -486,6 +502,7 @@ int main(int argc, char *argv[]) {
 	// Init debugger (must be after sim init)
 	ATInitDebugger();
 	ATImGuiDebuggerInit();
+	ATImGuiEmulatorInit();
 	fprintf(stderr, "Debugger initialized\n");
 
 	// Connect display to GTIA
@@ -591,7 +608,8 @@ int main(int argc, char *argv[]) {
 		g_pInput = nullptr;
 	}
 
-	// Shutdown debugger
+	// Shutdown debugger and emulator UI
+	ATImGuiEmulatorShutdown();
 	ATImGuiDebuggerShutdown();
 	ATShutdownDebugger();
 
