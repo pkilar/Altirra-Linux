@@ -848,6 +848,26 @@ static void DrawMenuBar() {
 
 			ImGui::Separator();
 
+			bool hasDirty = false;
+			for (int i = 0; i < 15 && !hasDirty; ++i) {
+				ATDiskInterface& di = g_sim.GetDiskInterface(i);
+				if (di.IsDiskLoaded() && di.IsDirty())
+					hasDirty = true;
+			}
+
+			if (ImGui::MenuItem("Save All Modified", nullptr, false, hasDirty)) {
+				int saved = 0;
+				for (int i = 0; i < 15; ++i) {
+					ATDiskInterface& di = g_sim.GetDiskInterface(i);
+					if (di.IsDiskLoaded() && di.IsDirty()) {
+						try { di.SaveDisk(); ++saved; } catch (...) {}
+					}
+				}
+				char msg[64];
+				snprintf(msg, sizeof(msg), "Saved %d disk(s)", saved);
+				ShowToast(msg);
+			}
+
 			if (ImGui::MenuItem("Unmount All", nullptr, false, activeDrives >= 1)) {
 				for (int i = 0; i < 15; ++i)
 					g_sim.GetDiskInterface(i).UnloadDisk();
