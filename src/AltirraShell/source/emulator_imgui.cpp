@@ -590,6 +590,30 @@ static void DrawMenuBar() {
 			g_sim.WarmReset();
 		}
 
+		if (ImGui::BeginMenu("Console Switches")) {
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			uint8 consw = gtia.ReadConsoleSwitchInputs();
+
+			// Console switch inputs are active-low: bit=0 means pressed
+			bool optionDown = !(consw & 0x04);
+			bool selectDown = !(consw & 0x02);
+			bool startDown  = !(consw & 0x01);
+
+			if (ImGui::MenuItem("Option", nullptr, optionDown))
+				gtia.SetConsoleSwitch(0x04, !optionDown);
+			if (ImGui::MenuItem("Select", nullptr, selectDown))
+				gtia.SetConsoleSwitch(0x02, !selectDown);
+			if (ImGui::MenuItem("Start", nullptr, startDown))
+				gtia.SetConsoleSwitch(0x01, !startDown);
+
+			ImGui::Separator();
+			if (ImGui::MenuItem("Release All")) {
+				gtia.SetConsoleSwitch(0x07, false);
+			}
+
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
 
 		{
