@@ -53,6 +53,7 @@
 #include "display_sdl2.h"
 
 #include <algorithm>
+#include <cerrno>
 #include <mutex>
 #include <string>
 #include <utility>
@@ -80,6 +81,7 @@
 #include "modemtcp.h"
 #include "customdevice_win32.h"
 #include "trace.h"
+#include <at/atcore/cio.h>
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -510,11 +512,36 @@ void ATRegisterDeviceConfigurers(ATDeviceManager&) {}
 // 10. Win32-to-SIO error translation (PCLink)
 ///////////////////////////////////////////////////////////////////////////
 
-uint8 ATTranslateWin32ErrorToSIOError(uint32) {
-	// Return a generic SIO error. On Linux this should not be called with
-	// Win32 error codes; a proper Linux implementation should translate
-	// errno values instead.
-	return 0xFF;
+uint8 ATTranslateWin32ErrorToSIOError(uint32 err) {
+	// On Linux, VDWin32Exception stores errno values (not Win32 error codes).
+	// Translate errno to Atari CIO status codes for PCLink/host device.
+	switch (err) {
+		case ENOENT:
+			return kATCIOStat_FileNotFound;
+
+		case ENOTDIR:
+			return kATCIOStat_PathNotFound;
+
+		case EEXIST:
+			return kATCIOStat_FileExists;
+
+		case ENOSPC:
+			return kATCIOStat_DiskFull;
+
+		case ENOTEMPTY:
+			return kATCIOStat_DirNotEmpty;
+
+		case EACCES:
+		case EPERM:
+			return kATCIOStat_AccessDenied;
+
+		case EAGAIN:
+		case EBUSY:
+			return kATCIOStat_FileLocked;
+
+		default:
+			return kATCIOStat_SystemError;
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////
