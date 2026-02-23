@@ -23,4 +23,8 @@ void ATImGuiShowToast(const char *message);
 // Paste clipboard text to emulator via POKEY
 void ATImGuiPasteText();
 
+// Open/Boot image via file dialog
+void ATImGuiOpenImage();
+void ATImGuiBootImage();
+
 #endif

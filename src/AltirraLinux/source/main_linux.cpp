@@ -534,6 +534,16 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 			}
 
+			// Ctrl+O = open image, Ctrl+Shift+O = boot image
+			if (event.key.keysym.scancode == SDL_SCANCODE_O
+				&& (event.key.keysym.mod & KMOD_CTRL)) {
+				if (event.key.keysym.mod & KMOD_SHIFT)
+					ATImGuiBootImage();
+				else
+					ATImGuiOpenImage();
+				continue;
+			}
+
 			// Ctrl+S = save settings
 			if (event.key.keysym.scancode == SDL_SCANCODE_S
 				&& (event.key.keysym.mod & KMOD_CTRL)) {

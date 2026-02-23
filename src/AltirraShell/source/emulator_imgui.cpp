@@ -764,7 +764,7 @@ static void DrawMenuBar() {
 
 	// --- File menu ---
 	if (ImGui::BeginMenu("File")) {
-		if (ImGui::MenuItem("Open Image...")) {
+		if (ImGui::MenuItem("Open Image...", "Ctrl+O")) {
 			VDStringW path = ATLinuxOpenFileDialog("Open Image", kDiskFilters);
 			if (!path.empty()) {
 				TryLoadImage(path);
@@ -773,7 +773,7 @@ static void DrawMenuBar() {
 			}
 		}
 
-		if (ImGui::MenuItem("Boot Image...")) {
+		if (ImGui::MenuItem("Boot Image...", "Ctrl+Shift+O")) {
 			VDStringW path = ATLinuxOpenFileDialog("Boot Image", kDiskFilters);
 			if (!path.empty()) {
 				try {
@@ -1619,6 +1619,8 @@ static void DrawShortcuts() {
 		row("Shift+F11", "Step Out (debugger)");
 		row("F12", "Toggle Overlay");
 		row("Pause", "Pause / Resume");
+		row("Ctrl+O", "Open Image");
+		row("Ctrl+Shift+O", "Boot Image");
 		row("Ctrl+V", "Paste Text");
 		row("Ctrl+S", "Save Settings");
 		row("Ctrl+Q", "Quit");
@@ -3586,6 +3588,30 @@ void ATImGuiShowToast(const char *message) {
 
 void ATImGuiPasteText() {
 	PasteTextToEmulator();
+}
+
+void ATImGuiOpenImage() {
+	VDStringW path = ATLinuxOpenFileDialog("Open Image", kDiskFilters);
+	if (!path.empty())
+		TryLoadImage(path);
+}
+
+void ATImGuiBootImage() {
+	VDStringW path = ATLinuxOpenFileDialog("Boot Image", kDiskFilters);
+	if (!path.empty()) {
+		try {
+			g_sim.UnloadAll();
+			g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+			g_sim.ColdReset();
+			MRUAdd(path.c_str());
+			VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
+			char msg[256];
+			snprintf(msg, sizeof(msg), "Booted: %s", fname.c_str());
+			ShowToast(msg);
+		} catch (...) {
+			ShowToast("Failed to boot image");
+		}
+	}
 }
 
 static double s_startTime = 0;
