@@ -676,6 +676,10 @@ static void ProcessEvents(SDL_Window *window) {
 						const char *fname = strrchr(dropped, '/');
 						snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : dropped);
 						ATImGuiShowToast(msg);
+					} catch (const std::exception& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Drop failed: %s", e.what());
+						ATImGuiShowToast(msg);
 					} catch (...) {
 						ATImGuiShowToast("Failed to load dropped file");
 					}
