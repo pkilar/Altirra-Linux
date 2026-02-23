@@ -30,11 +30,14 @@
 
 #include <at/atcore/device.h>
 #include <at/atcore/asyncdispatcher.h>
+#include <at/atcore/media.h>
 #include <at/ataudio/audiooutput.h>
 
 #include "simulator.h"
 #include "joystick.h"
 #include "debugger.h"
+#include "settings.h"
+#include "firmwaremanager.h"
 
 #include <display_sdl2.h>
 #include <input_sdl2.h>
@@ -47,10 +50,18 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <getopt.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <unistd.h>
 
 // Forward declarations from debugger.cpp
 void ATInitDebugger();
 void ATShutdownDebugger();
+
+// Forward declarations from uiregistry.cpp
+void ATUILoadRegistry(const wchar_t *path);
+void ATUISaveRegistry(const wchar_t *fnpath);
 
 // Global simulator instance — matches Windows main.cpp
 ATSimulator g_sim;
@@ -69,14 +80,172 @@ IATJoystickManager *ATCreateJoystickManagerSDL2();
 
 static bool g_running = true;
 
-static void InitRegistry() {
-	// Use in-memory registry for now.
-	// Phase 8 will add JSON-backed persistent settings.
-	VDRegistryProviderMemory *pMem = new VDRegistryProviderMemory;
-	VDSetRegistryProvider(pMem);
+// Settings path (used at init and shutdown)
+static VDStringW g_settingsPath;
+
+// Registry provider (owned, freed at shutdown)
+static VDRegistryProviderMemory *g_pRegistryMemory = nullptr;
+
+///////////////////////////////////////////////////////////////////////////
+// Settings path helpers
+///////////////////////////////////////////////////////////////////////////
+
+static void EnsureDirectoryExists(const VDStringW& path) {
+	VDStringA u8 = VDTextWToU8(path);
+	struct stat st;
+	if (stat(u8.c_str(), &st) != 0) {
+		mkdir(u8.c_str(), 0755);
+	}
 }
 
-static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext) {
+static VDStringW ATGetLinuxConfigDir() {
+	const char *xdgConfig = getenv("XDG_CONFIG_HOME");
+	VDStringW configDir;
+
+	if (xdgConfig && xdgConfig[0]) {
+		configDir = VDTextU8ToW(VDStringA(xdgConfig));
+	} else {
+		const char *home = getenv("HOME");
+		if (!home)
+			home = "/tmp";
+		VDStringW homeW = VDTextU8ToW(VDStringA(home));
+		configDir = VDMakePath(homeW.c_str(), L".config");
+	}
+
+	VDStringW altirraDir = VDMakePath(configDir.c_str(), L"altirra");
+	EnsureDirectoryExists(configDir);
+	EnsureDirectoryExists(altirraDir);
+	return altirraDir;
+}
+
+static VDStringW ATGetLinuxSettingsPath() {
+	return VDMakePath(ATGetLinuxConfigDir().c_str(), L"Altirra.ini");
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Firmware path scanning
+///////////////////////////////////////////////////////////////////////////
+
+static void ATScanLinuxFirmwarePaths(const VDStringW& configDir) {
+	// Build list of firmware search directories:
+	// 1. ~/.config/altirra/firmware/
+	// 2. <program-dir>/firmware/
+	// 3. /usr/share/altirra/firmware/
+	// 4. /usr/local/share/altirra/firmware/
+
+	VDStringW paths[4];
+	paths[0] = VDMakePath(configDir.c_str(), L"firmware");
+	paths[1] = VDMakePath(VDGetProgramPath().c_str(), L"firmware");
+	paths[2] = VDStringW(L"/usr/share/altirra/firmware");
+	paths[3] = VDStringW(L"/usr/local/share/altirra/firmware");
+
+	// Ensure user firmware directory exists
+	EnsureDirectoryExists(paths[0]);
+
+	// Set the primary firmware path in registry so the firmware manager
+	// can resolve relative paths. Use the user config firmware dir.
+	{
+		VDRegistryAppKey key("Firmware", true);
+		VDStringA u8path = VDTextWToU8(paths[0]);
+		key.setString("Firmware base path", paths[0].c_str());
+	}
+
+	// Log discovered firmware directories
+	for (int i = 0; i < 4; ++i) {
+		VDStringA u8 = VDTextWToU8(paths[i]);
+		struct stat st;
+		if (stat(u8.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
+			fprintf(stderr, "Firmware search path: %s\n", u8.c_str());
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// CLI argument parsing
+///////////////////////////////////////////////////////////////////////////
+
+struct ATLinuxOptions {
+	bool portable = false;
+	bool fullscreen = false;
+	bool showHelp = false;
+	bool showVersion = false;
+	VDStringW configPath;
+	VDStringW romPath;
+	VDStringW imagePath;
+};
+
+static void PrintUsage(const char *progname) {
+	fprintf(stderr,
+		"Usage: %s [options] [file]\n"
+		"\n"
+		"Options:\n"
+		"  <file>              Load disk/cart/tape image\n"
+		"  --portable          Use settings from program directory\n"
+		"  --config <path>     Use alternate settings file\n"
+		"  --rom-path <path>   Add firmware ROM search path\n"
+		"  --fullscreen        Start in fullscreen mode\n"
+		"  --help              Show this help\n"
+		"  --version           Show version\n",
+		progname
+	);
+}
+
+static void PrintVersion() {
+	fprintf(stderr, "Altirra (Linux port) 4.40\n");
+}
+
+static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
+	ATLinuxOptions opts;
+
+	static const struct option long_options[] = {
+		{"portable",    no_argument,       nullptr, 'p'},
+		{"config",      required_argument, nullptr, 'c'},
+		{"rom-path",    required_argument, nullptr, 'r'},
+		{"fullscreen",  no_argument,       nullptr, 'f'},
+		{"help",        no_argument,       nullptr, 'h'},
+		{"version",     no_argument,       nullptr, 'v'},
+		{nullptr, 0, nullptr, 0}
+	};
+
+	int opt;
+	while ((opt = getopt_long(argc, argv, "pc:r:fhv", long_options, nullptr)) != -1) {
+		switch (opt) {
+			case 'p':
+				opts.portable = true;
+				break;
+			case 'c':
+				opts.configPath = VDTextU8ToW(VDStringA(optarg));
+				break;
+			case 'r':
+				opts.romPath = VDTextU8ToW(VDStringA(optarg));
+				break;
+			case 'f':
+				opts.fullscreen = true;
+				break;
+			case 'h':
+				opts.showHelp = true;
+				break;
+			case 'v':
+				opts.showVersion = true;
+				break;
+			default:
+				break;
+		}
+	}
+
+	// Remaining non-option argument is the image file
+	if (optind < argc) {
+		opts.imagePath = VDTextU8ToW(VDStringA(argv[optind]));
+	}
+
+	return opts;
+}
+
+///////////////////////////////////////////////////////////////////////////
+// SDL init
+///////////////////////////////////////////////////////////////////////////
+
+static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscreen) {
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) < 0) {
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
 		return false;
@@ -86,12 +255,16 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext) {
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
+	uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN;
+	if (fullscreen)
+		windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+
 	window = SDL_CreateWindow(
 		"Altirra (Linux)",
 		SDL_WINDOWPOS_CENTERED,
 		SDL_WINDOWPOS_CENTERED,
 		912, 524,		// 2x NTSC resolution (456x262)
-		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN
+		windowFlags
 	);
 
 	if (!window) {
@@ -110,6 +283,10 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext) {
 
 	return true;
 }
+
+///////////////////////////////////////////////////////////////////////////
+// Event handling
+///////////////////////////////////////////////////////////////////////////
 
 static void HandleDebugShortcuts(const SDL_Event& event) {
 	if (event.type != SDL_KEYDOWN)
@@ -203,20 +380,78 @@ static void RenderAndSwap(SDL_Window *window) {
 	SDL_GL_SwapWindow(window);
 }
 
+///////////////////////////////////////////////////////////////////////////
+// Main
+///////////////////////////////////////////////////////////////////////////
+
 int main(int argc, char *argv[]) {
+	// Parse command-line arguments
+	ATLinuxOptions opts = ParseArguments(argc, argv);
+
+	if (opts.showHelp) {
+		PrintUsage(argv[0]);
+		return 0;
+	}
+
+	if (opts.showVersion) {
+		PrintVersion();
+		return 0;
+	}
+
 	fprintf(stderr, "Altirra Linux - starting up\n");
 
 	// Detect CPU features (SSE2, AVX, etc.)
 	CPUCheckForExtensions();
 
-	// Init registry (in-memory for now)
-	InitRegistry();
+	// Init registry (in-memory, backed by INI file)
+	g_pRegistryMemory = new VDRegistryProviderMemory;
+	VDSetRegistryProvider(g_pRegistryMemory);
+	VDRegistryAppKey::setDefaultKey("Software\\virtualdub.org\\Altirra\\");
+
+	// Always use portable mode on Linux (INI file instead of Windows registry)
+	ATSettingsSetInPortableMode(true);
+	ATSetFirmwarePathPortabilityMode(true);
+
+	// Determine settings file path
+	if (!opts.configPath.empty()) {
+		g_settingsPath = opts.configPath;
+	} else if (opts.portable) {
+		g_settingsPath = VDMakePath(VDGetProgramPath().c_str(), L"Altirra.ini");
+	} else {
+		g_settingsPath = ATGetLinuxSettingsPath();
+	}
+
+	// Load existing settings from INI file
+	if (VDDoesPathExist(g_settingsPath.c_str())) {
+		try {
+			ATUILoadRegistry(g_settingsPath.c_str());
+			fprintf(stderr, "Settings loaded from %s\n", VDTextWToU8(g_settingsPath).c_str());
+		} catch (...) {
+			fprintf(stderr, "Warning: Failed to load settings file, using defaults\n");
+		}
+	} else {
+		fprintf(stderr, "No settings file found, using defaults\n");
+	}
+
+	// Set up firmware search paths
+	VDStringW configDir = ATGetLinuxConfigDir();
+	ATScanLinuxFirmwarePaths(configDir);
+
+	// Add user-specified ROM path
+	if (!opts.romPath.empty()) {
+		VDStringA u8 = VDTextWToU8(opts.romPath);
+		fprintf(stderr, "Additional ROM path: %s\n", u8.c_str());
+	}
+
+	// Load profiles and last-used settings
+	ATLoadDefaultProfiles();
+	ATSettingsLoadLastProfile(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
 
 	// Init SDL2
 	SDL_Window *window = nullptr;
 	SDL_GLContext glContext = nullptr;
 
-	if (!InitSDL(window, glContext)) {
+	if (!InitSDL(window, glContext, opts.fullscreen)) {
 		fprintf(stderr, "Failed to initialize SDL2/OpenGL\n");
 		return 1;
 	}
@@ -285,6 +520,16 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Warning: ROM loading failed, will use HLE kernel\n");
 	}
 
+	// Load image from command line if specified
+	if (!opts.imagePath.empty()) {
+		try {
+			g_sim.Load(opts.imagePath.c_str(), kATMediaWriteMode_RO, nullptr);
+			fprintf(stderr, "Loaded image: %s\n", VDTextWToU8(opts.imagePath).c_str());
+		} catch (...) {
+			fprintf(stderr, "Warning: Failed to load image: %s\n", VDTextWToU8(opts.imagePath).c_str());
+		}
+	}
+
 	// Cold reset and start emulation
 	g_sim.ColdReset();
 	g_sim.Resume();
@@ -317,6 +562,16 @@ int main(int argc, char *argv[]) {
 	}
 
 	fprintf(stderr, "Shutting down...\n");
+
+	// Save settings before shutdown
+	ATSaveSettings(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
+
+	try {
+		ATUISaveRegistry(g_settingsPath.c_str());
+		fprintf(stderr, "Settings saved to %s\n", VDTextWToU8(g_settingsPath).c_str());
+	} catch (...) {
+		fprintf(stderr, "Warning: Failed to save settings\n");
+	}
 
 	// Disconnect display from GTIA before destroying it
 	g_sim.GetGTIA().SetVideoOutput(nullptr);
@@ -361,6 +616,11 @@ int main(int argc, char *argv[]) {
 	SDL_GL_DeleteContext(glContext);
 	SDL_DestroyWindow(window);
 	SDL_Quit();
+
+	// Cleanup registry provider
+	VDSetRegistryProvider(nullptr);
+	delete g_pRegistryMemory;
+	g_pRegistryMemory = nullptr;
 
 	fprintf(stderr, "Shutdown complete\n");
 	return 0;

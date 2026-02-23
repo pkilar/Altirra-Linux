@@ -18,6 +18,7 @@
 #include <stdafx.h>
 #include <oshelper.h>
 #include <vd2/system/vdtypes.h>
+#include <vd2/system/filesys.h>
 #include <at/atcore/enumparseimpl.h>
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
@@ -29,6 +30,9 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/wait.h>
+
+#include <SDL.h>
 
 // Resource loading — on Linux, kernel ROMs are not embedded as Win32 resources.
 // The firmware manager handles loading from external files.
@@ -64,14 +68,18 @@ void ATFileSetReadOnlyAttribute(const wchar_t *path, bool readOnly) {
 	// chmod could be used here, but not critical for emulation
 }
 
-// Clipboard — stub (could use X11/Wayland clipboard later)
+// Clipboard — using SDL2
 void ATCopyFrameToClipboard(const VDPixmap& px) {
+	// Frame-to-clipboard not implemented (would require encoding to PNG)
 }
 
 void ATCopyTextToClipboard(void *hwnd, const char *s) {
+	SDL_SetClipboardText(s);
 }
 
 void ATCopyTextToClipboard(void *hwnd, const wchar_t *s) {
+	VDStringA u8 = VDTextWToU8(VDStringW(s));
+	SDL_SetClipboardText(u8.c_str());
 }
 
 // Frame I/O — stub for now
@@ -105,11 +113,31 @@ VDStringW ATGetHelpPath() {
 void ATShowHelp(void *hwnd, const wchar_t *filename) {
 }
 
-// URL/file launching — could use xdg-open later
+// URL/file launching via xdg-open
+static void LaunchXdgOpen(const char *arg) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		// Child: redirect stdout/stderr to /dev/null
+		int devnull = open("/dev/null", O_WRONLY);
+		if (devnull >= 0) {
+			dup2(devnull, STDOUT_FILENO);
+			dup2(devnull, STDERR_FILENO);
+			close(devnull);
+		}
+		execlp("xdg-open", "xdg-open", arg, nullptr);
+		_exit(1);
+	}
+	// Parent: don't wait — xdg-open runs asynchronously
+}
+
 void ATLaunchURL(const wchar_t *url) {
+	VDStringA u8 = VDTextWToU8(VDStringW(url));
+	LaunchXdgOpen(u8.c_str());
 }
 
 void ATLaunchFileForEdit(const wchar_t *file) {
+	VDStringA u8 = VDTextWToU8(VDStringW(file));
+	LaunchXdgOpen(u8.c_str());
 }
 
 // Privilege checking
@@ -138,6 +166,13 @@ void ATGenerateGuid(uint8 guid[16]) {
 }
 
 void ATShowFileInSystemExplorer(const wchar_t *filename) {
+	// Open the parent directory containing the file
+	VDStringW dir(filename);
+	VDStringW parentDir = VDFileSplitPathLeft(dir);
+	if (parentDir.empty())
+		parentDir = L".";
+	VDStringA u8 = VDTextWToU8(parentDir);
+	LaunchXdgOpen(u8.c_str());
 }
 
 void ATRelaunchElevated(VDGUIHandle parent, const wchar_t *params) {

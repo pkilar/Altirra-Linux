@@ -5,6 +5,7 @@
 
 #include <stdafx.h>
 #include <vd2/system/VDString.h>
+#include <vd2/system/vdstl.h>
 #include <vd2/system/registry.h>
 #include <vd2/system/registrymemory.h>
 
@@ -203,4 +204,58 @@ void VDRegistryAppKey::setDefaultKey(const char *pszAppName) {
 
 const char *VDRegistryAppKey::getDefaultKey() {
 	return s_appbase.c_str();
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
+static void VDRegistryCopy2(IVDRegistryProvider& dstProvider, void *dstParentKey, const char *dstPath, IVDRegistryProvider& srcProvider, void *srcParentKey, const char *srcPath) {
+	void *srcKey = srcProvider.CreateKey(srcParentKey, srcPath, false);
+	if (srcKey) {
+		void *dstKey = dstProvider.CreateKey(dstParentKey, dstPath, true);
+
+		if (dstKey) {
+			void *srcValueEnum = srcProvider.EnumValuesBegin(srcKey);
+			if (srcValueEnum) {
+				while(const char *valueName = srcProvider.EnumValuesNext(srcValueEnum)) {
+					switch(srcProvider.GetType(srcKey, valueName)) {
+						case IVDRegistryProvider::kTypeInt:
+							if (int ival = 0; srcProvider.GetInt(srcKey, valueName, ival))
+								dstProvider.SetInt(dstKey, valueName, ival);
+							break;
+						case IVDRegistryProvider::kTypeString:
+							if (VDStringW sval; srcProvider.GetString(srcKey, valueName, sval))
+								dstProvider.SetString(dstKey, valueName, sval.c_str());
+							break;
+						case IVDRegistryProvider::kTypeBinary:
+							if (int len = srcProvider.GetBinaryLength(srcKey, valueName); len >= 0) {
+								vdblock<char> buf(len);
+
+								if (srcProvider.GetBinary(srcKey, valueName, buf.data(), len))
+									dstProvider.SetBinary(dstKey, valueName, buf.data(), len);
+							}
+							break;
+					}
+				}
+
+				srcProvider.EnumValuesClose(srcValueEnum);
+			}
+
+			void *srcKeyEnum = srcProvider.EnumKeysBegin(srcKey);
+			if (srcKeyEnum) {
+				while(const char *subKeyName = srcProvider.EnumKeysNext(srcKeyEnum)) {
+					VDRegistryCopy2(dstProvider, dstKey, subKeyName, srcProvider, srcKey, subKeyName);
+				}
+
+				srcProvider.EnumKeysClose(srcKeyEnum);
+			}
+
+			dstProvider.CloseKey(dstKey);
+		}
+
+		srcProvider.CloseKey(srcKey);
+	}
+}
+
+void VDRegistryCopy(IVDRegistryProvider& dstProvider, const char *dstPath, IVDRegistryProvider& srcProvider, const char *srcPath) {
+	VDRegistryCopy2(dstProvider, dstProvider.GetUserKey(), dstPath, srcProvider, srcProvider.GetUserKey(), srcPath);
 }

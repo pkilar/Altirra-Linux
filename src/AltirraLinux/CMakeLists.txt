@@ -1,4 +1,4 @@
-# AltirraLinux - Linux port of Altirra emulator (Phase 6)
+# AltirraLinux - Linux port of Altirra emulator (Phases 6-8)
 #
 # Strategy: GLOB all .cpp from Altirra/source, exclude Windows-only UI files,
 # add our Linux replacement implementations, link against all Phase 0-5 libraries.
@@ -143,7 +143,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"uiprofiles.cpp"
 	"uiprogress.cpp"
 	"uiqueue.cpp"
-	"uiregistry.cpp"
 	"uirender.cpp"
 	"uisavestate.cpp"
 	"uiscreeneffects.cpp"
@@ -297,3 +296,8 @@ target_link_libraries(altirra
 		dl
 		m
 )
+
+# Install targets
+install(TARGETS altirra RUNTIME DESTINATION bin)
+install(FILES ${CMAKE_SOURCE_DIR}/data/altirra.desktop DESTINATION share/applications)
+install(DIRECTORY DESTINATION share/altirra/firmware)

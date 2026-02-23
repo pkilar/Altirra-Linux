@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Altirra
+GenericName=Atari Emulator
+Comment=Atari 8-bit computer emulator (800/XL/XE/5200)
+Exec=altirra %f
+Icon=altirra
+Categories=Game;Emulator;
+MimeType=application/x-atari-disk;
+Terminal=false
