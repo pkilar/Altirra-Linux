@@ -607,10 +607,7 @@ void ATCreateNetSockWorker(
 	// No-op: leaves *pp unchanged (caller should check for null)
 }
 
-// Timer service (Windows multimedia timers)
-IATTimerService *ATCreateTimerService(IATAsyncDispatcher&) {
-	return nullptr;
-}
+// Timer service — provided by ATCore/source/timerserviceimpl_linux.cpp
 
 // UI renderer (Windows GDI / Direct3D overlay)
 void ATCreateUIRenderer(IATUIRenderer **r) {

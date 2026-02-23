@@ -58,6 +58,9 @@ if(WIN32)
 		source/checksum_arm64.cpp
 	)
 else()
+	list(APPEND ATCORE_SOURCES
+		source/timerserviceimpl_linux.cpp
+	)
 	# checksum_arm64.cpp uses windows.h + intrin.h; skip on Linux for now
 	if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
 		# TODO: Linux ARM64 checksum implementation
