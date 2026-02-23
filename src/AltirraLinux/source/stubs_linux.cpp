@@ -141,23 +141,34 @@ ATUIQueue& ATUIGetQueue() {
 // 4. ATUI accessor getters (bool) — simple stubs
 ///////////////////////////////////////////////////////////////////////////
 
-bool ATUIGetAltViewAutoswitchingEnabled() { return false; }
-bool ATUIGetAltViewEnabled() { return false; }
+static bool s_altViewAutoswitch = false;
+static bool s_altViewEnabled = false;
 static bool s_constrainMouseFS = true;
-bool ATUIGetConstrainMouseFullScreen() { return s_constrainMouseFS; }
-bool ATUIGetDisplayIndicators() { return false; }
-bool ATUIGetDisplayPadIndicators() { return false; }
-bool ATUIGetDrawPadBoundsEnabled() { return false; }
-bool ATUIGetDrawPadPointersEnabled() { return false; }
-bool ATUIGetMouseAutoCapture() { return false; }
+static bool s_displayIndicators = false;
+static bool s_displayPadIndicators = false;
+static bool s_drawPadBounds = false;
+static bool s_drawPadPointers = false;
+static bool s_mouseAutoCapture = false;
 static bool s_pauseWhenInactive = false;
-bool ATUIGetPauseWhenInactive() { return s_pauseWhenInactive; }
 static bool s_pointerAutoHide = true;
+static bool s_rawInput = false;
+static bool s_targetPointerVisible = false;
+static bool s_menuAutoHide = false;
+
+bool ATUIGetAltViewAutoswitchingEnabled() { return s_altViewAutoswitch; }
+bool ATUIGetAltViewEnabled() { return s_altViewEnabled; }
+bool ATUIGetConstrainMouseFullScreen() { return s_constrainMouseFS; }
+bool ATUIGetDisplayIndicators() { return s_displayIndicators; }
+bool ATUIGetDisplayPadIndicators() { return s_displayPadIndicators; }
+bool ATUIGetDrawPadBoundsEnabled() { return s_drawPadBounds; }
+bool ATUIGetDrawPadPointersEnabled() { return s_drawPadPointers; }
+bool ATUIGetMouseAutoCapture() { return s_mouseAutoCapture; }
+bool ATUIGetPauseWhenInactive() { return s_pauseWhenInactive; }
 bool ATUIGetPointerAutoHide() { return s_pointerAutoHide; }
-bool ATUIGetRawInputEnabled() { return false; }
-bool ATUIGetTargetPointerVisible() { return false; }
+bool ATUIGetRawInputEnabled() { return s_rawInput; }
+bool ATUIGetTargetPointerVisible() { return s_targetPointerVisible; }
 bool ATUIGetFrameRateVSyncAdaptive() { return false; }
-bool ATUIIsMenuAutoHideEnabled() { return false; }
+bool ATUIIsMenuAutoHideEnabled() { return s_menuAutoHide; }
 bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -189,9 +200,11 @@ ATDisplayStretchMode ATUIGetDisplayStretchMode() { return s_displayStretchMode; 
 ATFrameRateMode ATUIGetFrameRateMode() { return (ATFrameRateMode)0; }
 ATUIEnhancedTextMode ATUIGetEnhancedTextMode() { return kATUIEnhancedTextMode_None; }
 
-float ATUIGetDisplayZoom() { return 1.0f; }
+static float s_displayZoom = 1.0f;
+float ATUIGetDisplayZoom() { return s_displayZoom; }
 float ATUIGetSpeedModifier() { return s_speedModifier; }
-int ATUIGetViewFilterSharpness() { return 0; }
+static int s_viewFilterSharpness = 0;
+int ATUIGetViewFilterSharpness() { return s_viewFilterSharpness; }
 
 vdfloat2 ATUIGetDisplayPanOffset() { return vdfloat2{0, 0}; }
 
@@ -204,8 +217,8 @@ VDGUIHandle ATUIGetNewPopupOwner() { return nullptr; }
 // 6. ATUI accessor setters
 ///////////////////////////////////////////////////////////////////////////
 
-void ATUISetAltViewAutoswitchingEnabled(bool) {}
-void ATUISetAltViewEnabled(bool) {}
+void ATUISetAltViewAutoswitchingEnabled(bool v) { s_altViewAutoswitch = v; }
+void ATUISetAltViewEnabled(bool v) { s_altViewEnabled = v; }
 void ATUISetBootUnloadStorageMask(uint32) {}
 void ATUISetConstrainMouseFullScreen(bool v) {
 	s_constrainMouseFS = v;
@@ -216,8 +229,8 @@ void ATUISetConstrainMouseFullScreen(bool v) {
 }
 void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; }
-void ATUISetDisplayIndicators(bool) {}
-void ATUISetDisplayPadIndicators(bool) {}
+void ATUISetDisplayIndicators(bool v) { s_displayIndicators = v; }
+void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
 void ATUISetDisplayPanOffset(const vdfloat2&) {}
 void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	s_displayStretchMode = m;
@@ -226,17 +239,17 @@ void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	if (disp)
 		disp->SetStretchMode(m);
 }
-void ATUISetDisplayZoom(float) {}
-void ATUISetDrawPadBoundsEnabled(bool) {}
-void ATUISetDrawPadPointersEnabled(bool) {}
+void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
+void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
+void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode) {}
 void ATUISetFrameRateMode(ATFrameRateMode) {}
 void ATUISetFrameRateVSyncAdaptive(bool) {}
-void ATUISetMenuAutoHideEnabled(bool) {}
-void ATUISetMouseAutoCapture(bool) {}
+void ATUISetMenuAutoHideEnabled(bool v) { s_menuAutoHide = v; }
+void ATUISetMouseAutoCapture(bool v) { s_mouseAutoCapture = v; }
 void ATUISetPauseWhenInactive(bool v) { s_pauseWhenInactive = v; }
 void ATUISetPointerAutoHide(bool v) { s_pointerAutoHide = v; }
-void ATUISetRawInputEnabled(bool) {}
+void ATUISetRawInputEnabled(bool v) { s_rawInput = v; }
 void ATUISetResetFlags(uint32) {}
 void ATUISetShowFPS(bool v) { s_showFPS = v; }
 void ATUISetSpeedModifier(float v) {
@@ -247,14 +260,14 @@ void ATUISetSpeedModifier(float v) {
 	if (audio)
 		audio->SetCyclesPerSecond(1789772.5, 1.0 / rate);
 }
-void ATUISetTargetPointerVisible(bool) {}
+void ATUISetTargetPointerVisible(bool v) { s_targetPointerVisible = v; }
 void ATUISetTurbo(bool v) {
 	s_turbo = v;
 	extern ATSimulator g_sim;
 	g_sim.SetTurboModeEnabled(v);
 	SDL_GL_SetSwapInterval(v ? 0 : 1);
 }
-void ATUISetViewFilterSharpness(int) {}
+void ATUISetViewFilterSharpness(int v) { s_viewFilterSharpness = v; }
 void ATUISetWindowCaptionTemplate(const char *) {}
 
 ///////////////////////////////////////////////////////////////////////////
