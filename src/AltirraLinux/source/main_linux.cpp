@@ -679,6 +679,12 @@ static void UpdateWindowTitle(SDL_Window *window) {
 		}
 	}
 
+	// Show turbo/paused indicator
+	if (ATUIGetTurbo())
+		off += snprintf(title + off, sizeof(title) - off, " [TURBO]");
+	else if (g_sim.IsPaused())
+		off += snprintf(title + off, sizeof(title) - off, " [PAUSED]");
+
 	SDL_SetWindowTitle(window, title);
 }
 
