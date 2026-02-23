@@ -317,11 +317,50 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 	if (fullscreen)
 		windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
 
+	// Restore saved window geometry, or use defaults (2x NTSC resolution)
+	int winX = SDL_WINDOWPOS_CENTERED;
+	int winY = SDL_WINDOWPOS_CENTERED;
+	int winW = 912;
+	int winH = 524;
+	bool winMaximized = false;
+
+	VDRegistryAppKey key("Window", false);
+	if (key.getInt("Width", 0) > 0) {
+		winW = key.getInt("Width", 912);
+		winH = key.getInt("Height", 524);
+		winX = key.getInt("X", SDL_WINDOWPOS_CENTERED);
+		winY = key.getInt("Y", SDL_WINDOWPOS_CENTERED);
+		winMaximized = key.getBool("Maximized", false);
+
+		// Sanity check: ensure window is at least partially visible
+		int numDisplays = SDL_GetNumVideoDisplays();
+		if (numDisplays > 0 && winX != SDL_WINDOWPOS_CENTERED) {
+			SDL_Rect bounds;
+			bool onScreen = false;
+			for (int i = 0; i < numDisplays; ++i) {
+				if (SDL_GetDisplayBounds(i, &bounds) == 0) {
+					if (winX + winW > bounds.x && winX < bounds.x + bounds.w &&
+						winY + winH > bounds.y && winY < bounds.y + bounds.h) {
+						onScreen = true;
+						break;
+					}
+				}
+			}
+			if (!onScreen) {
+				winX = SDL_WINDOWPOS_CENTERED;
+				winY = SDL_WINDOWPOS_CENTERED;
+			}
+		}
+	}
+
+	if (winMaximized && !fullscreen)
+		windowFlags |= SDL_WINDOW_MAXIMIZED;
+
 	window = SDL_CreateWindow(
 		"Altirra (Linux)",
-		SDL_WINDOWPOS_CENTERED,
-		SDL_WINDOWPOS_CENTERED,
-		912, 524,		// 2x NTSC resolution (456x262)
+		winX,
+		winY,
+		winW, winH,
 		windowFlags
 	);
 
@@ -939,6 +978,23 @@ int main(int argc, char *argv[]) {
 	}
 
 	fprintf(stderr, "Shutting down...\n");
+
+	// Save window geometry before shutdown
+	if (window) {
+		VDRegistryAppKey wkey("Window", true);
+		uint32 flags = SDL_GetWindowFlags(window);
+		wkey.setBool("Maximized", (flags & SDL_WINDOW_MAXIMIZED) != 0);
+
+		if (!(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_FULLSCREEN))) {
+			int x, y, w, h;
+			SDL_GetWindowPosition(window, &x, &y);
+			SDL_GetWindowSize(window, &w, &h);
+			wkey.setInt("X", x);
+			wkey.setInt("Y", y);
+			wkey.setInt("Width", w);
+			wkey.setInt("Height", h);
+		}
+	}
 
 	// Save settings before shutdown
 	ATSaveSettings(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
