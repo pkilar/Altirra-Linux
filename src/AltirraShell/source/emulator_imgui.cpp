@@ -41,6 +41,7 @@ class ATIRQController;
 #include "constants.h"
 #include "cassette.h"
 #include "diskinterface.h"
+#include <at/atio/diskfs.h>
 #include "cartridge.h"
 #include "firmwaremanager.h"
 #include "firmwaredetect.h"
@@ -126,6 +127,12 @@ static bool s_fwListDirty = true;
 static uint64 s_fwSelectedId = 0;
 static std::string s_fwScanResult;
 static bool s_fwShowScanResult = false;
+
+// New disk dialog state
+static bool s_showNewDisk = false;
+static int s_newDiskSlot = 0;
+static int s_newDiskFormat = 1;  // 0=Custom, 1=SD 720, 2=MD 1040, 3=DD 720, 4=DSDD 1440
+static int s_newDiskFS = 0;      // 0=None, 1=DOS 2, 2=MyDOS
 
 // FPS counter state
 static double s_lastFpsTime = 0;
@@ -650,6 +657,12 @@ static void DrawMenuBar() {
 						} else if (ATLinuxFileDialogIsFallbackOpen()) {
 							s_pendingDialog = (PendingDialog)((int)PendingDialog::kMountDisk1 + i);
 						}
+					}
+
+					snprintf(label, sizeof(label), "New Disk in D%d...", i + 1);
+					if (ImGui::MenuItem(label)) {
+						s_showNewDisk = true;
+						s_newDiskSlot = i;
 					}
 
 					if (di.IsDiskLoaded()) {
@@ -2938,6 +2951,87 @@ static void DrawVideoConfig() {
 	ImGui::End();
 }
 
+// ============= New Disk Dialog =============
+
+static const struct {
+	const char *name;
+	uint32 sectorCount;
+	uint32 sectorSize;
+} kNewDiskFormats[] = {
+	{ "Single Density (90K - 720 sectors, 128 bytes)",   720, 128 },
+	{ "Medium Density (130K - 1040 sectors, 128 bytes)", 1040, 128 },
+	{ "Double Density (180K - 720 sectors, 256 bytes)",  720, 256 },
+	{ "Double-Sided DD (360K - 1440 sectors, 256 bytes)", 1440, 256 },
+};
+
+static const char *kNewDiskFSNames[] = {
+	"None (unformatted)",
+	"DOS 2.0",
+	"MyDOS",
+};
+
+static void DrawNewDisk() {
+	if (!s_showNewDisk)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(420, 0), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Create New Disk", &s_showNewDisk, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::End();
+		return;
+	}
+
+	ImGui::Text("Create blank disk image in D%d:", s_newDiskSlot + 1);
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	ImGui::Text("Disk Format:");
+	for (int i = 0; i < (int)(sizeof(kNewDiskFormats)/sizeof(kNewDiskFormats[0])); ++i) {
+		ImGui::RadioButton(kNewDiskFormats[i].name, &s_newDiskFormat, i);
+	}
+
+	ImGui::Spacing();
+	ImGui::Text("Filesystem:");
+	ImGui::Combo("##fs", &s_newDiskFS, kNewDiskFSNames, 3);
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	if (ImGui::Button("Create", ImVec2(100, 0))) {
+		try {
+			ATDiskInterface& di = g_sim.GetDiskInterface(s_newDiskSlot);
+			di.UnloadDisk();
+
+			uint32 sectorCount = kNewDiskFormats[s_newDiskFormat].sectorCount;
+			uint32 sectorSize = kNewDiskFormats[s_newDiskFormat].sectorSize;
+			di.CreateDisk(sectorCount, 3, sectorSize);
+			di.SetWriteMode(kATMediaWriteMode_VRW);
+
+			IATDiskImage *image = di.GetDiskImage();
+			if (image && s_newDiskFS > 0) {
+				vdautoptr<IATDiskFS> fs;
+				if (s_newDiskFS == 1)
+					fs = ATDiskFormatImageDOS2(image);
+				else if (s_newDiskFS == 2)
+					fs = ATDiskFormatImageMyDOS(image);
+
+				if (fs)
+					fs->Flush();
+			}
+		} catch (...) {
+			fprintf(stderr, "Failed to create new disk\n");
+		}
+		s_showNewDisk = false;
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+		s_showNewDisk = false;
+	}
+
+	ImGui::End();
+}
+
 // ============= Quit Confirmation =============
 
 static bool HasDirtyDisks() {
@@ -3023,6 +3117,7 @@ void ATImGuiEmulatorDraw() {
 	DrawStatusBar();
 	DrawAbout();
 	DrawShortcuts();
+	DrawNewDisk();
 	DrawQuitConfirmation();
 	PollFileDialogFallback();
 	CheckPendingErrors();
