@@ -289,7 +289,32 @@ void ATSetWindowSize(int w, int h) {
 void ATUIUpdateSpeedTiming() {}
 void ATSyncCPUHistoryState() {}
 
-bool ATUIClipGetText(VDStringW&) { return false; }
+bool ATUIClipIsTextAvailable() {
+	return SDL_HasClipboardText() == SDL_TRUE;
+}
+
+bool ATUIClipGetText(VDStringA& s8, VDStringW& s16, bool& use16) {
+	char *text = SDL_GetClipboardText();
+	if (!text || !*text) {
+		SDL_free(text);
+		return false;
+	}
+	s16 = VDTextU8ToW(VDStringSpanA(text));
+	SDL_free(text);
+	use16 = true;
+	return true;
+}
+
+bool ATUIClipGetText(VDStringW& s) {
+	char *text = SDL_GetClipboardText();
+	if (!text || !*text) {
+		SDL_free(text);
+		return false;
+	}
+	s = VDTextU8ToW(VDStringSpanA(text));
+	SDL_free(text);
+	return true;
+}
 
 void ATUIExecuteCommandStringAndShowErrors(const char *, const ATUICommandOptions *) noexcept {}
 

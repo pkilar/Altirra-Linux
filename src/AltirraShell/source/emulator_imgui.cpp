@@ -430,6 +430,119 @@ static void TryMountDisk(int index, const VDStringW& path) {
 	}
 }
 
+// ============= Paste text to Atari via POKEY =============
+// Character-to-scancode table (ported from uikeyboard.cpp)
+
+static struct CharToScanCodeInit {
+	uint8 table[256];
+	constexpr CharToScanCodeInit() : table{} {
+		for (auto& v : table)
+			v = 0xFF;
+
+		// Lower-case letters
+		table['a'] = 0x3F; table['b'] = 0x15; table['c'] = 0x12;
+		table['d'] = 0x3A; table['e'] = 0x2A; table['f'] = 0x38;
+		table['g'] = 0x3D; table['h'] = 0x39; table['i'] = 0x0D;
+		table['j'] = 0x01; table['k'] = 0x05; table['l'] = 0x00;
+		table['m'] = 0x25; table['n'] = 0x23; table['o'] = 0x08;
+		table['p'] = 0x0A; table['q'] = 0x2F; table['r'] = 0x28;
+		table['s'] = 0x3E; table['t'] = 0x2D; table['u'] = 0x0B;
+		table['v'] = 0x10; table['w'] = 0x2E; table['x'] = 0x16;
+		table['y'] = 0x2B; table['z'] = 0x17;
+
+		// Upper-case letters (shift + scancode)
+		table['A'] = 0x7F; table['B'] = 0x55; table['C'] = 0x52;
+		table['D'] = 0x7A; table['E'] = 0x6A; table['F'] = 0x78;
+		table['G'] = 0x7D; table['H'] = 0x79; table['I'] = 0x4D;
+		table['J'] = 0x41; table['K'] = 0x45; table['L'] = 0x40;
+		table['M'] = 0x65; table['N'] = 0x63; table['O'] = 0x48;
+		table['P'] = 0x4A; table['Q'] = 0x6F; table['R'] = 0x68;
+		table['S'] = 0x7E; table['T'] = 0x6D; table['U'] = 0x4B;
+		table['V'] = 0x50; table['W'] = 0x6E; table['X'] = 0x56;
+		table['Y'] = 0x6B; table['Z'] = 0x57;
+
+		// Digits
+		table['0'] = 0x32; table['1'] = 0x1F; table['2'] = 0x1E;
+		table['3'] = 0x1A; table['4'] = 0x18; table['5'] = 0x1D;
+		table['6'] = 0x1B; table['7'] = 0x33; table['8'] = 0x35;
+		table['9'] = 0x30;
+
+		// Punctuation and symbols
+		table[' '] = 0x21;
+		table['!'] = 0x5F; table['"'] = 0x5E; table['#'] = 0x5A;
+		table['$'] = 0x58; table['%'] = 0x5D; table['&'] = 0x5B;
+		table['\''] = 0x73; table['('] = 0x70; table[')'] = 0x72;
+		table['*'] = 0x07; table['+'] = 0x06; table[','] = 0x20;
+		table['-'] = 0x0E; table['.'] = 0x22; table['/'] = 0x26;
+		table[':'] = 0x42; table[';'] = 0x02; table['<'] = 0x36;
+		table['='] = 0x0F; table['>'] = 0x37; table['?'] = 0x66;
+		table['@'] = 0x75; table['['] = 0x60; table['\\'] = 0x46;
+		table[']'] = 0x62; table['^'] = 0x47; table['_'] = 0x4E;
+		table['`'] = 0x27; table['|'] = 0x4F; table['~'] = 0x67;
+	}
+} s_charToScanCode;
+
+static void PasteTextToEmulator() {
+	char *text = SDL_GetClipboardText();
+	if (!text || !*text) {
+		SDL_free(text);
+		return;
+	}
+
+	// Convert UTF-8 clipboard to wide chars
+	VDStringW ws = VDTextU8ToW(VDStringSpanA(text));
+	SDL_free(text);
+
+	auto& pokey = g_sim.GetPokey();
+
+	for (size_t i = 0; i < ws.size(); ++i) {
+		wchar_t c = ws[i];
+
+		// Skip null and zero-width characters
+		if (!c || (c >= 0x200B && c <= 0x200F) || c == 0xFEFF)
+			continue;
+
+		// Normalize smart quotes and dashes
+		switch (c) {
+			case L'\u2010': case L'\u2011': case L'\u2012':
+			case L'\u2013': case L'\u2014': case L'\u2015':
+				c = L'-'; break;
+			case L'\u2018': case L'\u2019':
+				c = L'\''; break;
+			case L'\u201C': case L'\u201D':
+				c = L'"'; break;
+			case L'\u2026':
+				pokey.PushKey(s_charToScanCode.table['.'], false, true, false, true);
+				pokey.PushKey(s_charToScanCode.table['.'], false, true, false, true);
+				c = L'.';
+				break;
+		}
+
+		// Handle newlines
+		if (c == L'\r' || c == L'\n') {
+			if (c == L'\r' && i + 1 < ws.size() && ws[i + 1] == L'\n')
+				++i;
+			pokey.PushKey(0x0C, false, true, false, true);
+			continue;
+		}
+
+		// Handle tab
+		if (c == L'\t') {
+			pokey.PushKey(0x2C, false, true, false, true);
+			continue;
+		}
+
+		// Map character to scancode
+		if (c < 0x100) {
+			uint8 sc = s_charToScanCode.table[(uint8)c];
+			if (sc != 0xFF)
+				pokey.PushKey(sc, false, true, false, true);
+		}
+	}
+
+	ShowToast("Text pasted");
+}
+
 // ============= MRU (Recent Files) helpers =============
 // Uses same registry format as Windows ATAddMRUListItem/ATGetMRUListItem
 
@@ -997,6 +1110,14 @@ static void DrawMenuBar() {
 		ImGui::EndMenu();
 	}
 
+	// --- Edit menu ---
+	if (ImGui::BeginMenu("Edit")) {
+		if (ImGui::MenuItem("Paste Text", "Ctrl+V"))
+			PasteTextToEmulator();
+
+		ImGui::EndMenu();
+	}
+
 	// --- View menu ---
 	if (ImGui::BeginMenu("View")) {
 		bool showFPS = ATUIGetShowFPS();
@@ -1463,6 +1584,7 @@ static void DrawShortcuts() {
 		row("Shift+F11", "Step Out (debugger)");
 		row("F12", "Toggle Overlay");
 		row("Pause", "Pause / Resume");
+		row("Ctrl+V", "Paste Text");
 		row("Ctrl+S", "Save Settings");
 		row("Ctrl+Q", "Quit");
 
@@ -3414,6 +3536,10 @@ bool ATImGuiIsQuitConfirmed() {
 
 void ATImGuiShowToast(const char *message) {
 	ShowToast(message);
+}
+
+void ATImGuiPasteText() {
+	PasteTextToEmulator();
 }
 
 static double s_startTime = 0;

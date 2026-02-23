@@ -529,6 +529,13 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 			}
 
+			// Ctrl+V = paste text to emulator
+			if (event.key.keysym.scancode == SDL_SCANCODE_V
+				&& (event.key.keysym.mod & KMOD_CTRL)) {
+				ATImGuiPasteText();
+				continue;
+			}
+
 			// Ctrl+Q = quit
 			if (event.key.keysym.scancode == SDL_SCANCODE_Q
 				&& (event.key.keysym.mod & KMOD_CTRL)) {

@@ -20,4 +20,7 @@ bool ATImGuiIsQuitConfirmed();
 // Toast notifications (2.5s fade-out)
 void ATImGuiShowToast(const char *message);
 
+// Paste clipboard text to emulator via POKEY
+void ATImGuiPasteText();
+
 #endif
