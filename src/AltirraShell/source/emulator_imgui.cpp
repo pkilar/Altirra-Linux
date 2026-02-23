@@ -2282,6 +2282,10 @@ static void DrawAudioOptions() {
 	if (ImGui::CollapsingHeader("POKEY Options", ImGuiTreeNodeFlags_DefaultOpen)) {
 		ATPokeyEmulator& pokey = g_sim.GetPokey();
 
+		bool dualPokey = g_sim.IsDualPokeysEnabled();
+		if (ImGui::Checkbox("Dual POKEY (stereo)", &dualPokey))
+			g_sim.SetDualPokeysEnabled(dualPokey);
+
 		bool stereoMono = pokey.IsStereoAsMonoEnabled();
 		if (ImGui::Checkbox("Downmix stereo to mono", &stereoMono))
 			pokey.SetStereoAsMonoEnabled(stereoMono);
