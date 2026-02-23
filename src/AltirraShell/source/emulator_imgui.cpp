@@ -10,15 +10,21 @@
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/text.h>
+#include <vd2/system/refcount.h>
+#include <vd2/VDDisplay/display.h>
 #include <at/atdebugger/target.h>
 #include <at/atcore/media.h>
+#include <at/atcore/serializable.h>
+#include <at/atio/image.h>
 
 #include <vd2/system/filesys.h>
 
 #include <imgui.h>
 #include <emulator_imgui.h>
 #include <debugger_imgui.h>
+#include <display_sdl2.h>
 #include <filedialog_linux.h>
+#include <error_imgui.h>
 
 // Forward declarations needed by simulator.h transitives
 class ATIRQController;
@@ -27,6 +33,7 @@ class ATIRQController;
 #include "constants.h"
 #include "diskinterface.h"
 #include "uiaccessors.h"
+#include "uitypes.h"
 #include "debugger.h"
 
 #include <SDL.h>
@@ -36,9 +43,25 @@ class ATIRQController;
 
 extern ATSimulator g_sim;
 
+// Display backend accessor (defined in main_linux.cpp)
+extern ATDisplaySDL2 *ATGetLinuxDisplay();
+
+// Quick save state (in-memory)
+static vdrefptr<IATSerializable> s_pQuickState;
+
 // Window visibility
 static bool s_showSystemConfig = false;
 static bool s_showAbout = false;
+
+// FPS counter state
+static double s_lastFpsTime = 0;
+static int s_fpsFrameCount = 0;
+static float s_currentFps = 0;
+
+// Error popup state
+static bool s_showErrorPopup = false;
+static std::string s_errorTitle;
+static std::string s_errorMessage;
 
 // Pending file dialog result tracking
 static enum class PendingDialog {
@@ -47,7 +70,9 @@ static enum class PendingDialog {
 	kMountDisk1,
 	kMountDisk2,
 	kMountDisk3,
-	kMountDisk4
+	kMountDisk4,
+	kSaveState,
+	kLoadState
 } s_pendingDialog = PendingDialog::kNone;
 
 static const char *kDiskFilters =
@@ -58,6 +83,10 @@ static const char *kDiskFilters =
 
 static const char *kDiskOnlyFilters =
 	"Disk Images|*.atr;*.xfd;*.dcm;*.pro;*.atx"
+	"|All Files|*";
+
+static const char *kSaveStateFilters =
+	"Save States|*.atstate2;*.altstate"
 	"|All Files|*";
 
 // ============= Hardware mode names =============
@@ -212,6 +241,52 @@ static void DrawMenuBar() {
 
 		ImGui::Separator();
 
+		if (ImGui::MenuItem("Quick Save State", "F7")) {
+			try {
+				s_pQuickState.clear();
+				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
+			} catch (...) {
+				fprintf(stderr, "Quick save state failed\n");
+			}
+		}
+		if (ImGui::MenuItem("Quick Load State", "F8", false, s_pQuickState != nullptr)) {
+			try {
+				ATStateLoadContext ctx {};
+				g_sim.ApplySnapshot(*s_pQuickState, &ctx);
+			} catch (...) {
+				fprintf(stderr, "Quick load state failed\n");
+			}
+		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Save State As...")) {
+			VDStringW path = ATLinuxSaveFileDialog("Save State", kSaveStateFilters);
+			if (!path.empty()) {
+				try {
+					g_sim.SaveState(path.c_str());
+				} catch (...) {
+					fprintf(stderr, "Save state failed\n");
+				}
+			} else if (ATLinuxFileDialogIsFallbackOpen()) {
+				s_pendingDialog = PendingDialog::kSaveState;
+			}
+		}
+		if (ImGui::MenuItem("Load State...")) {
+			VDStringW path = ATLinuxOpenFileDialog("Load State", kSaveStateFilters);
+			if (!path.empty()) {
+				try {
+					g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+				} catch (...) {
+					fprintf(stderr, "Load state failed\n");
+				}
+			} else if (ATLinuxFileDialogIsFallbackOpen()) {
+				s_pendingDialog = PendingDialog::kLoadState;
+			}
+		}
+
+		ImGui::Separator();
+
 		if (ImGui::BeginMenu("Disk Drives")) {
 			for (int i = 0; i < 4; ++i) {
 				char label[32];
@@ -266,8 +341,19 @@ static void DrawMenuBar() {
 		if (ImGui::BeginMenu("Display Filter")) {
 			ATDisplayFilterMode curFilter = ATUIGetDisplayFilterMode();
 			for (int i = 0; i < 5; ++i) {
-				if (ImGui::MenuItem(kDisplayFilterNames[i], nullptr, curFilter == (ATDisplayFilterMode)i))
+				if (ImGui::MenuItem(kDisplayFilterNames[i], nullptr, curFilter == (ATDisplayFilterMode)i)) {
 					ATUISetDisplayFilterMode((ATDisplayFilterMode)i);
+
+					// Apply to GL backend
+					ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+					if (disp) {
+						IVDVideoDisplay::FilterMode fm =
+							(i == kATDisplayFilterMode_Point)
+								? IVDVideoDisplay::kFilterPoint
+								: IVDVideoDisplay::kFilterBilinear;
+						disp->SetFilterMode(fm);
+					}
+				}
 			}
 			ImGui::EndMenu();
 		}
@@ -477,6 +563,23 @@ static void DrawStatusBar() {
 			ImGui::SameLine(0, 16);
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[TURBO]");
 		}
+
+		// FPS counter
+		++s_fpsFrameCount;
+		double now = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+		if (s_lastFpsTime == 0)
+			s_lastFpsTime = now;
+		double elapsed = now - s_lastFpsTime;
+		if (elapsed >= 0.5) {
+			s_currentFps = (float)(s_fpsFrameCount / elapsed);
+			s_fpsFrameCount = 0;
+			s_lastFpsTime = now;
+		}
+
+		if (ATUIGetShowFPS()) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%.1f fps", s_currentFps);
+		}
 	}
 	ImGui::End();
 
@@ -531,6 +634,18 @@ static void PollFileDialogFallback() {
 			case PendingDialog::kMountDisk4:
 				TryMountDisk((int)s_pendingDialog - (int)PendingDialog::kMountDisk1, result);
 				break;
+			case PendingDialog::kSaveState:
+				if (!result.empty()) {
+					try { g_sim.SaveState(result.c_str()); }
+					catch (...) { fprintf(stderr, "Save state failed\n"); }
+				}
+				break;
+			case PendingDialog::kLoadState:
+				if (!result.empty()) {
+					try { g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr); }
+					catch (...) { fprintf(stderr, "Load state failed\n"); }
+				}
+				break;
 			default:
 				break;
 		}
@@ -539,6 +654,44 @@ static void PollFileDialogFallback() {
 
 	if (!ATLinuxFileDialogIsFallbackOpen())
 		s_pendingDialog = PendingDialog::kNone;
+}
+
+// ============= Error Popup =============
+
+static void CheckPendingErrors() {
+	// Pop any errors from the thread-safe queue
+	auto errors = ATImGuiPopPendingErrors();
+	if (!errors.empty() && !s_showErrorPopup) {
+		// Show the first error; rest will be shown on subsequent frames
+		s_errorTitle = std::move(errors[0].first);
+		s_errorMessage = std::move(errors[0].second);
+		s_showErrorPopup = true;
+		ImGui::OpenPopup("##error_popup");
+	}
+}
+
+static void DrawErrorPopup() {
+	if (!s_showErrorPopup)
+		return;
+
+	// Ensure popup is opened
+	if (!ImGui::IsPopupOpen("##error_popup"))
+		ImGui::OpenPopup("##error_popup");
+
+	ImGui::SetNextWindowSize(ImVec2(400, 0), ImGuiCond_Appearing);
+	if (ImGui::BeginPopupModal("##error_popup", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", s_errorTitle.c_str());
+		ImGui::Separator();
+		ImGui::TextWrapped("%s", s_errorMessage.c_str());
+		ImGui::Separator();
+
+		if (ImGui::Button("OK", ImVec2(120, 0))) {
+			s_showErrorPopup = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
 }
 
 // ============= Public API =============
@@ -553,11 +706,13 @@ void ATImGuiEmulatorDraw() {
 	DrawStatusBar();
 	DrawAbout();
 	PollFileDialogFallback();
+	CheckPendingErrors();
+	DrawErrorPopup();
 
 	// Draw debugger windows (without toolbar — menu bar handles that now)
 	ATImGuiDebuggerDrawWindows();
 }
 
 void ATImGuiEmulatorShutdown() {
-	// No cleanup needed yet
+	s_pQuickState.clear();
 }

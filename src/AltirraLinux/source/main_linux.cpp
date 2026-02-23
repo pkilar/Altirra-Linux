@@ -31,7 +31,9 @@
 #include <at/atcore/device.h>
 #include <at/atcore/asyncdispatcher.h>
 #include <at/atcore/media.h>
+#include <at/atcore/serializable.h>
 #include <at/ataudio/audiooutput.h>
+#include <at/atio/image.h>
 
 #include "simulator.h"
 #include "joystick.h"
@@ -83,6 +85,9 @@ IATJoystickManager *ATCreateJoystickManagerSDL2();
 void ATSetFullscreenCallback(void (*pfn)(bool));
 
 static bool g_running = true;
+
+// Global accessor for the display backend — used by emulator_imgui.cpp
+ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
 
 // SDL window pointer for fullscreen toggle callback
 static SDL_Window *g_pWindow = nullptr;
@@ -300,10 +305,45 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 // Event handling
 ///////////////////////////////////////////////////////////////////////////
 
-static void HandleDebugShortcuts(const SDL_Event& event) {
+// Quick save state (in-memory, shared with emulator_imgui.cpp via extern)
+static vdrefptr<IATSerializable> s_pQuickState;
+
+static void HandleShortcuts(const SDL_Event& event) {
 	if (event.type != SDL_KEYDOWN)
 		return;
 
+	switch (event.key.keysym.scancode) {
+		// F7: quick save state
+		case SDL_SCANCODE_F7: {
+			try {
+				s_pQuickState.clear();
+				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
+				fprintf(stderr, "Quick state saved\n");
+			} catch (...) {
+				fprintf(stderr, "Quick save state failed\n");
+			}
+			return;
+		}
+
+		// F8: quick load state
+		case SDL_SCANCODE_F8: {
+			if (s_pQuickState) {
+				try {
+					ATStateLoadContext ctx {};
+					g_sim.ApplySnapshot(*s_pQuickState, &ctx);
+					fprintf(stderr, "Quick state loaded\n");
+				} catch (...) {
+					fprintf(stderr, "Quick load state failed\n");
+				}
+			}
+			return;
+		}
+
+		default:
+			break;
+	}
+
+	// Debug shortcuts (only when overlay visible)
 	IATDebugger *dbg = ATGetDebugger();
 	if (!dbg)
 		return;
@@ -351,9 +391,18 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
+		// F7/F8 quick save/load always active
+		if (event.type == SDL_KEYDOWN) {
+			if (event.key.keysym.scancode == SDL_SCANCODE_F7
+				|| event.key.keysym.scancode == SDL_SCANCODE_F8) {
+				HandleShortcuts(event);
+				continue;
+			}
+		}
+
 		// When overlay is visible, handle debug shortcuts
 		if (g_pImGui && g_pImGui->IsVisible()) {
-			HandleDebugShortcuts(event);
+			HandleShortcuts(event);
 
 			// If ImGui wants the input, don't pass to emulation
 			if (g_pImGui->WantCaptureMouse() || g_pImGui->WantCaptureKeyboard())
@@ -373,6 +422,21 @@ static void ProcessEvents(SDL_Window *window) {
 				if (event.window.event == SDL_WINDOWEVENT_CLOSE)
 					g_running = false;
 				break;
+
+			case SDL_DROPFILE: {
+				char *dropped = event.drop.file;
+				if (dropped) {
+					VDStringW path = VDTextU8ToW(VDStringA(dropped));
+					try {
+						g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+						fprintf(stderr, "Loaded dropped file: %s\n", dropped);
+					} catch (...) {
+						fprintf(stderr, "Failed to load dropped file: %s\n", dropped);
+					}
+					SDL_free(dropped);
+				}
+				break;
+			}
 		}
 	}
 }

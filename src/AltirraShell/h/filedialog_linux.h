@@ -20,6 +20,9 @@
 // Returns the selected file path, or empty string if cancelled.
 VDStringW ATLinuxOpenFileDialog(const char *title, const char *filters);
 
+// Opens a native "save file" dialog. Same backend selection as open.
+VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters);
+
 // Draws the ImGui fallback dialog. Call every frame while the fallback
 // dialog might be open. Returns true and fills 'result' when the user
 // confirms a path. Returns false while still open or if cancelled.

@@ -28,6 +28,7 @@
 #include <vd2/system/vectors.h>
 #include <vd2/system/atomic.h>
 #include <vd2/system/thread.h>
+#include <vd2/system/text.h>
 #include <vd2/system/file.h>
 #include <vd2/system/fileasync.h>
 #include <vd2/system/filewatcher.h>
@@ -41,10 +42,23 @@
 #include <at/atcore/deviceimpl.h>
 #include <at/atcore/propertyset.h>
 #include <at/atcore/timerservice.h>
+#include <at/ataudio/audiooutput.h>
 #include <at/atnetwork/socket.h>
 #include <at/atnetworksockets/vxlantunnel.h>
 #include <at/atnetworksockets/worker.h>
 #include <at/atui/uimanager.h>
+
+#include <SDL.h>
+#include <error_imgui.h>
+
+#include <algorithm>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
+// Forward declaration: simulator from main_linux.cpp
+#include "simulator.h"
 
 // Altirra application headers
 #include "uiaccessors.h"
@@ -208,9 +222,21 @@ void ATUISetPointerAutoHide(bool) {}
 void ATUISetRawInputEnabled(bool) {}
 void ATUISetResetFlags(uint32) {}
 void ATUISetShowFPS(bool v) { s_showFPS = v; }
-void ATUISetSpeedModifier(float v) { s_speedModifier = v; }
+void ATUISetSpeedModifier(float v) {
+	s_speedModifier = v;
+	extern ATSimulator g_sim;
+	double rate = std::clamp((double)v, 0.01, 100.0);
+	IATAudioOutput *audio = g_sim.GetAudioOutput();
+	if (audio)
+		audio->SetCyclesPerSecond(1789772.5, 1.0 / rate);
+}
 void ATUISetTargetPointerVisible(bool) {}
-void ATUISetTurbo(bool v) { s_turbo = v; }
+void ATUISetTurbo(bool v) {
+	s_turbo = v;
+	extern ATSimulator g_sim;
+	g_sim.SetTurboModeEnabled(v);
+	SDL_GL_SetSwapInterval(v ? 0 : 1);
+}
 void ATUISetViewFilterSharpness(int) {}
 void ATUISetWindowCaptionTemplate(const char *) {}
 
@@ -247,7 +273,56 @@ bool ATUIClipGetText(VDStringW&) { return false; }
 
 void ATUIExecuteCommandStringAndShowErrors(const char *, const ATUICommandOptions *) noexcept {}
 
-void ATUIShowWarning(VDGUIHandle, const wchar_t *, const wchar_t *) {}
+///////////////////////////////////////////////////////////////////////////
+// 8b. Error dialog queue (thread-safe, consumed by ImGui overlay)
+///////////////////////////////////////////////////////////////////////////
+
+static std::mutex s_errorMutex;
+static std::vector<std::pair<std::string,std::string>> s_pendingErrors;
+
+std::vector<std::pair<std::string,std::string>> ATImGuiPopPendingErrors() {
+	std::lock_guard<std::mutex> lock(s_errorMutex);
+	std::vector<std::pair<std::string,std::string>> result;
+	result.swap(s_pendingErrors);
+	return result;
+}
+
+void ATUIShowWarning(VDGUIHandle, const wchar_t *text, const wchar_t *caption) {
+	if (text) {
+		std::string capStr = caption ? VDTextWToU8(VDStringW(caption)).c_str() : "Warning";
+		std::string textStr = VDTextWToU8(VDStringW(text)).c_str();
+		std::lock_guard<std::mutex> lock(s_errorMutex);
+		s_pendingErrors.emplace_back(std::move(capStr), std::move(textStr));
+	}
+}
+
+void ATUIShowError2(VDGUIHandle, const wchar_t *text, const wchar_t *title) {
+	if (text) {
+		std::string capStr = title ? VDTextWToU8(VDStringW(title)).c_str() : "Error";
+		std::string textStr = VDTextWToU8(VDStringW(text)).c_str();
+		std::lock_guard<std::mutex> lock(s_errorMutex);
+		s_pendingErrors.emplace_back(std::move(capStr), std::move(textStr));
+	}
+}
+
+void ATUIShowError(VDGUIHandle, const wchar_t *text) {
+	if (text) {
+		std::string textStr = VDTextWToU8(VDStringW(text)).c_str();
+		std::lock_guard<std::mutex> lock(s_errorMutex);
+		s_pendingErrors.emplace_back("Error", std::move(textStr));
+	}
+}
+
+void ATUIShowError(VDGUIHandle h, const VDException& e) {
+	const wchar_t *msg = e.wc_str();
+	if (msg)
+		ATUIShowError(h, msg);
+}
+
+void ATUIShowError(const VDException& e) {
+	ATUIShowError(nullptr, e);
+}
+
 void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *, const wchar_t *) {}
 
 bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode, bool) { return false; }

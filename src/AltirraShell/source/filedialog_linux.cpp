@@ -215,6 +215,44 @@ VDStringW ATLinuxOpenFileDialog(const char *title, const char *filters) {
 	return VDStringW();
 }
 
+VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters) {
+	DialogBackend backend = DetectBackend();
+
+	if (backend == DialogBackend::kZenity) {
+		std::vector<std::string> argv;
+		argv.push_back("zenity");
+		argv.push_back("--file-selection");
+		argv.push_back("--save");
+		argv.push_back("--confirm-overwrite");
+		argv.push_back(std::string("--title=") + (title ? title : "Save File"));
+
+		auto zenityFilters = BuildZenityFilters(filters);
+		for (const auto& f : zenityFilters)
+			argv.push_back(f);
+
+		std::string result = RunCommand(argv);
+		if (!result.empty())
+			return VDTextU8ToW(VDStringA(result.c_str(), (int)result.size()));
+	} else if (backend == DialogBackend::kKdialog) {
+		std::vector<std::string> argv;
+		argv.push_back("kdialog");
+		argv.push_back("--getsavefilename");
+		argv.push_back("~");
+
+		std::string filter = BuildKdialogFilter(filters);
+		if (!filter.empty())
+			argv.push_back(filter);
+
+		std::string result = RunCommand(argv);
+		if (!result.empty())
+			return VDTextU8ToW(VDStringA(result.c_str(), (int)result.size()));
+	}
+
+	// Fallback: open ImGui popup
+	ATLinuxFileDialogOpenFallback(title ? title : "Save File");
+	return VDStringW();
+}
+
 void ATLinuxFileDialogOpenFallback(const char *title) {
 	s_fallbackOpen = true;
 	s_fallbackPath[0] = 0;
