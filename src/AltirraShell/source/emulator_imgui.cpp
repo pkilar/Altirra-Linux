@@ -206,7 +206,8 @@ static enum class PendingDialog {
 	kSaveState,
 	kLoadState,
 	kLoadTape,
-	kSaveTape
+	kSaveTape,
+	kBootImage
 } s_pendingDialog = PendingDialog::kNone;
 
 static const char *kDiskFilters =
@@ -769,6 +770,26 @@ static void DrawMenuBar() {
 				TryLoadImage(path);
 			} else if (ATLinuxFileDialogIsFallbackOpen()) {
 				s_pendingDialog = PendingDialog::kOpenImage;
+			}
+		}
+
+		if (ImGui::MenuItem("Boot Image...")) {
+			VDStringW path = ATLinuxOpenFileDialog("Boot Image", kDiskFilters);
+			if (!path.empty()) {
+				try {
+					g_sim.UnloadAll();
+					g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+					g_sim.ColdReset();
+					MRUAdd(path.c_str());
+					VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
+					char msg[256];
+					snprintf(msg, sizeof(msg), "Booted: %s", fname.c_str());
+					ShowToast(msg);
+				} catch (...) {
+					ShowToast("Failed to boot image");
+				}
+			} else if (ATLinuxFileDialogIsFallbackOpen()) {
+				s_pendingDialog = PendingDialog::kBootImage;
 			}
 		}
 
@@ -1639,6 +1660,17 @@ static void PollFileDialogFallback() {
 						g_sim.GetCassette().SetImagePersistent(result.c_str());
 						g_sim.GetCassette().SetImageClean();
 					} catch (...) { fprintf(stderr, "Save tape failed\n"); }
+				}
+				break;
+			case PendingDialog::kBootImage:
+				if (!result.empty()) {
+					try {
+						g_sim.UnloadAll();
+						g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr);
+						g_sim.ColdReset();
+						MRUAdd(result.c_str());
+						ShowToast("Booted image");
+					} catch (...) { ShowToast("Failed to boot image"); }
 				}
 				break;
 			default:
