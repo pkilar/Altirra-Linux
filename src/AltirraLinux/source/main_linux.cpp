@@ -93,6 +93,9 @@ void ATSetFullscreenCallback(void (*pfn)(bool));
 bool ATUIGetFullscreen();
 void ATSetFullscreen(bool);
 
+// Window resize callback (defined in stubs_linux.cpp)
+void ATSetWindowSizeCallback(void (*pfn)(int, int));
+
 static bool g_running = true;
 
 // Global accessor for the display backend — used by emulator_imgui.cpp
@@ -104,6 +107,11 @@ static SDL_Window *g_pWindow = nullptr;
 static void SetFullscreenImpl(bool fs) {
 	if (g_pWindow)
 		SDL_SetWindowFullscreen(g_pWindow, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
+}
+
+static void SetWindowSizeImpl(int w, int h) {
+	if (g_pWindow)
+		SDL_SetWindowSize(g_pWindow, w, h);
 }
 
 // Settings path (used at init and shutdown)
@@ -672,6 +680,7 @@ int main(int argc, char *argv[]) {
 	// Store window pointer and register fullscreen callback
 	g_pWindow = window;
 	ATSetFullscreenCallback(SetFullscreenImpl);
+	ATSetWindowSizeCallback(SetWindowSizeImpl);
 
 	fprintf(stderr, "SDL2/OpenGL initialized\n");
 

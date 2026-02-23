@@ -274,6 +274,18 @@ void ATSetFullscreen(bool fs) {
 		s_pfnSetFullscreen(fs);
 }
 void ATUIResizeDisplay() {}
+
+// ATSetWindowSize callback — sets the SDL window size without exposing SDL_Window*
+static void (*s_pfnSetWindowSize)(int, int) = nullptr;
+
+void ATSetWindowSizeCallback(void (*pfn)(int, int)) {
+	s_pfnSetWindowSize = pfn;
+}
+
+void ATSetWindowSize(int w, int h) {
+	if (s_pfnSetWindowSize)
+		s_pfnSetWindowSize(w, h);
+}
 void ATUIUpdateSpeedTiming() {}
 void ATSyncCPUHistoryState() {}
 

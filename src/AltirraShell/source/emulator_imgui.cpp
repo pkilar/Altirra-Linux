@@ -951,6 +951,22 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Window Size")) {
+			// Base NTSC resolution: 456x262
+			static const struct { const char *label; int w; int h; } kZoomLevels[] = {
+				{ "1x (456x262)",   456,  262 },
+				{ "2x (912x524)",   912,  524 },
+				{ "3x (1368x786)", 1368,  786 },
+				{ "4x (1824x1048)", 1824, 1048 },
+			};
+
+			for (auto& z : kZoomLevels) {
+				if (ImGui::MenuItem(z.label))
+					ATSetWindowSize(z.w, z.h);
+			}
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Video Settings..."))

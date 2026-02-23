@@ -93,6 +93,7 @@ void ATUISetShowFPS(bool enabled);
 bool ATUIGetFullscreen();
 bool ATUIGetDisplayFullscreen();
 void ATSetFullscreen(bool);
+void ATSetWindowSize(int w, int h);
 
 bool ATUIGetConstrainMouseFullScreen();
 void ATUISetConstrainMouseFullScreen(bool enabled);
