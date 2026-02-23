@@ -53,6 +53,9 @@ class ATIRQController;
 #include "debugger.h"
 #include "inputmanager.h"
 #include "oshelper.h"
+#include "audiowriter.h"
+#include "sapwriter.h"
+#include "vgmwriter.h"
 #include "inputmap.h"
 #include "joystick.h"
 
@@ -77,6 +80,11 @@ extern ATDisplaySDL2 *ATGetLinuxDisplay();
 
 // Quick save state (in-memory)
 static vdrefptr<IATSerializable> s_pQuickState;
+
+// Recording state
+static vdautoptr<ATAudioWriter> s_pAudioWriter;
+static vdautoptr<IATSAPWriter> s_pSapWriter;
+static vdrefptr<IATVgmWriter> s_pVgmWriter;
 
 // Window visibility
 static bool s_showSystemConfig = false;
@@ -164,6 +172,40 @@ static const char *kTapeFilters =
 static const char *kFirmwareFilters =
 	"ROM Images|*.rom;*.bin;*.epr;*.epm"
 	"|All Files|*";
+
+static const char *kWavFilters =
+	"WAV Audio|*.wav"
+	"|All Files|*";
+
+static const char *kSapFilters =
+	"SAP Type-R|*.sap"
+	"|All Files|*";
+
+static const char *kVgmFilters =
+	"VGM Files|*.vgm"
+	"|All Files|*";
+
+// ============= Recording helpers =============
+
+static bool IsRecordingActive() {
+	return s_pAudioWriter || s_pSapWriter || s_pVgmWriter;
+}
+
+static void StopAllRecording() {
+	if (s_pAudioWriter) {
+		g_sim.GetAudioOutput()->SetAudioTap(nullptr);
+		try { s_pAudioWriter->Finalize(); } catch (...) {}
+		s_pAudioWriter.reset();
+	}
+	if (s_pSapWriter) {
+		try { s_pSapWriter->Shutdown(); } catch (...) {}
+		s_pSapWriter.reset();
+	}
+	if (s_pVgmWriter) {
+		try { s_pVgmWriter->Shutdown(); } catch (...) {}
+		s_pVgmWriter.clear();
+	}
+}
 
 // ============= Hardware mode names =============
 
@@ -624,6 +666,86 @@ static void DrawMenuBar() {
 			}
 		}
 
+		if (ImGui::BeginMenu("Record")) {
+			bool recording = IsRecordingActive();
+			bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL;
+			bool isStereo = g_sim.IsDualPokeysEnabled();
+
+			if (ImGui::MenuItem("Record Audio (WAV)...", nullptr, false, !recording)) {
+				VDStringW path = ATLinuxSaveFileDialog("Record Audio", kWavFilters);
+				if (!path.empty()) {
+					try {
+						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+							path += L".wav";
+						s_pAudioWriter = new ATAudioWriter(path.c_str(), false, isStereo, isPAL, nullptr);
+						g_sim.GetAudioOutput()->SetAudioTap(s_pAudioWriter);
+					} catch (...) {
+						s_pAudioWriter.reset();
+						fprintf(stderr, "Failed to start audio recording\n");
+					}
+				}
+			}
+
+			if (ImGui::MenuItem("Record Raw Audio (PCM)...", nullptr, false, !recording)) {
+				VDStringW path = ATLinuxSaveFileDialog("Record Raw Audio",
+					"Raw PCM|*.pcm|All Files|*");
+				if (!path.empty()) {
+					try {
+						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+							path += L".pcm";
+						s_pAudioWriter = new ATAudioWriter(path.c_str(), true, isStereo, isPAL, nullptr);
+						g_sim.GetAudioOutput()->SetAudioTap(s_pAudioWriter);
+					} catch (...) {
+						s_pAudioWriter.reset();
+						fprintf(stderr, "Failed to start raw audio recording\n");
+					}
+				}
+			}
+
+			if (ImGui::MenuItem("Record SAP Type-R...", nullptr, false, !recording)) {
+				VDStringW path = ATLinuxSaveFileDialog("Record SAP", kSapFilters);
+				if (!path.empty()) {
+					try {
+						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+							path += L".sap";
+						s_pSapWriter = ATCreateSAPWriter();
+						s_pSapWriter->Init(
+							g_sim.GetEventManager(),
+							&g_sim.GetPokey(),
+							nullptr,
+							path.c_str(),
+							isPAL);
+					} catch (...) {
+						s_pSapWriter.reset();
+						fprintf(stderr, "Failed to start SAP recording\n");
+					}
+				}
+			}
+
+			if (ImGui::MenuItem("Record VGM...", nullptr, false, !recording)) {
+				VDStringW path = ATLinuxSaveFileDialog("Record VGM", kVgmFilters);
+				if (!path.empty()) {
+					try {
+						if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+							path += L".vgm";
+						s_pVgmWriter = ATCreateVgmWriter();
+						s_pVgmWriter->Init(path.c_str(), g_sim);
+					} catch (...) {
+						s_pVgmWriter.clear();
+						fprintf(stderr, "Failed to start VGM recording\n");
+					}
+				}
+			}
+
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Stop Recording", nullptr, false, recording)) {
+				StopAllRecording();
+			}
+
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Exit")) {
@@ -886,6 +1008,16 @@ static void DrawStatusBar() {
 		if (ATUIGetTurbo()) {
 			ImGui::SameLine(0, 16);
 			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "[TURBO]");
+		}
+
+		// Recording indicator
+		if (IsRecordingActive()) {
+			ImGui::SameLine(0, 16);
+			const char *recType = s_pAudioWriter
+				? (s_pAudioWriter->IsRecordingRaw() ? "REC:PCM" : "REC:WAV")
+				: s_pSapWriter ? "REC:SAP"
+				: "REC:VGM";
+			ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "%s", recType);
 		}
 
 		// FPS counter
@@ -2687,6 +2819,7 @@ void ATImGuiEmulatorDraw() {
 }
 
 void ATImGuiEmulatorShutdown() {
+	StopAllRecording();
 	s_pQuickState.clear();
 	s_cartLoadBuffer.clear();
 	s_cartDetectedModes.clear();
