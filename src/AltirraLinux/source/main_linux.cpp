@@ -975,7 +975,7 @@ int main(int argc, char *argv[]) {
 
 		// Check if quit was confirmed (after dirty disk dialog)
 		if (ATImGuiIsQuitConfirmed()) {
-			g_running = false;
+			g_running = 0;
 			break;
 		}
 

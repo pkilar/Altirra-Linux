@@ -71,6 +71,8 @@
 #include "uirender.h"
 #include "uiconfirm.h"
 #include "debugger.h"
+#include "constants.h"
+#include "firmwaremanager.h"
 #include <at/atdebugger/target.h>
 #include "devicemanager.h"
 #include "directorywatcher.h"
@@ -422,7 +424,79 @@ bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
 	g_sim.SetHardwareMode(mode);
 	return true;
 }
-bool ATUISwitchKernel(VDGUIHandle, uint64) { return false; }
+bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId) {
+	extern ATSimulator g_sim;
+
+	if (g_sim.GetKernelId() == kernelId)
+		return true;
+
+	ATFirmwareManager& fwm = *g_sim.GetFirmwareManager();
+
+	if (kernelId) {
+		ATFirmwareInfo fwinfo;
+		if (!fwm.GetFirmwareInfo(kernelId, fwinfo))
+			return false;
+
+		const auto hwmode = g_sim.GetHardwareMode();
+		const bool canUseXLOS = kATHardwareModeTraits[hwmode].mbRunsXLOS;
+
+		switch (fwinfo.mType) {
+			case kATFirmwareType_Kernel1200XL:
+				if (!canUseXLOS)
+					g_sim.SetHardwareMode(kATHardwareMode_1200XL);
+				break;
+
+			case kATFirmwareType_KernelXL:
+				if (!canUseXLOS)
+					g_sim.SetHardwareMode(kATHardwareMode_800XL);
+				break;
+
+			case kATFirmwareType_KernelXEGS:
+				if (!canUseXLOS)
+					g_sim.SetHardwareMode(kATHardwareMode_XEGS);
+				break;
+
+			case kATFirmwareType_Kernel800_OSA:
+			case kATFirmwareType_Kernel800_OSB:
+				if (hwmode == kATHardwareMode_5200)
+					g_sim.SetHardwareMode(kATHardwareMode_800);
+				break;
+
+			case kATFirmwareType_Kernel5200:
+				if (hwmode != kATHardwareMode_5200)
+					g_sim.SetHardwareMode(kATHardwareMode_5200);
+				break;
+
+			default:
+				break;
+		}
+
+		// XL kernels can't run with 48K or less (except 16K = 600XL config)
+		switch (fwinfo.mType) {
+			case kATFirmwareType_KernelXL:
+			case kATFirmwareType_Kernel1200XL:
+				switch (g_sim.GetMemoryMode()) {
+					case kATMemoryMode_8K:
+					case kATMemoryMode_24K:
+					case kATMemoryMode_32K:
+					case kATMemoryMode_40K:
+					case kATMemoryMode_48K:
+					case kATMemoryMode_52K:
+						g_sim.SetMemoryMode(kATMemoryMode_64K);
+						break;
+					default:
+						break;
+				}
+				break;
+			default:
+				break;
+		}
+	}
+
+	g_sim.SetKernel(kernelId);
+	g_sim.ColdReset();
+	return true;
+}
 
 void ATUITemporarilyMountVHDImageW32(VDGUIHandle, const wchar_t *, bool) {}
 
