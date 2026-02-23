@@ -18,8 +18,13 @@
 #include <stdafx.h>
 #include "console.h"
 #include <vd2/system/file.h>
+#include <imgui_manager.h>
+#include <debugger_imgui.h>
 #include <cstdio>
 #include <cstdarg>
+
+// External reference to ImGui manager (owned by main_linux.cpp)
+extern ATImGuiManager *g_pImGui;
 
 // Log file support
 static VDFileStream *g_pLogFile = nullptr;
@@ -49,6 +54,7 @@ void ATConsoleWrite(const char *s) {
 		g_pLogFile->write(s, strlen(s));
 	}
 	fputs(s, stderr);
+	ATImGuiDebuggerAppendConsole(s);
 }
 
 void ATConsolePrintfImpl(const char *format, ...) {
@@ -90,17 +96,27 @@ bool ATConsoleShowSource(uint32 addr) {
 	return false;
 }
 
+bool ATConsoleCheckBreak() {
+	return false;
+}
+
 void ATShowConsole() {
+	if (g_pImGui)
+		g_pImGui->SetVisible(true);
 }
 
 void ATOpenConsole() {
+	if (g_pImGui)
+		g_pImGui->SetVisible(true);
 }
 
 void ATCloseConsole() {
+	if (g_pImGui)
+		g_pImGui->SetVisible(false);
 }
 
 bool ATIsDebugConsoleActive() {
-	return false;
+	return g_pImGui && g_pImGui->IsVisible();
 }
 
 // Source windows — stub

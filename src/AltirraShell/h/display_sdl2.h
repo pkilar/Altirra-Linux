@@ -36,6 +36,10 @@ public:
 	// Called from main loop — uploads new frame to GL texture and renders
 	void PresentFrame();
 
+	// Split render path: upload texture + draw quad without swapping.
+	// Used when main loop needs to composite ImGui on top before swap.
+	void RenderFrame();
+
 	// Get window dimensions for aspect ratio calculation
 	void GetWindowSize(int& w, int& h) const;
 

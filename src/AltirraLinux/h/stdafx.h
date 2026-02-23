@@ -20,8 +20,17 @@
 
 #include <stddef.h>
 #include <string.h>
+#include <strings.h>
 #include <stdio.h>
 #include <math.h>
+
+// MSVC compat for _stricmp/_strnicmp used directly in some source files
+#ifndef _stricmp
+#define _stricmp strcasecmp
+#endif
+#ifndef _strnicmp
+#define _strnicmp strncasecmp
+#endif
 
 // Linux tchar.h stub (no TCHAR on Linux)
 #include <tchar.h>

@@ -50,6 +50,12 @@ void ATDisplaySDL2::Shutdown() {
 }
 
 void ATDisplaySDL2::PresentFrame() {
+	RenderFrame();
+	if (mpWindow)
+		SDL_GL_SwapWindow(mpWindow);
+}
+
+void ATDisplaySDL2::RenderFrame() {
 	if (!mpWindow || !mTexture)
 		return;
 

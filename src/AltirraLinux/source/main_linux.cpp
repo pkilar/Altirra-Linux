@@ -34,9 +34,12 @@
 
 #include "simulator.h"
 #include "joystick.h"
+#include "debugger.h"
 
 #include <display_sdl2.h>
 #include <input_sdl2.h>
+#include <imgui_manager.h>
+#include <debugger_imgui.h>
 
 #include <SDL.h>
 #include <GL/gl.h>
@@ -44,6 +47,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+
+// Forward declarations from debugger.cpp
+void ATInitDebugger();
+void ATShutdownDebugger();
 
 // Global simulator instance — matches Windows main.cpp
 ATSimulator g_sim;
@@ -53,6 +60,9 @@ static ATDisplaySDL2 *g_pDisplay = nullptr;
 
 // Input
 static ATInputSDL2 *g_pInput = nullptr;
+
+// ImGui manager (also referenced by console_linux.cpp)
+ATImGuiManager *g_pImGui = nullptr;
 
 // Joystick manager factory (defined in joystick_sdl2.cpp)
 IATJoystickManager *ATCreateJoystickManagerSDL2();
@@ -101,10 +111,67 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext) {
 	return true;
 }
 
+static void HandleDebugShortcuts(const SDL_Event& event) {
+	if (event.type != SDL_KEYDOWN)
+		return;
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
+
+	switch (event.key.keysym.scancode) {
+		case SDL_SCANCODE_F5:
+			if (dbg->IsRunning())
+				dbg->Break();
+			else
+				dbg->Run(kATDebugSrcMode_Disasm);
+			break;
+
+		case SDL_SCANCODE_F10:
+			if (!dbg->IsRunning())
+				dbg->StepOver(kATDebugSrcMode_Disasm);
+			break;
+
+		case SDL_SCANCODE_F11:
+			if (!dbg->IsRunning()) {
+				if (shift)
+					dbg->StepOut(kATDebugSrcMode_Disasm);
+				else
+					dbg->StepInto(kATDebugSrcMode_Disasm);
+			}
+			break;
+
+		default:
+			break;
+	}
+}
+
 static void ProcessEvents(SDL_Window *window) {
 	SDL_Event event;
 	while (SDL_PollEvent(&event)) {
-		// Let input handler try first
+		// Always let ImGui see the event (for input state tracking)
+		if (g_pImGui)
+			g_pImGui->ProcessEvent(event);
+
+		// F12 toggles debugger overlay
+		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F12) {
+			if (g_pImGui)
+				g_pImGui->ToggleVisible();
+			continue;
+		}
+
+		// When overlay is visible, handle debug shortcuts
+		if (g_pImGui && g_pImGui->IsVisible()) {
+			HandleDebugShortcuts(event);
+
+			// If ImGui wants the input, don't pass to emulation
+			if (g_pImGui->WantCaptureMouse() || g_pImGui->WantCaptureKeyboard())
+				continue;
+		}
+
+		// Let input handler try
 		if (g_pInput && g_pInput->ProcessEvent(event))
 			continue;
 
@@ -119,6 +186,21 @@ static void ProcessEvents(SDL_Window *window) {
 				break;
 		}
 	}
+}
+
+static void RenderAndSwap(SDL_Window *window) {
+	// Render emulation frame (upload texture + draw quad)
+	g_pDisplay->RenderFrame();
+
+	// Render ImGui overlay on top
+	if (g_pImGui && g_pImGui->IsVisible()) {
+		g_pImGui->NewFrame();
+		ATImGuiDebuggerDraw();
+		g_pImGui->Render();
+	}
+
+	// Single swap
+	SDL_GL_SwapWindow(window);
 }
 
 int main(int argc, char *argv[]) {
@@ -150,11 +232,26 @@ int main(int argc, char *argv[]) {
 
 	fprintf(stderr, "Display backend initialized\n");
 
+	// Init ImGui
+	g_pImGui = new ATImGuiManager;
+	if (!g_pImGui->Init(window, glContext)) {
+		fprintf(stderr, "Warning: ImGui init failed (continuing without debugger UI)\n");
+		delete g_pImGui;
+		g_pImGui = nullptr;
+	} else {
+		fprintf(stderr, "ImGui initialized (F12 to toggle debugger)\n");
+	}
+
 	// Init simulator
 	g_sim.Init();
 	g_sim.SetRandomSeed(rand() ^ (rand() << 15));
 
 	fprintf(stderr, "Simulator initialized\n");
+
+	// Init debugger (must be after sim init)
+	ATInitDebugger();
+	ATImGuiDebuggerInit();
+	fprintf(stderr, "Debugger initialized\n");
 
 	// Connect display to GTIA
 	g_sim.GetGTIA().SetVideoOutput(g_pDisplay);
@@ -197,15 +294,23 @@ int main(int argc, char *argv[]) {
 	while (g_running) {
 		ProcessEvents(window);
 
+		// Tick debugger (processes queued commands)
+		IATDebugger *dbg = ATGetDebugger();
+		if (dbg)
+			dbg->Tick();
+
 		// Advance emulation
 		ATSimulator::AdvanceResult result = g_sim.Advance(false);
 
 		if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
-			// Present the frame
-			g_pDisplay->PresentFrame();
+			RenderAndSwap(window);
 		} else if (result == ATSimulator::kAdvanceResult_Stopped) {
 			// Emulation stopped — still render but at reduced rate
-			g_pDisplay->PresentFrame();
+			// Auto-show debugger on stop
+			if (g_pImGui && !g_pImGui->IsVisible())
+				g_pImGui->SetVisible(true);
+
+			RenderAndSwap(window);
 			SDL_Delay(16);
 		}
 		// kAdvanceResult_Running means more work to do — loop immediately
@@ -231,8 +336,19 @@ int main(int argc, char *argv[]) {
 		g_pInput = nullptr;
 	}
 
+	// Shutdown debugger
+	ATImGuiDebuggerShutdown();
+	ATShutdownDebugger();
+
 	// Shutdown simulator
 	g_sim.Shutdown();
+
+	// Shutdown ImGui
+	if (g_pImGui) {
+		g_pImGui->Shutdown();
+		delete g_pImGui;
+		g_pImGui = nullptr;
+	}
 
 	// Shutdown display
 	if (g_pDisplay) {

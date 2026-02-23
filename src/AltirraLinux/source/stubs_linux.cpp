@@ -233,11 +233,8 @@ void ATUITemporarilyMountVHDImageW32(VDGUIHandle, const wchar_t *, bool) {}
 void ATRegisterDeviceConfigurers(ATDeviceManager&) {}
 
 ///////////////////////////////////////////////////////////////////////////
-// 9. Debugger accessors
+// 9. (Removed — debugger accessors now provided by debugger.cpp)
 ///////////////////////////////////////////////////////////////////////////
-
-IATDebugger *ATGetDebugger() { return nullptr; }
-IATDebuggerSymbolLookup *ATGetDebuggerSymbolLookup() { return nullptr; }
 
 ///////////////////////////////////////////////////////////////////////////
 // 10. Win32-to-SIO error translation (PCLink)
@@ -299,23 +296,8 @@ void ATCreateUIRenderer(IATUIRenderer **r) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 12. ATEnumLookupTable specializations
+// 12. (Removed — ATEnumLookupTable specializations now provided by debugger.cpp)
 ///////////////////////////////////////////////////////////////////////////
-
-// These provide enum-to-string lookup tables for debugger settings.
-// On Linux we provide empty tables since the debugger UI is not yet ported.
-
-static const ATEnumLookupTable s_emptyTable = { nullptr, 0, 0 };
-
-template<>
-const ATEnumLookupTable& ATGetEnumLookupTable<ATDebuggerScriptAutoLoadMode>() {
-	return s_emptyTable;
-}
-
-template<>
-const ATEnumLookupTable& ATGetEnumLookupTable<ATDebuggerSymbolLoadMode>() {
-	return s_emptyTable;
-}
 
 ///////////////////////////////////////////////////////////////////////////
 // 13. ATDirectoryWatcher (Windows ReadDirectoryChangesW)

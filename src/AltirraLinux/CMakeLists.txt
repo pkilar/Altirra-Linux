@@ -196,7 +196,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"cmdwindow.cpp"
 
 	# Windows-only implementations
-	"debugger.cpp"
 	"debuggerautotest.cpp"
 	"idephysdisk.cpp"
 	"midimate.cpp"
@@ -238,10 +237,10 @@ add_executable(altirra
 	${LINUX_SOURCES}
 )
 
-# Include directories
-target_include_directories(altirra
+# Include directories — BEFORE ensures our shim headers override system-wide includes
+target_include_directories(altirra BEFORE
 	PRIVATE
-		# Our Linux headers (stdafx.h, tchar.h) — must be FIRST to override
+		# Our Linux headers (stdafx.h, tchar.h, uiframe.h shim) — must be FIRST to override
 		${CMAKE_CURRENT_SOURCE_DIR}/h
 
 		# Altirra application headers (simulator.h, console.h, etc.)

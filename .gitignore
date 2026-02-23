@@ -7,3 +7,4 @@ lib/
 
 # Local configuration
 localconfig/active/
+*code-workspace
