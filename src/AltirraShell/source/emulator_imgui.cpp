@@ -50,6 +50,9 @@ class ATIRQController;
 #include "devicemanager.h"
 #include "cpu.h"
 #include "debugger.h"
+#include "inputmanager.h"
+#include "inputmap.h"
+#include "joystick.h"
 
 #include <SDL.h>
 
@@ -85,6 +88,7 @@ static bool s_showDeviceManager = false;
 static bool s_showCassetteControl = false;
 static bool s_showBootOptions = false;
 static bool s_showCPUOptions = false;
+static bool s_showInputSetup = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -258,6 +262,30 @@ static const char *kCPUModeNames[] = {
 };
 static_assert(sizeof(kCPUModeNames)/sizeof(kCPUModeNames[0]) == kATCPUModeCount);
 
+static const char *ATGetControllerTypeName(ATInputControllerType type) {
+	switch (type) {
+		case kATInputControllerType_Joystick:		return "Joystick";
+		case kATInputControllerType_Paddle:			return "Paddle";
+		case kATInputControllerType_STMouse:		return "ST Mouse";
+		case kATInputControllerType_Console:		return "Console";
+		case kATInputControllerType_5200Controller:	return "5200 Controller";
+		case kATInputControllerType_InputState:		return "Input State";
+		case kATInputControllerType_LightGun:		return "Light Gun (XG-1)";
+		case kATInputControllerType_Tablet:			return "Tablet";
+		case kATInputControllerType_KoalaPad:		return "KoalaPad";
+		case kATInputControllerType_AmigaMouse:		return "Amiga Mouse";
+		case kATInputControllerType_Keypad:			return "Keypad";
+		case kATInputControllerType_Trackball_CX80:	return "Trackball CX-80";
+		case kATInputControllerType_5200Trackball:	return "5200 Trackball";
+		case kATInputControllerType_Driving:		return "Driving Controller";
+		case kATInputControllerType_Keyboard:		return "Keyboard";
+		case kATInputControllerType_LightPen:		return "Light Pen";
+		case kATInputControllerType_PowerPad:		return "Power Pad";
+		case kATInputControllerType_LightPenStack:	return "Light Pen Stack";
+		default:									return "Unknown";
+	}
+}
+
 // ============= Helper: load file via dialog =============
 
 static void TryLoadImage(const VDStringW& path) {
@@ -350,6 +378,9 @@ static void DrawMenuBar() {
 		}
 		if (ImGui::MenuItem("Keyboard...")) {
 			s_showKeyboardConfig = true;
+		}
+		if (ImGui::MenuItem("Input Setup...")) {
+			s_showInputSetup = true;
 		}
 		if (ImGui::MenuItem("Devices...")) {
 			s_showDeviceManager = true;
@@ -1946,6 +1977,162 @@ static void DrawBootOptions() {
 	ImGui::End();
 }
 
+// ============= Input Setup Window =============
+
+static void DrawInputSetup() {
+	if (!s_showInputSetup)
+		return;
+
+	ATInputManager *inputMgr = g_sim.GetInputManager();
+	if (!inputMgr)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(620, 480), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Input Setup", &s_showInputSetup)) {
+		ImGui::End();
+		return;
+	}
+
+	// --- Detected controllers ---
+	if (ImGui::CollapsingHeader("Detected Controllers", ImGuiTreeNodeFlags_DefaultOpen)) {
+		int numJoysticks = SDL_NumJoysticks();
+		if (numJoysticks > 0) {
+			for (int i = 0; i < numJoysticks; ++i) {
+				const char *name = SDL_JoystickNameForIndex(i);
+				if (SDL_IsGameController(i)) {
+					ImGui::BulletText("Gamepad %d: %s", i + 1, name ? name : "(unknown)");
+				} else {
+					ImGui::BulletText("Joystick %d: %s", i + 1, name ? name : "(unknown)");
+				}
+			}
+		} else {
+			ImGui::TextDisabled("No joysticks/gamepads detected");
+		}
+
+		if (ImGui::Button("Rescan")) {
+			IATJoystickManager *jm = g_sim.GetJoystickManager();
+			if (jm)
+				jm->RescanForDevices();
+		}
+	}
+
+	// --- Active input maps ---
+	if (ImGui::CollapsingHeader("Input Maps", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ImGui::TextWrapped("Input maps bind host inputs (keyboard, mouse, gamepad) to Atari controllers.");
+		ImGui::Spacing();
+
+		uint32 mapCount = inputMgr->GetInputMapCount();
+
+		if (mapCount == 0) {
+			ImGui::TextDisabled("No input maps configured. Click 'Reset to Defaults' to add standard maps.");
+		}
+
+		// Scrollable list of maps
+		if (ImGui::BeginChild("##maplist", ImVec2(0, 280), ImGuiChildFlags_Borders)) {
+			static int s_selectedMapIdx = -1;
+
+			for (uint32 i = 0; i < mapCount; ++i) {
+				ATInputMap *imap = nullptr;
+				if (!inputMgr->GetInputMapByIndex(i, &imap))
+					continue;
+
+				ImGui::PushID((int)i);
+
+				bool enabled = inputMgr->IsInputMapEnabled(imap);
+				VDStringA u8name = VDTextWToU8(VDStringW(imap->GetName()));
+
+				// Checkbox for enable/disable
+				if (ImGui::Checkbox("##en", &enabled)) {
+					inputMgr->ActivateInputMap(imap, enabled);
+				}
+				ImGui::SameLine();
+
+				// Selectable row
+				bool selected = (s_selectedMapIdx == (int)i);
+				if (ImGui::Selectable(u8name.c_str(), selected)) {
+					s_selectedMapIdx = (int)i;
+				}
+
+				// Tooltip with map details on hover
+				if (ImGui::IsItemHovered()) {
+					ImGui::BeginTooltip();
+					uint32 ctrlCount = imap->GetControllerCount();
+					for (uint32 c = 0; c < ctrlCount; ++c) {
+						const ATInputMap::Controller& ctrl = imap->GetController(c);
+						ImGui::Text("  %s (port %u)", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+					}
+					uint32 mappingCount = imap->GetMappingCount();
+					ImGui::Text("  %u mapping(s)", mappingCount);
+					if (imap->IsQuickMap())
+						ImGui::Text("  [Quick Map]");
+					ImGui::EndTooltip();
+				}
+
+				ImGui::PopID();
+			}
+
+			// Buttons for selected map
+			ImGui::Spacing();
+			ImGui::Separator();
+
+			ATInputMap *selMap = nullptr;
+			if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount) {
+				inputMgr->GetInputMapByIndex(s_selectedMapIdx, &selMap);
+			}
+
+			if (ImGui::Button("Remove") && selMap) {
+				inputMgr->RemoveInputMap(selMap);
+				s_selectedMapIdx = -1;
+			}
+		}
+		ImGui::EndChild();
+	}
+
+	// --- Add from presets ---
+	if (ImGui::CollapsingHeader("Add Preset Map")) {
+		uint32 presetCount = inputMgr->GetPresetInputMapCount();
+
+		static int s_selectedPresetIdx = -1;
+
+		if (ImGui::BeginChild("##presetlist", ImVec2(0, 200), ImGuiChildFlags_Borders)) {
+			for (uint32 i = 0; i < presetCount; ++i) {
+				vdrefptr<ATInputMap> preset;
+				if (!inputMgr->GetPresetInputMapByIndex(i, ~preset))
+					continue;
+
+				VDStringA u8name = VDTextWToU8(VDStringW(preset->GetName()));
+				bool selected = (s_selectedPresetIdx == (int)i);
+
+				if (ImGui::Selectable(u8name.c_str(), selected)) {
+					s_selectedPresetIdx = (int)i;
+				}
+			}
+		}
+		ImGui::EndChild();
+
+		if (ImGui::Button("Add Selected Preset") && s_selectedPresetIdx >= 0) {
+			vdrefptr<ATInputMap> preset;
+			if (inputMgr->GetPresetInputMapByIndex(s_selectedPresetIdx, ~preset)) {
+				inputMgr->AddInputMap(preset);
+			}
+		}
+	}
+
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	if (ImGui::Button("Reset to Defaults")) {
+		inputMgr->ResetToDefaults();
+	}
+	ImGui::SameLine();
+	ImGui::TextDisabled("(?)");
+	if (ImGui::IsItemHovered()) {
+		ImGui::SetTooltip("Remove all maps and add back the default set.\nIncludes arrow keys, numpad, mouse, and gamepad presets.");
+	}
+
+	ImGui::End();
+}
+
 // ============= Cassette Control Window =============
 
 static void FormatTapeTime(char *buf, size_t bufLen, float seconds) {
@@ -2364,6 +2551,7 @@ void ATImGuiEmulatorDraw() {
 	DrawAudioOptions();
 	DrawVideoConfig();
 	DrawKeyboardConfig();
+	DrawInputSetup();
 	DrawDeviceManager();
 	DrawStatusBar();
 	DrawAbout();
