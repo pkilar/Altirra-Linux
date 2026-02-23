@@ -545,9 +545,12 @@ static void ProcessEvents(SDL_Window *window) {
 					VDStringW path = VDTextU8ToW(VDStringA(dropped));
 					try {
 						g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
-						fprintf(stderr, "Loaded dropped file: %s\n", dropped);
+						char msg[256];
+						const char *fname = strrchr(dropped, '/');
+						snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : dropped);
+						ATImGuiShowToast(msg);
 					} catch (...) {
-						fprintf(stderr, "Failed to load dropped file: %s\n", dropped);
+						ATImGuiShowToast("Failed to load dropped file");
 					}
 					SDL_free(dropped);
 				}

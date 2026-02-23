@@ -403,9 +403,12 @@ static void TryLoadImage(const VDStringW& path) {
 	try {
 		g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
 		MRUAdd(path.c_str());
+		VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
+		char msg[256];
+		snprintf(msg, sizeof(msg), "Loaded: %s", fname.c_str());
+		ShowToast(msg);
 	} catch (...) {
-		VDStringA u8 = VDTextWToU8(path);
-		fprintf(stderr, "Failed to load image: %s\n", u8.c_str());
+		ShowToast("Failed to load image");
 	}
 }
 
@@ -416,9 +419,14 @@ static void TryMountDisk(int index, const VDStringW& path) {
 	try {
 		ATDiskInterface& di = g_sim.GetDiskInterface(index);
 		di.LoadDisk(path.c_str());
+		VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
+		char msg[128];
+		snprintf(msg, sizeof(msg), "D%d: %s", index + 1, fname.c_str());
+		ShowToast(msg);
 	} catch (...) {
-		VDStringA u8 = VDTextWToU8(path);
-		fprintf(stderr, "Failed to mount disk D%d: %s\n", index + 1, u8.c_str());
+		char msg[64];
+		snprintf(msg, sizeof(msg), "Failed to mount D%d", index + 1);
+		ShowToast(msg);
 	}
 }
 
