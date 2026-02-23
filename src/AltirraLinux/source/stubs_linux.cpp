@@ -620,14 +620,22 @@ void ATCreateUIRenderer(IATUIRenderer **r) {
 ///////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////
-// 13. ATDirectoryWatcher (Windows ReadDirectoryChangesW)
-//     ATDirectoryWatcher inherits VDThread so we must provide ThreadRun().
+// 13. ATDirectoryWatcher — Linux polling implementation
+//     Uses eventfd for exit signaling, polls directory checksums every 1s.
+//     The void* mhExitEvent member stores an eventfd (via intptr_t cast).
 ///////////////////////////////////////////////////////////////////////////
+
+#include <poll.h>
+#include <sys/eventfd.h>
+#include <vd2/system/binary.h>
+#include <vd2/system/filesys.h>
+#include <at/atcore/checksum.h>
 
 bool ATDirectoryWatcher::sbShouldUsePolling = true;
 
 ATDirectoryWatcher::ATDirectoryWatcher()
-	: mhDir(nullptr)
+	: VDThread("Altirra directory watcher")
+	, mhDir(nullptr)
 	, mhExitEvent(nullptr)
 	, mhDirChangeEvent(nullptr)
 	, mpChangeBuffer(nullptr)
@@ -641,25 +649,162 @@ ATDirectoryWatcher::~ATDirectoryWatcher() {
 	Shutdown();
 }
 
-void ATDirectoryWatcher::Init(const wchar_t *, bool) {
-	// Stub: directory watching not yet implemented on Linux.
-	// A real implementation would use inotify.
+void ATDirectoryWatcher::Init(const wchar_t *basePath, bool recursive) {
+	Shutdown();
+
+	mBasePath = VDGetLongPath(basePath);
+	mbRecursive = recursive;
+
+	int efd = eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+	if (efd < 0)
+		return;
+
+	mhExitEvent = reinterpret_cast<void *>(static_cast<intptr_t>(efd));
+
+	ThreadStart();
 }
 
 void ATDirectoryWatcher::Shutdown() {
-	// Stub: nothing to clean up
+	if (isThreadAttached()) {
+		int efd = static_cast<int>(reinterpret_cast<intptr_t>(mhExitEvent));
+		if (efd >= 0) {
+			uint64_t val = 1;
+			[[maybe_unused]] auto r = ::write(efd, &val, sizeof(val));
+		}
+		ThreadWait();
+	}
+
+	int efd = static_cast<int>(reinterpret_cast<intptr_t>(mhExitEvent));
+	if (efd >= 0) {
+		::close(efd);
+		mhExitEvent = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
+	}
 }
 
 bool ATDirectoryWatcher::CheckForChanges() {
-	return false;
+	bool changed = false;
+
+	vdsynchronized(mMutex) {
+		changed = mbAllChanged;
+
+		if (changed) {
+			mbAllChanged = false;
+		} else if (!mChangedDirs.empty()) {
+			mChangedDirs.clear();
+			changed = true;
+		}
+	}
+
+	return changed;
 }
 
-bool ATDirectoryWatcher::CheckForChanges(vdfastvector<wchar_t>&) {
-	return false;
+bool ATDirectoryWatcher::CheckForChanges(vdfastvector<wchar_t>& strheap) {
+	bool allChanged = false;
+	strheap.clear();
+
+	vdsynchronized(mMutex) {
+		allChanged = mbAllChanged;
+
+		if (allChanged) {
+			mbAllChanged = false;
+		} else {
+			for (const auto& s : mChangedDirs) {
+				const wchar_t *t = s.c_str();
+				strheap.insert(strheap.end(), t, t + s.size() + 1);
+			}
+		}
+
+		mChangedDirs.clear();
+	}
+
+	return allChanged;
 }
 
 void ATDirectoryWatcher::ThreadRun() {
-	// Stub: no background thread on Linux
+	// Always use polling on Linux (inotify support could be added later)
+	RunPollThread();
+}
+
+void ATDirectoryWatcher::RunPollThread() {
+	int efd = static_cast<int>(reinterpret_cast<intptr_t>(mhExitEvent));
+	uint32 delay = 1000;
+	uint32 lastChecksum[8] {};
+	bool firstPoll = true;
+
+	for (;;) {
+		uint32 newChecksum[8] {};
+		PollDirectory(newChecksum, mBasePath, 0);
+
+		if (memcmp(newChecksum, lastChecksum, sizeof newChecksum) || firstPoll) {
+			memcpy(lastChecksum, newChecksum, sizeof lastChecksum);
+
+			if (firstPoll)
+				firstPoll = false;
+			else
+				NotifyAllChanged();
+		}
+
+		// Wait for exit signal or timeout
+		struct pollfd pfd {};
+		pfd.fd = efd;
+		pfd.events = POLLIN;
+
+		int ret = ::poll(&pfd, 1, delay);
+		if (ret > 0)
+			break;  // exit signaled
+	}
+}
+
+void ATDirectoryWatcher::PollDirectory(uint32 *orderIndependentChecksum, const VDStringSpanW& path, uint32 nestingLevel) {
+	ATChecksumEngineSHA256 checksumEngine;
+
+	VDDirectoryIterator it(VDMakePath(path, VDStringSpanW(L"*")).c_str());
+	while (it.Next()) {
+		const VDStringW& fullItemPath = it.GetFullPath();
+
+		checksumEngine.Reset();
+		checksumEngine.Process(fullItemPath.data(), fullItemPath.size() * sizeof(fullItemPath[0]));
+
+		const struct MiscData {
+			sint64 mSize;
+			uint64 mCreationDate;
+			uint64 mLastWriteDate;
+			uint32 mAttributes;
+			uint32 mPad;
+		} miscData = {
+			it.GetSize(),
+			it.GetCreationDate().mTicks,
+			it.GetLastWriteDate().mTicks,
+			it.GetAttributes()
+		};
+
+		checksumEngine.Process(&miscData, sizeof miscData);
+		const auto& checksum = checksumEngine.Finalize();
+
+		uint32 c = 0;
+		for (uint32 i = 0; i < 8; ++i) {
+			uint32 x = orderIndependentChecksum[i];
+			uint32 y = VDReadUnalignedU32(&checksum.mDigest[i * 4]);
+			uint64 sum = (uint64)x + y + c;
+
+			orderIndependentChecksum[i] = (uint32)sum;
+			c = (uint32)(sum >> 32);
+		}
+
+		if (it.IsDirectory() && !it.IsLink() && nestingLevel < 8 && mbRecursive)
+			PollDirectory(orderIndependentChecksum, fullItemPath, nestingLevel + 1);
+	}
+}
+
+void ATDirectoryWatcher::RunNotifyThread() {
+	// Not implemented on Linux — use polling mode
+	RunPollThread();
+}
+
+void ATDirectoryWatcher::NotifyAllChanged() {
+	vdsynchronized(mMutex) {
+		mbAllChanged = true;
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////
