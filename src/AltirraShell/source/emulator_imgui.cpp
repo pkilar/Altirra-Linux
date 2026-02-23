@@ -100,6 +100,7 @@ static bool s_showCassetteControl = false;
 static bool s_showBootOptions = false;
 static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
+static bool s_showShortcuts = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -890,6 +891,11 @@ static void DrawMenuBar() {
 
 	// --- Help menu ---
 	if (ImGui::BeginMenu("Help")) {
+		if (ImGui::MenuItem("Keyboard Shortcuts..."))
+			s_showShortcuts = true;
+
+		ImGui::Separator();
+
 		if (ImGui::MenuItem("About Altirra..."))
 			s_showAbout = true;
 
@@ -1113,6 +1119,52 @@ static void DrawAbout() {
 	ImGui::Separator();
 	if (ImGui::Button("Close", ImVec2(120, 0)))
 		s_showAbout = false;
+
+	ImGui::End();
+}
+
+// ============= Keyboard Shortcuts Window =============
+
+static void DrawShortcuts() {
+	if (!s_showShortcuts)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(420, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Keyboard Shortcuts", &s_showShortcuts)) {
+		ImGui::End();
+		return;
+	}
+
+	if (ImGui::BeginTable("shortcuts", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+		ImGui::TableSetupColumn("Key", ImGuiTableColumnFlags_WidthFixed, 140);
+		ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableHeadersRow();
+
+		auto row = [](const char *key, const char *action) {
+			ImGui::TableNextRow();
+			ImGui::TableSetColumnIndex(0);
+			ImGui::TextUnformatted(key);
+			ImGui::TableSetColumnIndex(1);
+			ImGui::TextUnformatted(action);
+		};
+
+		row("F5", "Break / Run (debugger)");
+		row("F6", "Warm Reset");
+		row("Shift+F6", "Cold Reset");
+		row("F7", "Quick Save State");
+		row("F8", "Quick Load State");
+		row("F9", "Save Screenshot");
+		row("F10", "Step Over (debugger)");
+		row("F11", "Fullscreen / Step Into");
+		row("Shift+F11", "Step Out (debugger)");
+		row("F12", "Toggle Overlay");
+		row("Pause", "Pause / Resume");
+
+		ImGui::EndTable();
+	}
+
+	ImGui::Spacing();
+	ImGui::TextDisabled("F5/F10/F11(step) only active with overlay open");
 
 	ImGui::End();
 }
@@ -2855,6 +2907,7 @@ void ATImGuiEmulatorDraw() {
 	DrawDeviceManager();
 	DrawStatusBar();
 	DrawAbout();
+	DrawShortcuts();
 	PollFileDialogFallback();
 	CheckPendingErrors();
 	DrawErrorPopup();
