@@ -1322,6 +1322,15 @@ static void DrawStatusBar() {
 			ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "%s", recType);
 		}
 
+		// Mute indicator
+		{
+			IATAudioOutput *audioOut = g_sim.GetAudioOutput();
+			if (audioOut && audioOut->GetMute()) {
+				ImGui::SameLine(0, 16);
+				ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "MUTE");
+			}
+		}
+
 		// FPS counter
 		++s_fpsFrameCount;
 		double now = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
