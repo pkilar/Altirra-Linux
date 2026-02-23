@@ -38,6 +38,7 @@ class ATIRQController;
 
 #include "simulator.h"
 #include "constants.h"
+#include "cassette.h"
 #include "diskinterface.h"
 #include "cartridge.h"
 #include "firmwaremanager.h"
@@ -80,6 +81,7 @@ static bool s_showAudioOptions = false;
 static bool s_showVideoConfig = false;
 static bool s_showKeyboardConfig = false;
 static bool s_showDeviceManager = false;
+static bool s_showCassetteControl = false;
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -142,6 +144,10 @@ static const char *kSaveStateFilters =
 
 static const char *kCartFilters =
 	"Cartridge Images|*.car;*.bin;*.rom"
+	"|All Files|*";
+
+static const char *kTapeFilters =
+	"Tape Images|*.cas;*.wav"
 	"|All Files|*";
 
 static const char *kFirmwareFilters =
@@ -227,6 +233,18 @@ static const char *kColorMatchingNames[] = {
 static const char *kLumaRampNames[] = {
 	"Linear", "XL"
 };
+
+static const char *kCassetteTurboModeNames[] = {
+	"None (FSK only)",
+	"Command Control",
+	"Proceed Sense",
+	"Interrupt Sense",
+	"KSO Turbo 2000",
+	"Turbo D",
+	"Data Control",
+	"Always"
+};
+static_assert(sizeof(kCassetteTurboModeNames)/sizeof(kCassetteTurboModeNames[0]) == kATCassetteTurboMode_Always + 1);
 
 // ============= Helper: load file via dialog =============
 
@@ -393,6 +411,11 @@ static void DrawMenuBar() {
 				s_pendingDialog = PendingDialog::kLoadState;
 			}
 		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Cassette..."))
+			s_showCassetteControl = true;
 
 		ImGui::Separator();
 
@@ -671,6 +694,20 @@ static void DrawStatusBar() {
 		if (g_sim.IsCartridgeAttached(0)) {
 			ImGui::SameLine(0, 16);
 			ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+		}
+
+		// Tape indicator
+		{
+			ATCassetteEmulator& cas = g_sim.GetCassette();
+			if (cas.IsLoaded()) {
+				ImGui::SameLine(0, 16);
+				if (cas.IsPlayEnabled() && !cas.IsPaused())
+					ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "TAPE>");
+				else if (cas.IsRecordEnabled() && !cas.IsPaused())
+					ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "TAPE*");
+				else
+					ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "TAPE");
+			}
 		}
 
 		// Turbo indicator
@@ -1690,6 +1727,203 @@ static void DrawKeyboardConfig() {
 	ImGui::End();
 }
 
+// ============= Cassette Control Window =============
+
+static void FormatTapeTime(char *buf, size_t bufLen, float seconds) {
+	int mins = (int)(seconds / 60.0f);
+	float secs = seconds - mins * 60.0f;
+	snprintf(buf, bufLen, "%d:%05.2f", mins, secs);
+}
+
+static void DrawCassetteControl() {
+	if (!s_showCassetteControl)
+		return;
+
+	ATCassetteEmulator& cas = g_sim.GetCassette();
+
+	ImGui::SetNextWindowSize(ImVec2(460, 340), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Cassette Control", &s_showCassetteControl)) {
+		ImGui::End();
+		return;
+	}
+
+	// Load/New/Unload/Save toolbar
+	if (ImGui::Button("Load Tape...")) {
+		VDStringW path = ATLinuxOpenFileDialog("Load Tape", kTapeFilters);
+		if (!path.empty()) {
+			try {
+				cas.Load(path.c_str());
+			} catch (...) {
+				fprintf(stderr, "Failed to load tape image\n");
+			}
+		}
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("New Tape")) {
+		cas.LoadNew();
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Unload") && cas.IsLoaded()) {
+		cas.Unload();
+	}
+
+	ImGui::SameLine();
+
+	if (ImGui::Button("Save As...") && cas.IsLoaded()) {
+		VDStringW path = ATLinuxSaveFileDialog("Save Tape", kTapeFilters);
+		if (!path.empty()) {
+			try {
+				cas.SetImagePersistent(path.c_str());
+				cas.SetImageClean();
+			} catch (...) {
+				fprintf(stderr, "Failed to save tape image\n");
+			}
+		}
+	}
+
+	// Current tape info
+	ImGui::Separator();
+
+	if (cas.IsLoaded()) {
+		const wchar_t *tapePath = cas.GetPath();
+		if (tapePath && *tapePath) {
+			VDStringA u8path = VDTextWToU8(VDStringW(VDFileSplitPath(tapePath)));
+			ImGui::Text("File: %s", u8path.c_str());
+		} else {
+			ImGui::Text("File: [new tape]");
+		}
+
+		if (cas.IsImageDirty())
+			ImGui::SameLine(), ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "(modified)");
+	} else {
+		ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "No tape loaded");
+	}
+
+	// Position display and scrubber
+	float pos = cas.GetPosition();
+	float len = cas.GetLength();
+
+	char posStr[32], lenStr[32];
+	FormatTapeTime(posStr, sizeof(posStr), pos);
+	FormatTapeTime(lenStr, sizeof(lenStr), len);
+
+	ImGui::Text("Position: %s / %s", posStr, lenStr);
+
+	if (cas.IsLoaded() && len > 0) {
+		float scrubPos = pos;
+		ImGui::SetNextItemWidth(-1);
+		if (ImGui::SliderFloat("##tapepos", &scrubPos, 0.0f, len, "")) {
+			cas.SeekToTime(scrubPos);
+		}
+	}
+
+	// Transport controls
+	ImGui::Separator();
+
+	bool loaded = cas.IsLoaded();
+	bool playing = cas.IsPlayEnabled();
+	bool recording = cas.IsRecordEnabled();
+	bool paused = cas.IsPaused();
+	bool stopped = cas.IsStopped();
+
+	// Rewind
+	if (ImGui::Button("Rewind") && loaded)
+		cas.RewindToStart();
+
+	ImGui::SameLine();
+
+	// Play
+	if (playing && !paused) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.2f, 1.0f));
+		if (ImGui::Button("Play"))
+			cas.SetPaused(true);
+		ImGui::PopStyleColor();
+	} else {
+		if (ImGui::Button("Play") && loaded) {
+			if (paused)
+				cas.SetPaused(false);
+			else
+				cas.Play();
+		}
+	}
+
+	ImGui::SameLine();
+
+	// Record
+	if (recording && !paused) {
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+		if (ImGui::Button("Record"))
+			cas.SetPaused(true);
+		ImGui::PopStyleColor();
+	} else {
+		if (ImGui::Button("Record") && loaded) {
+			if (paused && recording)
+				cas.SetPaused(false);
+			else
+				cas.Record();
+		}
+	}
+
+	ImGui::SameLine();
+
+	// Stop
+	if (ImGui::Button("Stop") && loaded && !stopped)
+		cas.Stop();
+
+	ImGui::SameLine();
+
+	// Skip forward
+	if (ImGui::Button("+10s") && loaded)
+		cas.SkipForward(10.0f);
+
+	// Status indicators
+	{
+		ImGui::SameLine(0, 16);
+
+		if (playing && !paused)
+			ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "PLAY");
+		else if (recording && !paused)
+			ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "REC");
+		else if (paused)
+			ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.2f, 1.0f), "PAUSED");
+		else
+			ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "STOP");
+
+		// Motor indicator
+		if (cas.IsMotorRunning()) {
+			ImGui::SameLine(0, 12);
+			ImGui::TextColored(ImVec4(0.2f, 0.8f, 1.0f, 1.0f), "MOTOR");
+		}
+	}
+
+	// Tape options
+	ImGui::Separator();
+
+	if (ImGui::CollapsingHeader("Options")) {
+		// Turbo mode
+		int turboMode = (int)cas.GetTurboMode();
+		ImGui::Text("Turbo Mode:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("##turbomode", &turboMode, kCassetteTurboModeNames, kATCassetteTurboMode_Always + 1))
+			cas.SetTurboMode((ATCassetteTurboMode)turboMode);
+
+		bool autoRewind = cas.IsAutoRewindEnabled();
+		if (ImGui::Checkbox("Auto-rewind on load", &autoRewind))
+			cas.SetAutoRewindEnabled(autoRewind);
+
+		bool loadAsAudio = cas.IsLoadDataAsAudioEnabled();
+		if (ImGui::Checkbox("Load data as audio", &loadAsAudio))
+			cas.SetLoadDataAsAudioEnable(loadAsAudio);
+	}
+
+	ImGui::End();
+}
+
 // ============= Video Configuration Window =============
 
 static void DrawVideoConfig() {
@@ -1899,6 +2133,7 @@ void ATImGuiEmulatorInit() {
 void ATImGuiEmulatorDraw() {
 	DrawMenuBar();
 	DrawSystemConfig();
+	DrawCassetteControl();
 	DrawCartridgeBrowser();
 	DrawFirmwareManager();
 	DrawAudioOptions();
