@@ -122,6 +122,12 @@ static VDStringW g_settingsPath;
 // Registry provider (owned, freed at shutdown)
 static VDRegistryProviderMemory *g_pRegistryMemory = nullptr;
 
+// Save settings — used by emulator_imgui.cpp
+void ATLinuxSaveSettings() {
+	if (!g_settingsPath.empty())
+		ATUISaveRegistry(g_settingsPath.c_str());
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // Settings path helpers
 ///////////////////////////////////////////////////////////////////////////
@@ -510,6 +516,16 @@ static void ProcessEvents(SDL_Window *window) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F11
 				&& !(g_pImGui && g_pImGui->IsVisible())) {
 				ATSetFullscreen(!ATUIGetFullscreen());
+				continue;
+			}
+
+			// Ctrl+S = save settings
+			if (event.key.keysym.scancode == SDL_SCANCODE_S
+				&& (event.key.keysym.mod & KMOD_CTRL)) {
+				if (!g_settingsPath.empty()) {
+					ATUISaveRegistry(g_settingsPath.c_str());
+					ATImGuiShowToast("Settings saved");
+				}
 				continue;
 			}
 

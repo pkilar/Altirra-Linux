@@ -634,6 +634,13 @@ static void DrawMenuBar() {
 		}
 
 		ImGui::Separator();
+
+		if (ImGui::MenuItem("Save Settings", "Ctrl+S")) {
+			extern void ATLinuxSaveSettings();
+			ATLinuxSaveSettings();
+			ShowToast("Settings saved");
+		}
+
 		if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
 			ATImGuiRequestQuit();
 		}
@@ -1456,6 +1463,8 @@ static void DrawShortcuts() {
 		row("Shift+F11", "Step Out (debugger)");
 		row("F12", "Toggle Overlay");
 		row("Pause", "Pause / Resume");
+		row("Ctrl+S", "Save Settings");
+		row("Ctrl+Q", "Quit");
 
 		ImGui::EndTable();
 	}
