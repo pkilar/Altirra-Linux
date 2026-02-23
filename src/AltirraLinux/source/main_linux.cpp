@@ -88,8 +88,10 @@ ATImGuiManager *g_pImGui = nullptr;
 // Joystick manager factory (defined in joystick_sdl2.cpp)
 IATJoystickManager *ATCreateJoystickManagerSDL2();
 
-// Fullscreen callback (defined in stubs_linux.cpp)
+// Fullscreen callback and state (defined in stubs_linux.cpp)
 void ATSetFullscreenCallback(void (*pfn)(bool));
+bool ATUIGetFullscreen();
+void ATSetFullscreen(bool);
 
 static bool g_running = true;
 
@@ -442,12 +444,20 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F7/F8/F9 quick save/load/screenshot always active
+		// F7/F8/F9/Pause always active (quick save/load/screenshot/pause)
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F7
 				|| event.key.keysym.scancode == SDL_SCANCODE_F8
-				|| event.key.keysym.scancode == SDL_SCANCODE_F9) {
+				|| event.key.keysym.scancode == SDL_SCANCODE_F9
+				|| event.key.keysym.scancode == SDL_SCANCODE_PAUSE) {
 				HandleShortcuts(event);
+				continue;
+			}
+
+			// F11 = fullscreen toggle when overlay is hidden
+			if (event.key.keysym.scancode == SDL_SCANCODE_F11
+				&& !(g_pImGui && g_pImGui->IsVisible())) {
+				ATSetFullscreen(!ATUIGetFullscreen());
 				continue;
 			}
 		}
