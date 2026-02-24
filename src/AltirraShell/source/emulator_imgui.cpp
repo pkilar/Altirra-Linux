@@ -1366,6 +1366,23 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Load Symbols...", nullptr, false, dbg != nullptr)) {
+			VDStringW path = ATLinuxOpenFileDialog("Load Symbols",
+				"Symbol Files|*.lbl;*.lst;*.lab;*.sym;*.mads"
+				"|All Files|*");
+			if (!path.empty() && dbg) {
+				dbg->LoadSymbols(path.c_str(), true);
+				ShowToast("Symbols loaded");
+			}
+		}
+
+		if (ImGui::MenuItem("Unload All Symbols", nullptr, false, dbg != nullptr)) {
+			if (dbg)
+				dbg->QueueCommand(".unloadsym", false);
+		}
+
 		ImGui::EndMenu();
 	}
 
