@@ -498,8 +498,12 @@ static void DrawMemory() {
 		for (int row = 0; row < 16; row++) {
 			uint16 rowAddr = (s_memoryAddr + row * 16) & 0xFFFF;
 
-			// Address
+			// Address — right-click for context menu
 			ImGui::Text("%04X:", rowAddr);
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+				s_disasmContextAddr = rowAddr;
+				ImGui::OpenPopup("##memctx");
+			}
 
 			// Hex bytes — clickable for editing
 			for (int col = 0; col < 16; col++) {
@@ -557,6 +561,36 @@ static void DrawMemory() {
 			}
 			ascii[16] = 0;
 			ImGui::TextColored(ImVec4(0.6f, 0.8f, 0.6f, 1.0f), "%s", ascii);
+		}
+
+		// Context menu for memory rows
+		if (ImGui::BeginPopup("##memctx")) {
+			ImGui::Text("$%04X", s_disasmContextAddr);
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("View in Disassembly")) {
+				s_disasmAddr = s_disasmContextAddr;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X",
+					s_disasmAddr);
+				s_showDisassembly = true;
+			}
+
+			// Follow pointer: read 2 bytes at this address as little-endian addr
+			uint16 ptrAddr = buf[0] | (buf[1] << 8);  // bytes at context addr
+			int offset = (s_disasmContextAddr - s_memoryAddr) & 0xFF;
+			if (offset + 1 < 256)
+				ptrAddr = buf[offset] | (buf[offset + 1] << 8);
+
+			char ptrLabel[32];
+			snprintf(ptrLabel, sizeof(ptrLabel), "Follow Pointer ($%04X)", ptrAddr);
+			if (ImGui::MenuItem(ptrLabel)) {
+				s_memoryAddr = ptrAddr;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X",
+					s_memoryAddr);
+			}
+
+			ImGui::EndPopup();
 		}
 	}
 	ImGui::EndChild();
