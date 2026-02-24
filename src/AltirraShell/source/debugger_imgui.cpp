@@ -313,6 +313,18 @@ static void DrawRegisters() {
 	EditableReg(" X", 2, regs.mX, 2);
 	EditableReg(" Y", 3, regs.mY, 2);
 	EditableReg(" S", 4, regs.mS, 2);
+	// Stack peek: show top 8 bytes above SP
+	if (target) {
+		ImGui::SameLine(140);
+		char stackStr[32];
+		int pos = 0;
+		for (int i = 1; i <= 6 && (regs.mS + i) <= 0xFF; i++) {
+			uint8 b = target->DebugReadByte(0x0100 + regs.mS + i);
+			pos += snprintf(stackStr + pos, sizeof(stackStr) - pos, "%02X ", b);
+		}
+		if (pos > 0)
+			ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.8f, 1.0f), "[%s]", stackStr);
+	}
 
 	ImGui::Separator();
 
@@ -330,6 +342,16 @@ static void DrawRegisters() {
 			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), "%c", flags[i]);
 		else
 			ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), ".");
+	}
+
+	// Hardware register readouts (ANTIC/GTIA via debug reads)
+	if (target) {
+		ImGui::Separator();
+		ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.8f, 1.0f), "Hardware:");
+		uint8 vcount = target->DebugReadByte(0xD40B);  // ANTIC VCOUNT
+		uint8 nmist  = target->DebugReadByte(0xD40F);  // ANTIC NMIST
+		uint8 dmactl = target->DebugReadByte(0xD400);  // ANTIC DMACTL
+		ImGui::Text("VCOUNT:%3d  NMIST:%02X  DMA:%02X", vcount, nmist, dmactl);
 	}
 
 	ImGui::End();
