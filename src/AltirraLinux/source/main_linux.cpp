@@ -1266,8 +1266,14 @@ int main(int argc, char *argv[]) {
 
 			RenderAndSwap(window);
 			SDL_Delay(16);
+		} else if (result == ATSimulator::kAdvanceResult_Running) {
+			// Our display copies frame data in PostBuffer and immediately
+			// releases the frame, so the GTIA frame tracker never fills up
+			// and Advance() never yields WaitingForFrame. Render whenever
+			// the display has a new frame ready.
+			if (g_pDisplay && g_pDisplay->IsFramePending())
+				RenderAndSwap(window);
 		}
-		// kAdvanceResult_Running means more work to do — loop immediately
 	}
 
 	fprintf(stderr, "Shutting down...\n");
