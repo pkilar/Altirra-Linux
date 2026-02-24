@@ -4157,7 +4157,12 @@ static void DrawCassetteControl() {
 
 	ImGui::SameLine();
 
-	// Skip forward
+	// Skip backward/forward
+	if (ImGui::Button("-10s") && loaded)
+		cas.SkipBackward(10.0f);
+
+	ImGui::SameLine();
+
 	if (ImGui::Button("+10s") && loaded)
 		cas.SkipForward(10.0f);
 

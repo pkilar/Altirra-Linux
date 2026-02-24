@@ -659,6 +659,12 @@ void ATCassetteEmulator::SkipForward(float seconds) {
 	SeekToBitPos(mPosition + bitsToSkip);
 }
 
+void ATCassetteEmulator::SkipBackward(float seconds) {
+	sint32 bitsToSkip = VDRoundToInt(seconds * kATCassetteDataSampleRate);
+
+	SeekToBitPos(mPosition > (uint32)bitsToSkip ? mPosition - bitsToSkip : 0);
+}
+
 uint32 ATCassetteEmulator::OnPreModifyTape() {
 	if (mpRecordEvent) {
 		FlushRecording(ATSCHEDULER_GETTIME(mpScheduler), true);

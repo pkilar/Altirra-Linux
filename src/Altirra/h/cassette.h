@@ -163,6 +163,7 @@ public:
 	void SeekToTime(float seconds);
 	void SeekToBitPos(uint32 bitPos);
 	void SkipForward(float seconds);
+	void SkipBackward(float seconds);
 
 	uint32 OnPreModifyTape();
 	void OnPostModifyTape(uint32 newPos);
