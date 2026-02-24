@@ -81,9 +81,49 @@ void ATFileSetReadOnlyAttribute(const wchar_t *path, bool readOnly) {
 	chmod(u8path.c_str(), newMode);
 }
 
-// Clipboard — using SDL2
+// Clipboard — copy frame as PNG via xclip
 void ATCopyFrameToClipboard(const VDPixmap& px) {
-	// Frame-to-clipboard not implemented (would require encoding to PNG)
+	if (!px.data || px.w <= 0 || px.h <= 0)
+		return;
+
+	VDPixmapBuffer pxbuf(px.w, px.h, nsVDPixmap::kPixFormat_RGB888);
+	VDPixmapBlt(pxbuf, px);
+
+	vdautoptr<IVDImageEncoderPNG> encoder(VDCreateImageEncoderPNG());
+	const void *mem;
+	uint32 len;
+	encoder->Encode(pxbuf, mem, len, false);
+
+	// Pipe PNG data to xclip for clipboard
+	pid_t pid;
+	int pipefd[2];
+	if (pipe(pipefd) != 0)
+		return;
+
+	pid = fork();
+	if (pid == 0) {
+		// Child: read from pipe, redirect stdout/stderr to /dev/null
+		close(pipefd[1]);
+		dup2(pipefd[0], STDIN_FILENO);
+		close(pipefd[0]);
+		int devnull = open("/dev/null", O_WRONLY);
+		if (devnull >= 0) {
+			dup2(devnull, STDOUT_FILENO);
+			dup2(devnull, STDERR_FILENO);
+			close(devnull);
+		}
+		execlp("xclip", "xclip", "-selection", "clipboard", "-t", "image/png", nullptr);
+		_exit(1);
+	} else if (pid > 0) {
+		// Parent: write PNG data to pipe
+		close(pipefd[0]);
+		write(pipefd[1], mem, len);
+		close(pipefd[1]);
+		// Don't wait — xclip runs asynchronously (it forks itself to serve clipboard)
+	} else {
+		close(pipefd[0]);
+		close(pipefd[1]);
+	}
 }
 
 void ATCopyTextToClipboard(void *hwnd, const char *s) {
