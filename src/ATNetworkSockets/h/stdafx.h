@@ -14,10 +14,14 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
+#ifdef VD_PLATFORM_WINDOWS
 #define _WINSOCK_DEPRECATED_NO_WARNINGS
+#endif
 
 #include <functional>
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/function.h>
+#ifdef VD_PLATFORM_WINDOWS
 #include <windows.h>
+#endif

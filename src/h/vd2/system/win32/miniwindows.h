@@ -26,6 +26,10 @@
 #ifndef f_VD2_SYSTEM_WIN32_MINIWINDOWS_H
 #define f_VD2_SYSTEM_WIN32_MINIWINDOWS_H
 
+#include <vd2/system/vdtypes.h>
+
+#ifdef VD_PLATFORM_WINDOWS
+
 #define VDZCALLBACK __stdcall
 
 #ifndef _WIN64
@@ -69,5 +73,61 @@ typedef struct _IMAGELIST	*VDZHIMAGELIST;
 typedef struct tagPAINTSTRUCT	VDZPAINTSTRUCT;
 
 typedef VDZWORD			VDZATOM;
+
+#else // !VD_PLATFORM_WINDOWS
+
+// Linux/POSIX stub types — these are opaque pointers used only in the UI layer.
+// Core emulation code should not depend on these.
+
+#define VDZCALLBACK
+
+#include <cstdint>
+
+typedef intptr_t		VDZINT_PTR;
+typedef uintptr_t		VDZUINT_PTR;
+typedef intptr_t		VDZLONG_PTR;
+typedef uintptr_t		VDZULONG_PTR;
+typedef uintptr_t		VDZDWORD_PTR;
+
+typedef void			VDZMSG;
+typedef void			*VDZHWND;
+typedef void			*VDZHDC;
+typedef void			*VDZHKEY;
+typedef void			*VDZHMENU;
+typedef unsigned		VDZUINT;
+typedef unsigned short	VDZWORD;
+typedef unsigned long	VDZDWORD;
+typedef uintptr_t		VDZWPARAM;
+typedef intptr_t		VDZLPARAM;
+typedef intptr_t		VDZLRESULT;
+typedef void			*VDZHDROP;
+typedef void			*VDZHFONT;
+typedef void			*VDZHACCEL;
+typedef void			*VDZHBRUSH;
+typedef void			*VDZHIMAGELIST;
+typedef void			VDZPAINTSTRUCT;
+
+typedef unsigned short	VDZATOM;
+
+// Stub for Windows LOGFONTW struct (used by console font functions)
+struct tagLOGFONTW {
+	long lfHeight;
+	long lfWidth;
+	long lfEscapement;
+	long lfOrientation;
+	long lfWeight;
+	unsigned char lfItalic;
+	unsigned char lfUnderline;
+	unsigned char lfStrikeOut;
+	unsigned char lfCharSet;
+	unsigned char lfOutPrecision;
+	unsigned char lfClipPrecision;
+	unsigned char lfQuality;
+	unsigned char lfPitchAndFamily;
+	wchar_t lfFaceName[32];
+};
+typedef struct tagLOGFONTW LOGFONTW;
+
+#endif // VD_PLATFORM_WINDOWS
 
 #endif

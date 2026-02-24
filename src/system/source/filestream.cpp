@@ -608,7 +608,11 @@ void VDTextOutputStream::Write(const char *s, int len) {
 }
 
 void VDTextOutputStream::PutLine() {
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 }
 
 void VDTextOutputStream::PutLine(const char *s) {
@@ -617,7 +621,11 @@ void VDTextOutputStream::PutLine(const char *s) {
 
 void VDTextOutputStream::PutLine(const char *s, int len) {
 	PutData(s, len);
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 }
 
 void VDTextOutputStream::Format(const char *format, ...) {
@@ -626,10 +634,19 @@ void VDTextOutputStream::Format(const char *format, ...) {
 	va_start(val, format);
 
 	int rv = -1;
-	if (mLevel < kBufSize-4)
-		rv = _vsnprintf(mBuf+mLevel, kBufSize-mLevel, format, val);
+	int avail = kBufSize - mLevel;
+	if (avail > 4) {
+		// Use va_copy because C99 vsnprintf may consume the va_list,
+		// and we need the original for the Format2 fallback path.
+		va_list val2;
+		va_copy(val2, val);
+		rv = vsnprintf(mBuf+mLevel, avail, format, val2);
+		va_end(val2);
+	}
 
-	if (rv >= 0)
+	// C99 vsnprintf returns the required length even on truncation,
+	// so check rv < avail to confirm no truncation occurred.
+	if (rv >= 0 && rv < avail)
 		mLevel += rv;
 	else
 		Format2(format, val);
@@ -643,24 +660,35 @@ void VDTextOutputStream::FormatLine(const char *format, ...) {
 	va_start(val, format);
 
 	int rv = -1;
-	if (mLevel < kBufSize-4)
-		rv = _vsnprintf(mBuf+mLevel, kBufSize-mLevel, format, val);
+	int avail = kBufSize - mLevel;
+	if (avail > 4) {
+		va_list val2;
+		va_copy(val2, val);
+		rv = vsnprintf(mBuf+mLevel, avail, format, val2);
+		va_end(val2);
+	}
 
-	if (rv >= 0)
+	// C99 vsnprintf returns the required length even on truncation,
+	// so check rv < avail to confirm no truncation occurred.
+	if (rv >= 0 && rv < avail)
 		mLevel += rv;
 	else
 		Format2(format, val);
 
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 	va_end(val);
 }
 
 void VDTextOutputStream::Format2(const char *format, va_list val) {
 	char buf[3072];
 
-	int rv = _vsnprintf(buf, 3072, format, val);
+	int rv = vsnprintf(buf, 3072, format, val);
 	if (rv > 0)
-		PutData(buf, rv);
+		PutData(buf, rv < 3072 ? rv : 3071);
 }
 
 void VDTextOutputStream::PutData(const char *s, int len) {

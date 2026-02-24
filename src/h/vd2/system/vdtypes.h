@@ -46,6 +46,8 @@
 
 	#if defined(__clang__)
 		#define VD_COMPILER_CLANG
+	#elif defined(__GNUC__)
+		#define VD_COMPILER_GCC		__GNUC__
 	#elif defined(_MSC_VER)
 		#define VD_COMPILER_MSVC	_MSC_VER
 
@@ -60,13 +62,27 @@
 #ifndef VD_CPU_DETECTED
 	#define VD_CPU_DETECTED
 
-	#if defined(_M_AMD64)
+	#if defined(_M_AMD64) || defined(__x86_64__)
 		#define VD_CPU_AMD64	1
 		#define VD_CPU_X64		1
 	#elif defined(_M_IX86) || defined(__i386__)
 		#define VD_CPU_X86		1
-	#elif defined(_M_ARM64)
+	#elif defined(_M_ARM64) || defined(__aarch64__)
 		#define VD_CPU_ARM64	1
+	#endif
+#endif
+
+#ifndef VD_PLATFORM_DETECTED
+	#define VD_PLATFORM_DETECTED
+
+	#if defined(_WIN32) || defined(_WIN64)
+		#ifndef VD_PLATFORM_WINDOWS
+			#define VD_PLATFORM_WINDOWS	1
+		#endif
+	#elif defined(__linux__)
+		#ifndef VD_PLATFORM_LINUX
+			#define VD_PLATFORM_LINUX	1
+		#endif
 	#endif
 #endif
 
@@ -107,7 +123,11 @@
 
 #define VD64(x) INT64_C(x)
 	
+#ifdef VD_PLATFORM_LINUX
+typedef	void *VDGUIHandle;
+#else
 typedef	struct __VDGUIHandle *VDGUIHandle;
+#endif
 
 // enforce wchar_t under Visual C++
 
@@ -142,7 +162,7 @@ typedef	struct __VDGUIHandle *VDGUIHandle;
 	#define VDCDECL				__cdecl
 	#define VD_CPU_TARGET(exts)
 	#define VD_CPU_TARGET_LAMBDA(exts)
-#elif defined(VD_COMPILER_CLANG)
+#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 	#define VDINTERFACE
 	#define VDNORETURN			__attribute__((noreturn))
 	#define VDPUREFUNC			__attribute__((pure))
@@ -150,7 +170,11 @@ typedef	struct __VDGUIHandle *VDGUIHandle;
 	#define VDNOINLINE			__attribute__((noinline))
 	#define VDFORCEINLINE		inline __attribute__((always_inline))
 	#define VDALIGN(alignment)	__attribute__((aligned(alignment)))
-	#define VDCDECL				__cdecl
+	#ifdef VD_PLATFORM_WINDOWS
+		#define VDCDECL			__cdecl
+	#else
+		#define VDCDECL
+	#endif
 	#define VD_CPU_TARGET(exts)	[[gnu::target(exts)]]
 	#define VD_CPU_TARGET_LAMBDA(exts)	__attribute__((target(exts)))
 #else
@@ -186,6 +210,14 @@ extern void VDDebugPrint(const char *format, ...);
 		#define VDBREAK		__builtin_debugtrap()
 	#else
 		#define VDBREAK		__asm__ volatile ("int3" : : )
+	#endif
+#elif defined(VD_COMPILER_GCC)
+	#if defined(VD_CPU_AMD64) || defined(VD_CPU_X86)
+		#define VDBREAK		__asm__ volatile ("int3" : : )
+	#elif defined(VD_CPU_ARM64)
+		#define VDBREAK		__builtin_trap()
+	#else
+		#define VDBREAK		__builtin_trap()
 	#endif
 #else
 	#define VDBREAK		*(volatile char *)0 = *(volatile char *)0
@@ -236,7 +268,11 @@ extern void VDDebugPrint(const char *format, ...);
 	#define VDINLINEASSERT(exp)			((exp)||(VDAssertHelper<__LINE__>(#exp, __FILE__),false))
 	#define VDINLINEASSERTFALSE(exp)	((exp)&&(VDAssertHelper<__LINE__>("!("#exp")", __FILE__),true))
 
+#if defined(VD_COMPILER_MSVC)
 	#define	VDNEVERHERE			do { if (VDAssert( "[never here]", __FILE__, __LINE__ )) VDBREAK; __assume(false); } while(false)
+#else
+	#define	VDNEVERHERE			do { if (VDAssert( "[never here]", __FILE__, __LINE__ )) VDBREAK; __builtin_unreachable(); } while(false)
+#endif
 
 	#define VDDEBUG(...)		VDDebugPrint(__VA_ARGS__)
 
@@ -260,7 +296,7 @@ extern void VDDebugPrint(const char *format, ...);
 
 	#if defined(VD_COMPILER_MSVC)
 		#define	VDNEVERHERE			__assume(false)
-	#elif defined(VD_COMPILER_CLANG)
+	#elif defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 		#define	VDNEVERHERE			__builtin_unreachable()
 	#else
 		#define	VDNEVERHERE			VDASSERT(false)

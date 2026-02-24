@@ -52,7 +52,11 @@ namespace {
 	void minMax16x2_SSE2(const sint16 * VDRESTRICT src, uint32 n, sint32& minvL, sint32& maxvL, sint32& minvR, sint32& maxvR) {
 		// We do unaligned loads from this array, so it's important that we
 		// avoid data cache unit (DCU) split penalties on older CPUs.
+#ifdef _MSC_VER
 		static const __declspec(align(64)) uint64 window_table[6] = {
+#else
+		alignas(64) static const uint64 window_table[6] = {
+#endif
 			0, 0, (uint64)0 - 1, (uint64)0 - 1, 0, 0
 		};
 

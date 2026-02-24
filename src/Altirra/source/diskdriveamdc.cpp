@@ -24,7 +24,7 @@
 #include <at/atcore/propertyset.h>
 #include <at/atcore/deviceserial.h>
 #include "audiosampleplayer.h"
-#include "diskdriveAMDC.h"
+#include "diskdriveamdc.h"
 #include "memorymanager.h"
 #include "firmwaremanager.h"
 #include "debuggerlog.h"

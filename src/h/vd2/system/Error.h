@@ -37,7 +37,11 @@
 
 class VDException;
 
+#ifdef VD_PLATFORM_WINDOWS
 using VDExceptionPostContext = struct HWND__ *;
+#else
+using VDExceptionPostContext = void *;
+#endif
 
 template<typename T>
 concept VDPrintfCompatible = (std::is_arithmetic_v<std::decay_t<T>> || std::is_pointer_v<std::decay_t<T>> || std::is_enum_v<std::decay_t<T>>);

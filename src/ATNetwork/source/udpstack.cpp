@@ -1,4 +1,8 @@
 #include <stdafx.h>
+#ifndef _WIN32
+#include <alloca.h>
+#define _alloca alloca
+#endif
 #include <vd2/system/binary.h>
 #include <vd2/system/vdalloc.h>
 #include <at/atnetwork/ethernetframe.h>

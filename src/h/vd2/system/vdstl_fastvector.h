@@ -169,7 +169,13 @@ public:
 	using const_reverse_iterator	= typename vdfastvector_core<T>::const_reverse_iterator;
 
 	~vdfastvector_base() {
+#ifdef VD_COMPILER_MSVC
 		static_assert(std::is_trivially_copyable_v<T> && std::is_trivially_destructible_v<T>);
+#else
+		// Relaxed for GCC/Clang: std::pair is not trivially copyable in libstdc++/libc++
+		// even when both element types are, due to user-provided copy constructor.
+		static_assert(std::is_trivially_destructible_v<T>);
+#endif
 
 		if (static_cast<const S&>(m).is_deallocatable_storage(mpBegin))
 			m.deallocate(mpBegin, m.eos - mpBegin);

@@ -30,8 +30,13 @@
 #include <stdarg.h>
 #include <stdio.h>
 
+#ifdef VD_PLATFORM_WINDOWS
 #include <windows.h>
 #include <winnls.h>
+#else
+#include <cwchar>
+#include <cstring>
+#endif
 
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/vdstdc.h>
@@ -39,6 +44,8 @@
 #include <vd2/system/text.h>
 #include <vd2/system/tls.h>
 #include <vd2/system/VDString.h>
+
+#ifdef VD_PLATFORM_WINDOWS
 
 int VDTextWToA(char *dst, int max_dst, const wchar_t *src, int max_src) {
 	VDASSERTPTR(dst);
@@ -125,6 +132,102 @@ int VDTextAToWLength(const char *s, int length) {
 
 	return rv;
 }
+
+#else // VD_PLATFORM_LINUX
+
+// On Linux, wchar_t is UTF-32 (4 bytes). VDTextWToA/VDTextAToW convert
+// between wchar_t (UTF-32) and the system locale (typically UTF-8).
+// We use VDTextWToU8/VDTextU8ToW which are defined below as portable code.
+
+int VDTextWToA(char *dst, int max_dst, const wchar_t *src, int max_src) {
+	VDASSERTPTR(dst);
+	VDASSERTPTR(src);
+	VDASSERT(max_dst > 0);
+
+	*dst = 0;
+
+	int srclen = max_src;
+	if (srclen < 0) {
+		srclen = 0;
+		while (src[srclen])
+			++srclen;
+	}
+
+	VDStringA utf8 = VDTextWToU8(src, srclen);
+	int copyLen = (int)utf8.size();
+	if (copyLen >= max_dst)
+		copyLen = max_dst - 1;
+
+	memcpy(dst, utf8.c_str(), copyLen);
+	dst[copyLen] = 0;
+	return copyLen;
+}
+
+int VDTextAToW(wchar_t *dst, int max_dst, const char *src, int max_src) {
+	VDASSERTPTR(dst);
+	VDASSERTPTR(src);
+	VDASSERT(max_dst > 0);
+
+	*dst = 0;
+
+	int srclen = max_src;
+	if (srclen < 0) {
+		srclen = 0;
+		while (src[srclen])
+			++srclen;
+	}
+
+	VDStringW wide = VDTextU8ToW(src, srclen);
+	int copyLen = (int)wide.size();
+	if (copyLen >= max_dst)
+		copyLen = max_dst - 1;
+
+	memcpy(dst, wide.c_str(), copyLen * sizeof(wchar_t));
+	dst[copyLen] = 0;
+	return copyLen;
+}
+
+VDStringA VDTextWToA(const VDStringW& sw) {
+	return VDTextWToU8(sw.data(), sw.length());
+}
+
+VDStringA VDTextWToA(const wchar_t *src, int srclen) {
+	if (!src)
+		return VDStringA();
+	return VDTextWToU8(src, srclen);
+}
+
+VDStringW VDTextAToW(const VDStringA& s) {
+	return VDTextU8ToW(s.data(), s.length());
+}
+
+VDStringW VDTextAToW(const char *src, int srclen) {
+	if (!src)
+		return VDStringW();
+	return VDTextU8ToW(src, srclen);
+}
+
+int VDTextWToALength(const wchar_t *s, int length) {
+	if (length < 0) {
+		length = 0;
+		while (s[length])
+			++length;
+	}
+	VDStringA utf8 = VDTextWToU8(s, length);
+	return (int)utf8.size();
+}
+
+int VDTextAToWLength(const char *s, int length) {
+	if (length < 0) {
+		length = 0;
+		while (s[length])
+			++length;
+	}
+	VDStringW wide = VDTextU8ToW(s, length);
+	return (int)wide.size();
+}
+
+#endif // VD_PLATFORM_WINDOWS
 
 namespace {
 	bool VDIsUnicodeSurrogateFirst(wchar_t c) {
@@ -322,6 +425,7 @@ bad_sequence_exit:
 
 ///////////////////////////////////////////////////////////////////////////
 
+#ifdef VD_PLATFORM_WINDOWS
 bool VDTextContainsSubstringMatchByLocale(VDStringSpanW sourceString, VDStringSpanW searchString) {
 	const int pos = FindNLSStringEx(
 		LOCALE_NAME_USER_DEFAULT,
@@ -341,6 +445,31 @@ bool VDTextContainsSubstringMatchByLocale(VDStringSpanW sourceString, VDStringSp
 
 	return pos >= 0;
 }
+#else
+bool VDTextContainsSubstringMatchByLocale(VDStringSpanW sourceString, VDStringSpanW searchString) {
+	// Simple case-insensitive substring search on Linux.
+	if (searchString.empty())
+		return true;
+
+	if (sourceString.size() < searchString.size())
+		return false;
+
+	size_t limit = sourceString.size() - searchString.size() + 1;
+	for (size_t i = 0; i < limit; ++i) {
+		bool match = true;
+		for (size_t j = 0; j < searchString.size(); ++j) {
+			if (towlower(sourceString.data()[i + j]) != towlower(searchString.data()[j])) {
+				match = false;
+				break;
+			}
+		}
+		if (match)
+			return true;
+	}
+
+	return false;
+}
+#endif
 
 ///////////////////////////////////////////////////////////////////////////
 //

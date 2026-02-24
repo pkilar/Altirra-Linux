@@ -1,5 +1,5 @@
 #include <stdafx.h>
-#include <vd2/system/error.h>
+#include <vd2/system/Error.h>
 #include <vd2/system/linearalloc.h>
 
 VDLinearAllocator::VDLinearAllocator(uint32 blockSize)

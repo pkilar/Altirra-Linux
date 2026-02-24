@@ -5,20 +5,28 @@
 #pragma setlocale("C")
 #endif
 
-// Select Windows Vista baseline.
-#define _WIN32_WINNT 0x0600
-
-struct IUnknown;
-
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/atomic.h>
-#include <vd2/system/thread.h>
-#include <vd2/system/error.h>
-#include <vd2/system/vdstl.h>
-#include <vd2/system/vdstl_hashmap.h>
-#include <windows.h>
-#include <process.h>
-#include <vd2/system/win32/intrin.h>
+
+#ifdef VD_PLATFORM_WINDOWS
+	// Select Windows Vista baseline.
+	#define _WIN32_WINNT 0x0600
+
+	struct IUnknown;
+
+	#include <vd2/system/thread.h>
+	#include <vd2/system/Error.h>
+	#include <vd2/system/vdstl.h>
+	#include <vd2/system/vdstl_hashmap.h>
+	#include <windows.h>
+	#include <process.h>
+	#include <vd2/system/win32/intrin.h>
+#else
+	#include <vd2/system/Error.h>
+	#include <vd2/system/vdstl.h>
+	#include <vd2/system/vdstl_hashmap.h>
+#endif
+
 #include <string.h>
 #include <stdarg.h>
 #include <math.h>

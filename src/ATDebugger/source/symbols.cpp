@@ -163,7 +163,7 @@ sint32 ATSymbolStore::LookupSymbol(const char *s) {
 	for(; it != itEnd; ++it) {
 		const Symbol& sym = *it;
 
-		if (!_stricmp(s, mNameBytes.data() + sym.mNameOffset))
+		if (!vdstricmp(s, mNameBytes.data() + sym.mNameOffset))
 			return sym.mOffset;
 	}
 

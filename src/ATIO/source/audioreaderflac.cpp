@@ -232,10 +232,12 @@ VDFORCEINLINE uint32 ATAudioReaderFLAC::BitReader::GetUnaryValue() {
 
 #if VD_CPU_X86 || VD_CPU_X64
 	if constexpr (T_HaveLzcnt) {
-		#ifdef VD_COMPILER_CLANG
+		#if defined(VD_COMPILER_CLANG)
 			accumZeroes = [](uint32 v) __attribute__((target("lzcnt"))) {
 				return _lzcnt_u32(v);
 			}(bitAccum);
+		#elif defined(VD_COMPILER_GCC)
+			accumZeroes = __builtin_clz(bitAccum);
 		#else
 			accumZeroes = _lzcnt_u32(bitAccum);
 		#endif
@@ -243,7 +245,11 @@ VDFORCEINLINE uint32 ATAudioReaderFLAC::BitReader::GetUnaryValue() {
 #endif
 	{
 		unsigned long oneBitPos;
+#if defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
+		oneBitPos = 31 - __builtin_clz(bitAccum);
+#else
 		_BitScanReverse(&oneBitPos, bitAccum);
+#endif
 
 #if VD_CPU_ARM64
 		// This is more optimal for ARM64, as the compiler doesn't realize

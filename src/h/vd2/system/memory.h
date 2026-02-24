@@ -44,7 +44,7 @@ struct VDAlignedObject {
 void *VDAlignedVirtualAlloc(size_t n);
 void VDAlignedVirtualFree(void *p);
 
-extern void (__cdecl *VDSwapMemory)(void *p0, void *p1, size_t bytes);
+extern void (VDCDECL *VDSwapMemory)(void *p0, void *p1, size_t bytes);
 
 void VDInvertMemory(void *p, unsigned bytes);
 

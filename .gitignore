@@ -1,0 +1,10 @@
+# Build output directories
+build/
+build-*/
+obj/
+out/
+lib/
+
+# Local configuration
+localconfig/active/
+*code-workspace

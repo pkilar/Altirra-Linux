@@ -34,7 +34,11 @@
 #include <stdlib.h>
 #include <vd2/system/vdtypes.h>
 
+#ifdef VD_COMPILER_MSVC
 #define vdvsnprintf _vsnprintf
+#else
+#define vdvsnprintf vsnprintf
+#endif
 
 #ifdef VD_COMPILER_GCC_MINGW
 	// MinGW doesn't define the correct standard version of (v)swprintf with

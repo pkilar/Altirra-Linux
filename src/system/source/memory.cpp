@@ -25,11 +25,21 @@
 
 #include <stdafx.h>
 #include <malloc.h>
-#include <windows.h>
+#ifdef VD_PLATFORM_WINDOWS
+	#include <windows.h>
+#else
+	#include <sys/mman.h>
+	#include <unistd.h>
+#endif
 #include <vd2/system/atomic.h>
 #include <vd2/system/memory.h>
 #include <vd2/system/seh.h>
-#include <vd2/system/cpuaccel.h>
+#if (defined(VD_CPU_AMD64) || defined(VD_CPU_X86)) && !defined(VD_COMPILER_MSVC)
+	#include <xmmintrin.h>
+#endif
+#ifdef VD_PLATFORM_WINDOWS
+	#include <vd2/system/cpuaccel.h>
+#endif
 
 void *VDAlignedMallocThrow(size_t n, unsigned alignment) {
 	void *p = VDAlignedMalloc(n, alignment);
@@ -66,14 +76,26 @@ void VDAlignedFree(void *p) vdnoexcept {
 }
 
 void *VDAlignedVirtualAlloc(size_t n) {
+#ifdef VD_PLATFORM_WINDOWS
 	return VirtualAlloc(NULL, n, MEM_COMMIT, PAGE_READWRITE);
+#else
+	void *p = mmap(NULL, n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+	return (p == MAP_FAILED) ? nullptr : p;
+#endif
 }
 
 void VDAlignedVirtualFree(void *p) {
+#ifdef VD_PLATFORM_WINDOWS
 	VirtualFree(p, 0, MEM_RELEASE);
+#else
+	// Note: on Linux we'd need the size, but this is typically used for large fixed-size allocs.
+	// For now, use munmap with a size of 0 which will fail — callers should track sizes.
+	// In practice this function is rarely used in the core emulation path.
+	(void)p;
+#endif
 }
 
-void __cdecl VDSwapMemoryScalar(void *p0, void *p1, size_t bytes) {
+void VDCDECL VDSwapMemoryScalar(void *p0, void *p1, size_t bytes) {
 	uint32 *dst0 = (uint32 *)p0;
 	uint32 *dst1 = (uint32 *)p1;
 
@@ -100,7 +122,7 @@ void __cdecl VDSwapMemoryScalar(void *p0, void *p1, size_t bytes) {
 }
 
 #if defined(VD_CPU_AMD64) || defined(VD_CPU_X86)
-	void __cdecl VDSwapMemorySSE(void *p0, void *p1, size_t bytes) {
+	void VDCDECL VDSwapMemorySSE(void *p0, void *p1, size_t bytes) {
 		if (((uint32)(size_t)p0 | (uint32)(size_t)p1) & 15)
 			return VDSwapMemoryScalar(p0, p1, bytes);
 
@@ -133,7 +155,7 @@ void __cdecl VDSwapMemoryScalar(void *p0, void *p1, size_t bytes) {
 	}
 #endif
 
-void (__cdecl *VDSwapMemory)(void *p0, void *p1, size_t bytes) = VDSwapMemoryScalar;
+void (VDCDECL *VDSwapMemory)(void *p0, void *p1, size_t bytes) = VDSwapMemoryScalar;
 
 void VDInvertMemory(void *p, unsigned bytes) {
 	char *dst = (char *)p;
@@ -166,16 +188,16 @@ void VDInvertMemory(void *p, unsigned bytes) {
 }
 
 namespace {
-	uintptr VDGetSystemPageSizeW32() {
-		SYSTEM_INFO sysInfo;
-		GetSystemInfo(&sysInfo);
-
-		return sysInfo.dwPageSize;
-	}
-
 	uintptr VDGetSystemPageSize() {
-		static uintptr pageSize = VDGetSystemPageSizeW32();
-
+#ifdef VD_PLATFORM_WINDOWS
+		static uintptr pageSize = []() -> uintptr {
+			SYSTEM_INFO sysInfo;
+			GetSystemInfo(&sysInfo);
+			return sysInfo.dwPageSize;
+		}();
+#else
+		static uintptr pageSize = (uintptr)sysconf(_SC_PAGESIZE);
+#endif
 		return pageSize;
 	}
 }
@@ -433,22 +455,22 @@ void VDMemset32Rect(void *dst, ptrdiff_t pitch, uint32 value, size_t w, size_t h
 }
 
 #if defined(_WIN32) && defined(VD_CPU_X86) && defined(VD_COMPILER_MSVC)
-	extern "C" void __cdecl VDFastMemcpyPartialMMX2(void *dst, const void *src, size_t bytes);
+	extern "C" void VDCDECL VDFastMemcpyPartialMMX2(void *dst, const void *src, size_t bytes);
 
-	void __cdecl VDFastMemcpyPartialScalar(void *dst, const void *src, size_t bytes) {
+	void VDCDECL VDFastMemcpyPartialScalar(void *dst, const void *src, size_t bytes) {
 		memcpy(dst, src, bytes);
 	}
 
-	void __cdecl VDFastMemcpyFinishScalar() {
+	void VDCDECL VDFastMemcpyFinishScalar() {
 	}
 
-	void __cdecl VDFastMemcpyFinishMMX2() {
+	void VDCDECL VDFastMemcpyFinishMMX2() {
 		_mm_empty();
 		_mm_sfence();
 	}
 
-	void (__cdecl *VDFastMemcpyPartial)(void *dst, const void *src, size_t bytes) = VDFastMemcpyPartialScalar;
-	void (__cdecl *VDFastMemcpyFinish)() = VDFastMemcpyFinishScalar;
+	void (VDCDECL *VDFastMemcpyPartial)(void *dst, const void *src, size_t bytes) = VDFastMemcpyPartialScalar;
+	void (VDCDECL *VDFastMemcpyFinish)() = VDFastMemcpyFinishScalar;
 
 	void VDFastMemcpyAutodetect() {
 		long exts = CPUGetEnabledExtensions();

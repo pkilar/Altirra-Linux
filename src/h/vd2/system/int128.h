@@ -31,7 +31,7 @@
 struct vdint128;
 struct vduint128;
 
-#ifdef _M_AMD64
+#if defined(_M_AMD64)
 	extern "C" unsigned __int64 __shiftleft128(unsigned __int64 low, unsigned __int64 high, unsigned char shift);
 	extern "C" unsigned __int64 __shiftright128(unsigned __int64 low, unsigned __int64 high, unsigned char shift);
 
@@ -40,10 +40,22 @@ struct vduint128;
 
 	void vdasm_uint128_add(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
 	void vdasm_uint128_sub(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
+#elif defined(VD_CPU_AMD64) && !defined(VD_COMPILER_MSVC)
+	inline void vdasm_uint128_add(uint64 dst[2], const uint64 x[2], const uint64 y[2]) {
+		const auto x0 = x[0];
+		dst[0] = x0 + y[0];
+		dst[1] = x[1] + y[1] + (dst[0] < x0);
+	}
+
+	inline void vdasm_uint128_sub(uint64 dst[2], const uint64 x[2], const uint64 y[2]) {
+		const auto x0 = x[0];
+		dst[0] = x0 - y[0];
+		dst[1] = x[1] - y[1] - (dst[0] > x0);
+	}
 #else
 	extern "C" {
-		void __cdecl vdasm_uint128_add(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
-		void __cdecl vdasm_uint128_sub(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
+		void VDCDECL vdasm_uint128_add(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
+		void VDCDECL vdasm_uint128_sub(uint64 dst[2], const uint64 x[2], const uint64 y[2]);
 	}
 #endif
 
@@ -76,10 +88,12 @@ public:
 		q[1] = 0;
 	}
 
+#ifdef VD_PLATFORM_WINDOWS
 	vdint128(unsigned long x) {
 		q[0] = x;
 		q[1] = 0;
 	}
+#endif
 
 	vdint128(sint64 hi, uint64 lo) {
 		q[0] = lo;
@@ -159,7 +173,7 @@ public:
 		return q[1] < 0 ? -*this : *this;
 	}
 
-#ifdef _M_AMD64
+#if defined(_M_AMD64)
 	void setSquare(sint64 v) {
 		const vdint128 v128(v);
 		operator=(v128*v128);
@@ -188,6 +202,45 @@ public:
 		} else {
 			t.q[0] = __shiftright128(q[0], q[1], count);
 			t.q[1] = q[1] >> count;
+		}
+
+		return t;
+	}
+#elif defined(VD_CPU_AMD64) && !defined(VD_COMPILER_MSVC)
+	void setSquare(sint64 v) {
+		const vdint128 v128(v);
+		operator=(v128*v128);
+	}
+
+	const vdint128 operator<<(int count) const {
+		vdint128 t;
+
+		if (count >= 64) {
+			t.q[0] = 0;
+			t.q[1] = q[0] << (count-64);
+		} else if (count > 0) {
+			t.q[0] = q[0] << count;
+			t.q[1] = ((uint64)q[1] << count) | ((uint64)q[0] >> (64 - count));
+		} else {
+			t.q[0] = q[0];
+			t.q[1] = q[1];
+		}
+
+		return t;
+	}
+
+	const vdint128 operator>>(int count) const {
+		vdint128 t;
+
+		if (count >= 64) {
+			t.q[0] = q[1] >> (count-64);
+			t.q[1] = q[1] >> 63;
+		} else if (count > 0) {
+			t.q[0] = ((uint64)q[0] >> count) | ((uint64)q[1] << (64 - count));
+			t.q[1] = q[1] >> count;
+		} else {
+			t.q[0] = q[0];
+			t.q[1] = q[1];
 		}
 
 		return t;
@@ -315,7 +368,7 @@ public:
 		return operator=(operator>>(count));
 	}
 
-#ifdef _M_AMD64
+#if defined(_M_AMD64)
 	const vduint128 operator<<(int count) const {
 		vduint128 t;
 
@@ -343,6 +396,40 @@ public:
 
 		return t;
 	}
+#elif defined(VD_CPU_AMD64) && !defined(VD_COMPILER_MSVC)
+	const vduint128 operator<<(int count) const {
+		vduint128 t;
+
+		if (count >= 64) {
+			t.q[0] = 0;
+			t.q[1] = q[0] << (count-64);
+		} else if (count > 0) {
+			t.q[0] = q[0] << count;
+			t.q[1] = (q[1] << count) | (q[0] >> (64 - count));
+		} else {
+			t.q[0] = q[0];
+			t.q[1] = q[1];
+		}
+
+		return t;
+	}
+
+	const vduint128 operator>>(int count) const {
+		vduint128 t;
+
+		if (count >= 64) {
+			t.q[0] = q[1] >> (count-64);
+			t.q[1] = 0;
+		} else if (count > 0) {
+			t.q[0] = (q[0] >> count) | (q[1] << (64 - count));
+			t.q[1] = q[1] >> count;
+		} else {
+			t.q[0] = q[0];
+			t.q[1] = q[1];
+		}
+
+		return t;
+	}
 #else
 	const vduint128 operator<<(int v) const;
 	const vduint128 operator>>(int v) const;
@@ -359,10 +446,19 @@ inline vduint128::vduint128(const vdint128& x) {
 	q[1] = x.q[1];
 }
 
-#ifdef _M_AMD64
+#if defined(_M_AMD64)
 	inline vduint128 VDUMul64x64To128(uint64 x, uint64 y) {
 		vduint128 result;
 		result.q[0] = _umul128(x, y, &result.q[1]);
+		return result;
+	}
+	uint64 VDUDiv128x64To64(const vduint128& dividend, uint64 divisor, uint64& remainder);
+#elif defined(VD_CPU_AMD64) && !defined(VD_COMPILER_MSVC)
+	inline vduint128 VDUMul64x64To128(uint64 x, uint64 y) {
+		unsigned __int128 r = (unsigned __int128)x * y;
+		vduint128 result;
+		result.q[0] = (uint64)r;
+		result.q[1] = (uint64)(r >> 64);
 		return result;
 	}
 	uint64 VDUDiv128x64To64(const vduint128& dividend, uint64 divisor, uint64& remainder);

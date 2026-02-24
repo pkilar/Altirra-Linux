@@ -159,9 +159,11 @@ invalid:
 		}
 	}
 #elif defined(VD_CPU_AMD64)
-	#if defined(VD_COMPILER_CLANG)
+	#if defined(VD_COMPILER_CLANG) || defined(VD_COMPILER_GCC)
 		sint64 VDFractionScale64(uint64 a, uint32 b, uint32 c, uint32& remainder) {
-			return (sint64)(((__uint128_t)a * b) / c);
+			unsigned __int128 product = (unsigned __int128)a * b;
+			remainder = (uint32)(product % c);
+			return (sint64)(product / c);
 		}
 	#else
 		sint64 VDFractionScale64(uint64 a, uint32 b, uint32 c, uint32& remainder) {

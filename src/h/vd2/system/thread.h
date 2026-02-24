@@ -38,6 +38,8 @@ typedef uint32 VDThreadID;
 typedef uint32 VDThreadId;
 typedef uint32 VDProcessId;
 
+#ifdef VD_PLATFORM_WINDOWS
+
 #if defined(__MINGW32__) || defined(__MINGW64__)
 	struct _CRITICAL_SECTION;
 	typedef _CRITICAL_SECTION VDCriticalSectionW32;
@@ -53,6 +55,8 @@ extern "C" void __declspec(dllimport) __stdcall DeleteCriticalSection(VDCritical
 extern "C" unsigned long __declspec(dllimport) __stdcall WaitForSingleObject(void *hHandle, unsigned long dwMilliseconds);
 extern "C" int __declspec(dllimport) __stdcall ReleaseSemaphore(void *hSemaphore, long lReleaseCount, long *lpPreviousCount);
 
+#endif // VD_PLATFORM_WINDOWS
+
 VDThreadID VDGetCurrentThreadID();
 VDProcessId VDGetCurrentProcessId();
 uint32 VDGetLogicalProcessorCount();
@@ -66,19 +70,6 @@ void VDThreadSleep(int milliseconds);
 //
 //	VDThread is a quick way to portably create threads -- to use it,
 //	derive a subclass from it that implements the ThreadRun() function.
-//
-//	Win32 notes:
-//
-//	The thread startup code will attempt to notify the VC++ debugger of
-//	the debug name of the thread.  Only the first 9 characters are used
-//	by Visual C 6.0; Visual Studio .NET will accept a few dozen.
-//
-//	VDThread objects must not be WaitThread()ed or destructed from a
-//	DllMain() function, TLS callback for an executable, or static
-//	destructor unless the thread has been detached from the object.
-//  The reason is that Win32 serializes calls to DllMain() functions.
-//  If you attempt to do so, you will cause a deadlock when Win32
-//  attempts to fire thread detach notifications.
 //
 ///////////////////////////////////////////////////////////////////////////
 
@@ -119,7 +110,11 @@ public:
 	virtual void ThreadRun() = 0;				// thread, come to life
 
 private:
+#ifdef VD_PLATFORM_WINDOWS
 	static unsigned __stdcall StaticThreadStart(void *pThis);
+#else
+	static void *StaticThreadStart(void *pThis);
+#endif
 	void ThreadDetach();
 
 	const char *mpszDebugName;
@@ -131,6 +126,7 @@ private:
 
 class VDCriticalSection {
 private:
+#ifdef VD_PLATFORM_WINDOWS
 	struct CritSec {				// This is a clone of CRITICAL_SECTION.
 		void	*DebugInfo;
 		sint32	LockCount;
@@ -139,10 +135,16 @@ private:
 		void	*LockSemaphore;
 		uint32	SpinCount;
 	} csect;
+#else
+	// Opaque storage for pthread_mutex_t (typically 40 bytes on Linux x64)
+	alignas(8) char csect[64];
+#endif
 
 	VDCriticalSection(const VDCriticalSection&);
 	const VDCriticalSection& operator=(const VDCriticalSection&);
+#ifdef VD_PLATFORM_WINDOWS
 	static void StructCheck();
+#endif
 public:
 	class AutoLock {
 	private:
@@ -154,6 +156,7 @@ public:
 		inline operator bool() const { return false; }
 	};
 
+#ifdef VD_PLATFORM_WINDOWS
 	VDCriticalSection() {
 		InitializeCriticalSection((VDCriticalSectionW32 *)&csect);
 	}
@@ -177,6 +180,14 @@ public:
 	void Unlock() {
 		LeaveCriticalSection((VDCriticalSectionW32 *)&csect);
 	}
+#else
+	VDCriticalSection();
+	~VDCriticalSection();
+	void operator++();
+	void operator--();
+	void Lock();
+	void Unlock();
+#endif
 };
 
 // 'vdsynchronized' keyword
@@ -251,6 +262,7 @@ public:
 
 	void Reset(int count);
 
+#ifdef VD_PLATFORM_WINDOWS
 	void Wait() {
 		WaitForSingleObject(mKernelSema, 0xFFFFFFFFU);
 	}
@@ -266,6 +278,12 @@ public:
 	void Post() {
 		ReleaseSemaphore(mKernelSema, 1, NULL);
 	}
+#else
+	void Wait();
+	bool Wait(int timeout);
+	bool TryWait();
+	void Post();
+#endif
 
 private:
 	void *mKernelSema;
@@ -278,7 +296,12 @@ class VDRWLock {
 	VDRWLock& operator=(const VDRWLock&) = delete;
 
 public:
+#ifdef VD_PLATFORM_LINUX
+	VDRWLock();
+	~VDRWLock();
+#else
 	VDRWLock() = default;
+#endif
 
 	void LockExclusive() noexcept;
 	void UnlockExclusive() noexcept;
@@ -313,7 +336,12 @@ class VDConditionVariable {
 	VDConditionVariable(const VDConditionVariable&) = delete;
 	VDConditionVariable& operator=(const VDConditionVariable&) = delete;
 public:
+#ifdef VD_PLATFORM_LINUX
+	VDConditionVariable();
+	~VDConditionVariable();
+#else
 	VDConditionVariable() = default;
+#endif
 
 	void Wait(VDRWLock& rwLock) noexcept;
 	void NotifyOne() noexcept;

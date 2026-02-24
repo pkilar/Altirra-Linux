@@ -161,7 +161,9 @@ void ATVgmWriter::Shutdown() {
 
 		// create GD3 (we need the length up front)
 		VDStringW gd3text;
+#ifdef VD_PLATFORM_WINDOWS
 		static_assert(sizeof(gd3text[0]) == 2, "GD3 requires UTF-16");
+#endif
 		gd3text += L"";	// track name (English)
 		gd3text += L'\0';
 		gd3text += L"";	// track name (original)

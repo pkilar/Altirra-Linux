@@ -78,6 +78,8 @@ public:
 	uint8 mCommandBuffer[5] {};
 };
 
+class ATSaveStateSioCommandStep;
+
 class ATSaveStateSioActiveCommand final : public ATSnapExchangeObject<ATSaveStateSioActiveCommand, "ATSaveStateSioActiveCommand"> {
 public:
 	template<typename T>

@@ -29,10 +29,10 @@
 // Rest in peace, Phil Katz.
 
 #include <string.h>
-#include <intrin.h>
+#include <vd2/system/win32/intrin.h>
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/binary.h>
-#include <vd2/system/error.h>
+#include <vd2/system/Error.h>
 #include <vd2/system/file.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/vdstl.h>

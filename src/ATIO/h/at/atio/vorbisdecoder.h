@@ -92,7 +92,11 @@ struct ATVorbisCodeBook {
 	bool IsValidForVQ() const { return !mVQValues.empty(); }
 
 	static uint32_t Rev32(uint32_t v) {
+#ifdef _MSC_VER
 		v = _byteswap_ulong(v);
+#else
+		v = __builtin_bswap32(v);
+#endif
 
 		v = ((v & 0x55555555) << 1) + ((v & 0xAAAAAAAA) >> 1);
 		v = ((v & 0x33333333) << 2) + ((v & 0xCCCCCCCC) >> 2);

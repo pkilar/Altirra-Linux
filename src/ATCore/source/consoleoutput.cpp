@@ -19,6 +19,8 @@
 //	archive for details.
 
 #include <stdafx.h>
+#include <cstdio>
+#include <cstdarg>
 #include <at/atcore/consoleoutput.h>
 
 void ATConsoleOutput::operator()(const char *format, ...) {
@@ -26,7 +28,7 @@ void ATConsoleOutput::operator()(const char *format, ...) {
 	va_list val;
 
 	va_start(val, format);
-	if ((unsigned)_vsnprintf(buf, 3072, format, val) < 3072)
+	if ((unsigned)vsnprintf(buf, 3072, format, val) < 3072)
 		WriteLine(buf);
 	va_end(val);
 }

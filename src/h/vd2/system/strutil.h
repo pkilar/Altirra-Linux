@@ -26,6 +26,10 @@
 #define f_VD2_SYSTEM_STRUTIL_H
 
 #include <string.h>
+#ifndef VD_PLATFORM_WINDOWS
+#include <strings.h>
+#include <wchar.h>
+#endif
 #include <vd2/system/vdtypes.h>
 
 char *strncpyz(char *strDest, const char *strSource, size_t count);
@@ -42,19 +46,35 @@ size_t vdwcslcpy(wchar_t *dst, const wchar_t *src, size_t sizeChars);
 size_t vdstrlcat(char *dst, const char *src, size_t sizeChars);
 
 inline int vdstricmp(const char *s, const char *t) {
+#ifdef VD_COMPILER_MSVC
 	return _stricmp(s, t);
+#else
+	return strcasecmp(s, t);
+#endif
 }
 
 inline int vdstricmp(const char *s, const char *t, size_t maxlen) {
+#ifdef VD_COMPILER_MSVC
 	return _strnicmp(s, t, maxlen);
+#else
+	return strncasecmp(s, t, maxlen);
+#endif
 }
 
 inline int vdwcsicmp(const wchar_t *s, const wchar_t *t) {
+#ifdef VD_COMPILER_MSVC
 	return _wcsicmp(s, t);
+#else
+	return wcscasecmp(s, t);
+#endif
 }
 
 inline int vdwcsnicmp(const wchar_t *s, const wchar_t *t, size_t maxlen) {
+#ifdef VD_COMPILER_MSVC
 	return _wcsnicmp(s, t, maxlen);
+#else
+	return wcsncasecmp(s, t, maxlen);
+#endif
 }
 
 #endif

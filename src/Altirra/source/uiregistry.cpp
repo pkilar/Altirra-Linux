@@ -68,7 +68,7 @@ void ATUILoadRegistry(const wchar_t *path) {
 
 		++s;
 		const char *nameStart = s;
-		while(*s != '"')
+		while(*s && *s != '"')
 			++s;
 
 		if (!*s)

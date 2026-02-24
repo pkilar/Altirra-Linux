@@ -5,7 +5,12 @@
 #include <vd2/system/math.h>
 #include <vd2/system/memory.h>
 #include <vd2/system/vectors.h>
+#ifdef VD_PLATFORM_WINDOWS
 #include <tchar.h>
+#else
+#define _T(x) L##x
+#define _tprintf wprintf
+#endif
 #include "test.h"
 
 AT_DEFINE_TEST_NONAUTO(Kasumi_Pixmap) {

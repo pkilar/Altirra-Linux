@@ -30,9 +30,9 @@
 #include <vd2/system/vdtypes.h>
 
 #if defined(VD_CPU_X86) || defined(VD_CPU_X64)
-#include <intrin.h>
+#include <vd2/system/win32/intrin.h>
 #elif defined(VD_CPU_ARM64)
-#include <arm_neon.h>
+#include <vd2/system/win32/intrin.h>
 #endif
 
 // Constants

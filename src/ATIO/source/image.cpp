@@ -104,7 +104,7 @@ ATImageType ATDetectImageType(const wchar_t *imagePath, IVDRandomAccessStream& s
 		(header[2] == 'P' && header[3] == '3') ||
 		(header[2] == 'P' && header[3] == '2') ||
 		(header[0] == 0x96 && header[1] == 0x02) ||
-		(!(size & 127) && size <= 65535*128 && !_wcsicmp(ext, L".xfd")))
+		(!(size & 127) && size <= 65535*128 && !vdwcsicmp(ext, L".xfd")))
 	{
 		return kATImageType_Disk;
 	}

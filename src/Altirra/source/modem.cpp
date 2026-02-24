@@ -1743,7 +1743,7 @@ void ATModemEmulator::SendResponseF(const char *format, ...) {
 	va_list val;
 
 	va_start(val, format);
-	int n = _vsnprintf(buf, 512, format, val);
+	int n = vsnprintf(buf, 512, format, val);
 	va_end(val);
 
 	if ((unsigned)n >= 511)

@@ -38,10 +38,13 @@
 
 struct VDDate;
 
-#ifdef WIN32
+#ifdef VD_PLATFORM_WINDOWS
 	typedef void *VDFileHandle;				// this needs to match wtypes.h definition for HANDLE
+#elif defined(VD_PLATFORM_LINUX)
+	typedef int VDFileHandle;				// POSIX file descriptor
+	#define VD_INVALID_FILE_HANDLE (-1)
 #else
-	#error No operating system target declared??
+	#error No operating system target declared
 #endif
 
 namespace nsVDFile {
@@ -77,7 +80,11 @@ namespace nsVDFile {
 
 class VDFile {
 protected:
+#ifdef VD_PLATFORM_LINUX
+	VDFileHandle	mhFile = VD_INVALID_FILE_HANDLE;
+#else
 	VDFileHandle	mhFile = nullptr;
+#endif
 	vdautoptr2<wchar_t>	mpFilename;
 	sint64			mFilePosition = 0;
 
@@ -86,7 +93,11 @@ private:
 	const VDFile& operator=(const VDFile& f);
 
 public:
+#ifdef VD_PLATFORM_LINUX
+	VDFile() : mhFile(VD_INVALID_FILE_HANDLE) {}
+#else
 	VDFile() : mhFile(NULL) {}
+#endif
 	VDFile(const char *pszFileName, uint32 flags = nsVDFile::kRead | nsVDFile::kDenyWrite | nsVDFile::kOpenExisting);
 	VDFile(const wchar_t *pwszFileName, uint32 flags = nsVDFile::kRead | nsVDFile::kDenyWrite | nsVDFile::kOpenExisting);
 	VDFile(VDFileHandle h);
