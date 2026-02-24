@@ -101,8 +101,8 @@
 alignas(ATUIManager) static char g_ATUIManager_storage[sizeof(ATUIManager)] = {};
 ATUIManager& g_ATUIManager = reinterpret_cast<ATUIManager&>(g_ATUIManager_storage);
 
-// Keyboard options (defined in main.cpp on Windows)
-ATUIKeyboardOptions g_kbdOpts {};
+// Keyboard options — defined in uikeyboard_linux.cpp
+extern ATUIKeyboardOptions g_kbdOpts;
 
 // Device definitions for Windows-only devices
 extern const ATDeviceDefinition g_ATDeviceDefBrowser = {
@@ -335,12 +335,8 @@ void ATUISetViewFilterSharpness(int v) { s_viewFilterSharpness = v; }
 void ATUISetWindowCaptionTemplate(const char *s) { s_windowCaptionTemplate = s ? s : ""; }
 
 ///////////////////////////////////////////////////////////////////////////
-// 7. ATUI keyboard map functions
+// 7. ATUI keyboard map functions — implemented in uikeyboard_linux.cpp
 ///////////////////////////////////////////////////////////////////////////
-
-void ATUIInitVirtualKeyMap(const ATUIKeyboardOptions&) {}
-void ATUIGetCustomKeyMap(vdfastvector<uint32>&) {}
-void ATUISetCustomKeyMap(const uint32 *, size_t) {}
 
 ///////////////////////////////////////////////////////////////////////////
 // 8. ATUI miscellaneous functions

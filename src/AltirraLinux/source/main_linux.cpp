@@ -51,6 +51,7 @@
 #include "inputmanager.h"
 #include "uiaccessors.h"
 #include "uicommondialogs.h"
+#include "uikeyboard.h"
 #include "uiqueue.h"
 #include "inputmap.h"
 
@@ -464,6 +465,108 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// Keyboard mapping → POKEY
+///////////////////////////////////////////////////////////////////////////
+
+extern ATUIKeyboardOptions g_kbdOpts;
+
+// Track active special keys (Start/Select/Option/Break) by their VK code
+// so we can release them correctly on key-up even if modifiers changed.
+struct ActiveSpecialKey {
+	uint32 vk;
+	uint32 scanCode;
+};
+static std::vector<ActiveSpecialKey> s_activeSpecialKeys;
+
+static bool IsExtendedKey(SDL_Scancode sc) {
+	switch (sc) {
+		case SDL_SCANCODE_INSERT:
+		case SDL_SCANCODE_DELETE:
+		case SDL_SCANCODE_HOME:
+		case SDL_SCANCODE_END:
+		case SDL_SCANCODE_PAGEUP:
+		case SDL_SCANCODE_PAGEDOWN:
+		case SDL_SCANCODE_LEFT:
+		case SDL_SCANCODE_RIGHT:
+		case SDL_SCANCODE_UP:
+		case SDL_SCANCODE_DOWN:
+		case SDL_SCANCODE_KP_ENTER:
+			return true;
+		default:
+			return false;
+	}
+}
+
+static void HandleSpecialKey(uint32 scanCode, bool state) {
+	switch(scanCode) {
+		case kATUIKeyScanCode_Start:
+			g_sim.GetGTIA().SetConsoleSwitch(0x01, state);
+			break;
+		case kATUIKeyScanCode_Select:
+			g_sim.GetGTIA().SetConsoleSwitch(0x02, state);
+			break;
+		case kATUIKeyScanCode_Option:
+			g_sim.GetGTIA().SetConsoleSwitch(0x04, state);
+			break;
+		case kATUIKeyScanCode_Break:
+			g_sim.GetPokey().SetBreakKeyState(state, !g_kbdOpts.mbFullRawKeys);
+			break;
+	}
+}
+
+static void ProcessAtariKeyboard(const SDL_Event& event) {
+	if (event.type == SDL_KEYDOWN) {
+		uint32 vk = ATInputSDL2::TranslateSDLScancode(event.key.keysym.scancode);
+		if (vk == kATInputCode_None)
+			return;
+
+		SDL_Keymod mod = SDL_GetModState();
+		bool alt   = (mod & KMOD_ALT) != 0;
+		bool ctrl  = (mod & KMOD_CTRL) != 0;
+		bool shift = (mod & KMOD_SHIFT) != 0;
+		bool ext   = IsExtendedKey(event.key.keysym.scancode);
+
+		uint32 scanCode;
+		if (!ATUIGetScanCodeForVirtualKey(vk, alt, ctrl, shift, ext, scanCode))
+			return;
+
+		if (scanCode >= kATUIKeyScanCodeFirst) {
+			// Special key (Start/Select/Option/Break)
+			HandleSpecialKey(scanCode, true);
+
+			// Track for release on key-up
+			bool found = false;
+			for (auto& k : s_activeSpecialKeys) {
+				if (k.vk == vk) {
+					k.scanCode = scanCode;
+					found = true;
+					break;
+				}
+			}
+			if (!found)
+				s_activeSpecialKeys.push_back({vk, scanCode});
+		} else if (g_kbdOpts.mbRawKeys) {
+			g_sim.GetPokey().PushRawKey(scanCode, !g_kbdOpts.mbFullRawKeys);
+		} else {
+			g_sim.GetPokey().PushKey(scanCode, event.key.repeat != 0);
+		}
+	} else if (event.type == SDL_KEYUP) {
+		uint32 vk = ATInputSDL2::TranslateSDLScancode(event.key.keysym.scancode);
+		if (vk == kATInputCode_None)
+			return;
+
+		// Release any special key tracked for this VK
+		for (auto it = s_activeSpecialKeys.begin(); it != s_activeSpecialKeys.end(); ++it) {
+			if (it->vk == vk) {
+				HandleSpecialKey(it->scanCode, false);
+				s_activeSpecialKeys.erase(it);
+				break;
+			}
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
 // Event handling
 ///////////////////////////////////////////////////////////////////////////
 
@@ -733,7 +836,10 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 		}
 
-		// Let input handler try
+		// Keyboard mapping → POKEY (type characters into Atari emulation)
+		ProcessAtariKeyboard(event);
+
+		// Let input handler try (joystick/paddle/etc. input maps)
 		if (g_pInput && g_pInput->ProcessEvent(event))
 			continue;
 
@@ -1058,6 +1164,10 @@ int main(int argc, char *argv[]) {
 	ATLoadDefaultProfiles();
 	ATSettingsLoadLastProfile(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
 	fprintf(stderr, "Settings loaded\n");
+
+	// Initialize keyboard mapping (must be after settings load which sets g_kbdOpts)
+	ATUIInitVirtualKeyMap(g_kbdOpts);
+	fprintf(stderr, "Keyboard mapping initialized\n");
 
 	// Load ROMs (will use HLE kernel if no external ROMs found)
 	try {

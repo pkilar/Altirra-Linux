@@ -145,6 +145,10 @@ uint32 ATInputSDL2::TranslateSDLScancode(SDL_Scancode sc) {
 		case SDL_SCANCODE_LCTRL:  return kATInputCode_KeyLControl;
 		case SDL_SCANCODE_RCTRL:  return kATInputCode_KeyRControl;
 
+		// Caps Lock / Pause (needed for keyboard mapping)
+		case SDL_SCANCODE_CAPSLOCK:  return 0x14;  // VK_CAPITAL
+		case SDL_SCANCODE_PAUSE:     return 0x13;  // VK_PAUSE
+
 		// Punctuation / OEM keys
 		case SDL_SCANCODE_SEMICOLON:    return kATInputCode_KeyOem1;       // ;:
 		case SDL_SCANCODE_EQUALS:       return kATInputCode_KeyOemPlus;    // =+

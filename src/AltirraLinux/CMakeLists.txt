@@ -229,6 +229,7 @@ set(LINUX_SOURCES
 	source/console_linux.cpp
 	source/stubs_linux.cpp
 	source/modemtcp_linux.cpp
+	source/uikeyboard_linux.cpp
 )
 
 # Build executable

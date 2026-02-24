@@ -36,8 +36,11 @@ public:
 	// Process a single SDL event. Returns true if the event was consumed.
 	bool ProcessEvent(const SDL_Event& event);
 
-private:
+	// Translate SDL scancode to ATInputCode (VK equivalent). Public so
+	// keyboard mapping in main_linux.cpp can reuse it.
 	static uint32 TranslateSDLScancode(SDL_Scancode sc);
+
+private:
 	void OnControllerAdded(int joystickIndex);
 	void OnControllerRemoved(SDL_JoystickID instanceID);
 
