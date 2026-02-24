@@ -369,9 +369,21 @@ static void DrawRegisters() {
 			uint8 vcount = target->DebugReadByte(0xD40B);
 			uint8 nmist  = target->DebugReadByte(0xD40F);
 			uint8 dmactl = target->DebugReadByte(0xD400);
+			uint8 dlistl = target->DebugReadByte(0xD402);
+			uint8 dlisth = target->DebugReadByte(0xD403);
+			uint16 dlist = dlistl | ((uint16)dlisth << 8);
 			ImGui::Text("VCOUNT:%3d  NMIST:%02X  DMA:%02X", vcount, nmist, dmactl);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("ANTIC: VCOUNT=$D40B NMIST=$D40F DMACTL=$D400");
+			ImGui::Text("DLIST: %04X", dlist);
+			if (ImGui::IsItemHovered()) {
+				ImGui::SetTooltip("ANTIC: DLISTL=$D402 DLISTH=$D403\nClick to view in memory");
+			}
+			if (ImGui::IsItemClicked()) {
+				s_memoryAddr = dlist;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", dlist);
+				s_showMemory = true;
+			}
 
 			uint8 irqst  = target->DebugReadByte(0xD20E);
 			uint8 audctl = target->DebugReadByte(0xD208);
