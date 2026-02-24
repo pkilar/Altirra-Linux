@@ -53,6 +53,7 @@
 #include "uicommondialogs.h"
 #include "uikeyboard.h"
 #include "uiqueue.h"
+#include "versioninfo.h"
 #include "inputmap.h"
 
 #include <display_sdl2.h>
@@ -324,7 +325,7 @@ static void PrintUsage(const char *progname) {
 }
 
 static void PrintVersion() {
-	fprintf(stderr, "Altirra (Linux port) 4.40\n");
+	fprintf(stderr, "Altirra (Linux port) " AT_VERSION "\n");
 }
 
 static ATLinuxOptions ParseArguments(int argc, char *argv[]) {

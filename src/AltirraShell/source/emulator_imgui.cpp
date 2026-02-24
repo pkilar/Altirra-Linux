@@ -56,6 +56,7 @@ class ATIRQController;
 #include "debugger.h"
 #include "inputmanager.h"
 #include "oshelper.h"
+#include "versioninfo.h"
 #include "audiowriter.h"
 #include "sapwriter.h"
 #include "vgmwriter.h"
@@ -2019,7 +2020,7 @@ static void DrawAbout() {
 		return;
 	}
 
-	ImGui::Text("Altirra (Linux port) 4.40");
+	ImGui::Text("Altirra (Linux port) " AT_VERSION);
 	ImGui::Separator();
 	ImGui::TextWrapped(
 		"Atari 800/800XL/5200 emulator by Avery Lee.\n"
