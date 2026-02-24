@@ -929,6 +929,18 @@ static void DrawMemory() {
 				}
 			}
 
+			// Copy hex row (16 bytes from context address)
+			if (ImGui::MenuItem("Copy Row (16 bytes)")) {
+				uint16 rowBase = s_disasmContextAddr & 0xFFF0;
+				char hexRow[128];
+				int pos = snprintf(hexRow, sizeof(hexRow), "%04X:", rowBase);
+				for (int j = 0; j < 16; j++) {
+					uint8 b = target->DebugReadByte((rowBase + j) & 0xFFFF);
+					pos += snprintf(hexRow + pos, sizeof(hexRow) - pos, " %02X", b);
+				}
+				ImGui::SetClipboardText(hexRow);
+			}
+
 			ImGui::EndPopup();
 		}
 	}
