@@ -27,6 +27,7 @@
 #include <vd2/Kasumi/pixmapops.h>
 #include <vd2/system/file.h>
 #include "encode_png.h"
+#include "decode_png.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -135,11 +136,36 @@ void ATCopyTextToClipboard(void *hwnd, const wchar_t *s) {
 	SDL_SetClipboardText(u8.c_str());
 }
 
-// Frame I/O — stub for now
+// Frame I/O — PNG decoding using built-in decoder
 void ATLoadFrame(VDPixmapBuffer& px, const wchar_t *filename) {
+	VDFile f(filename);
+
+	sint64 size = f.size();
+	if (size > 256*1024*1024)
+		throw MyError("File is too large to load.");
+
+	vdblock<unsigned char> buf((uint32)size);
+	f.read(buf.data(), (long)size);
+	f.close();
+
+	ATLoadFrameFromMemory(px, buf.data(), size);
 }
 
 void ATLoadFrameFromMemory(VDPixmapBuffer& px, const void *mem, size_t len) {
+	// Check for PNG signature
+	if (len >= 8 && !memcmp(mem, "\x89PNG\r\n\x1a\n", 8)) {
+		vdautoptr<IVDImageDecoderPNG> decoder(VDCreateImageDecoderPNG());
+		PNGDecodeError err = decoder->Decode(mem, (uint32)len);
+		if (err != kPNGDecodeOK)
+			throw MyError("PNG decode error (%d).", (int)err);
+
+		const VDPixmap& src = decoder->GetFrameBuffer();
+		px.init(src.w, src.h, nsVDPixmap::kPixFormat_XRGB8888);
+		VDPixmapBlt(px, src);
+		return;
+	}
+
+	throw MyError("Unsupported image format.");
 }
 
 void ATSaveFrame(const VDPixmap& px, const wchar_t *filename) {
