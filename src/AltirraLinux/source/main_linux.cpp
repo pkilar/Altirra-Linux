@@ -1074,6 +1074,10 @@ int main(int argc, char *argv[]) {
 	if (!opts.romPath.empty())
 		s_extraRomPath = opts.romPath;
 
+	// Register save state type deserializers (must be before any save state load)
+	extern void ATInitSaveStateDeserializer();
+	ATInitSaveStateDeserializer();
+
 	// Init simulator (must happen before settings load, which calls
 	// SetHardwareMode and other methods that access the device manager)
 	g_sim.Init();
