@@ -1,0 +1,227 @@
+# Altirra Linux Port
+
+An unofficial Linux port of [Altirra](https://virtualdub.org/altirra.html), a cycle-accurate Atari 8-bit computer emulator (800/XL/XE/5200) by Avery Lee.
+
+This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and Dear ImGui, replacing the Windows-native UI and display layers while keeping the emulation engine unchanged.
+
+## Features
+
+### Emulation (from upstream Altirra)
+
+- Cycle-accurate CPU emulation: 6502, 65C02, 65C816, 6809, Z80, 8048, 8051
+- ANTIC, GTIA, POKEY, and PIA chip emulation
+- Disk drive emulation (D1-D15) with SIO bus timing
+- Cassette tape emulation with playback, recording, and turbo modes
+- Cartridge support (100+ mapper types)
+- H: host device and PCLink file sharing
+- IDE hard disk emulation
+- Ethernet emulation (DragonCart)
+- Save states
+- Built-in BASIC compiler/interpreter
+
+### Linux Frontend
+
+- **Display**: SDL2 + OpenGL with bilinear/point filtering, multiple stretch modes (aspect-preserving, square pixels, integral scaling), PAR correction, HiDPI support, adaptive vsync
+- **Audio**: SDL2 audio output with POKEY emulation
+- **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
+- **UI**: Full Dear ImGui interface with menus, dialogs, and configuration
+- **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, console, hardware register inspection, and CPU target switching
+- **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
+- **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
+- **Settings**: Portable INI-based configuration at `~/.config/altirra/Altirra.ini`
+- **File dialogs**: Native dialogs via zenity (GTK) or kdialog (KDE) with ImGui fallback
+- **Firmware discovery**: Automatic ROM scanning from multiple paths
+- **Screenshots**: PNG screenshot capture
+- **Recording**: Audio recording (WAV/PCM/SAP/VGM)
+
+### Keyboard Shortcuts
+
+| Key        | Action                                                    |
+| ---------- | --------------------------------------------------------- |
+| F12        | Toggle ImGui overlay (menus/dialogs)                      |
+| Escape     | Close overlay                                             |
+| F5         | Continue (debugger)                                       |
+| F10        | Step over (debugger)                                      |
+| F11        | Step into (debugger) / Fullscreen toggle (overlay hidden) |
+| Alt+Return | Toggle fullscreen                                         |
+| F1 (hold)  | Warp speed while held                                     |
+| F7         | Quick save state                                          |
+| F8         | Quick load state                                          |
+| Ctrl+S     | Save settings                                             |
+| Ctrl+V     | Paste text to emulator                                    |
+
+## Building
+
+### Requirements
+
+- CMake 3.20+
+- GCC 13+ or Clang 16+ (C++23 required)
+- Ninja (recommended) or Make
+- SDL2 development libraries
+- OpenGL development libraries
+- Git (for Dear ImGui fetch)
+
+#### Debian/Ubuntu
+
+```bash
+sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev git
+```
+
+#### Arch Linux
+
+```bash
+sudo pacman -S base-devel cmake ninja sdl2 mesa git
+```
+
+#### Fedora
+
+```bash
+sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel git
+```
+
+### Build
+
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+The executable is produced at `build/src/AltirraLinux/altirra`.
+
+Dear ImGui v1.91.8 is automatically fetched via CMake FetchContent during the first build.
+
+#### Build Types
+
+| Type      | Description                                      |
+| --------- | ------------------------------------------------ |
+| `Release` | Optimized (`-O2`), recommended for regular use   |
+| `Debug`   | Debug symbols, no optimization, `_DEBUG` defined |
+
+#### Address Sanitizer (development)
+
+```bash
+cmake -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_CXX_FLAGS="-fsanitize=address -fno-omit-frame-pointer" \
+  -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
+cmake --build build-asan
+```
+
+### Running Tests
+
+```bash
+build/src/ATTest/attest CoProc_6502 Emu_PokeyTimers Core_MD5 System_Vector System_CRC
+```
+
+## Usage
+
+```bash
+# Run with no arguments (starts with built-in kernel)
+./build/src/AltirraLinux/altirra
+
+# Load a disk/cartridge/tape image directly
+./build/src/AltirraLinux/altirra game.atr
+./build/src/AltirraLinux/altirra cart.car
+
+# Start in fullscreen
+./build/src/AltirraLinux/altirra --fullscreen game.atr
+
+# Specify firmware ROM search path
+./build/src/AltirraLinux/altirra --rom-path /path/to/roms
+
+# Use alternate settings file
+./build/src/AltirraLinux/altirra --config ~/my-altirra.ini
+```
+
+### Command-Line Options
+
+| Option              | Description                               |
+| ------------------- | ----------------------------------------- |
+| `<file>`            | Load disk/cartridge/tape image at startup |
+| `--portable`        | Store settings next to the executable     |
+| `--config <path>`   | Use alternate settings file               |
+| `--rom-path <path>` | Add firmware ROM search path              |
+| `--fullscreen`      | Start in fullscreen mode                  |
+| `--help`            | Show usage information                    |
+| `--version`         | Show version                              |
+
+### Firmware ROMs
+
+Altirra includes a built-in replacement kernel, but for best compatibility you can provide original Atari OS ROMs. Place ROM files in any of these directories:
+
+1. `~/.config/altirra/firmware/`
+2. `<program-directory>/firmware/`
+3. `/usr/share/altirra/firmware/`
+4. `/usr/local/share/altirra/firmware/`
+
+Use **System > Firmware Manager** (F12 to open overlay) to scan, identify, and assign firmware images.
+
+### Configuration
+
+Settings are stored in `~/.config/altirra/Altirra.ini` by default. All emulator settings (hardware mode, memory, video standard, input mappings, display options) are saved here. Use Ctrl+S or **System > Save Settings** to save, or settings are automatically saved on exit.
+
+## Port Status
+
+The Linux port is approximately **98% complete** relative to the Windows version.
+
+### Fully Functional
+
+- Complete emulation core (all CPUs, chips, peripherals, disk/cassette/cartridge)
+- Full ImGui UI with all configuration dialogs
+- Integrated debugger with 9+ tool windows
+- Disk explorer with filesystem operations
+- Input mapping with binding editor
+- Save states (quick save/load and file-based)
+- Audio/video recording
+- Network emulation (socket layer with epoll)
+- Firmware discovery and management
+
+### Not Implemented
+
+- **Profiler/performance views** — Windows has a rich profiler UI (timeline, source pane, stats tree) used primarily by Atari developers. This is a significant standalone feature planned for a future effort.
+- **ATUICommandManager** — Windows command dispatch system; all commands are accessible through ImGui menus instead.
+
+### Intentionally Disabled
+
+- **Raw disk access** (ATIDEPhysicalDisk) — disabled for security
+- **ETW tracing** (ATCreateNativeTracer) — Windows-specific tracing infrastructure
+- **Win32 resource loading** — not applicable on Linux
+
+## Project Structure
+
+```
+CMakeLists.txt                          # Top-level build
+cmake/
+  AltirraCompilerFlags.cmake            # Shared compiler settings (C++23, warnings)
+  FetchImGui.cmake                      # Dear ImGui v1.91.8 auto-download
+src/
+  AltirraLinux/source/
+    main_linux.cpp                      # Entry point, SDL2 window, main loop, settings
+    stubs_linux.cpp                     # Implementations for Windows-only interfaces
+  AltirraShell/source/
+    emulator_imgui.cpp                  # ImGui UI (menus, dialogs, status bar)
+    debugger_imgui.cpp                  # ImGui debugger windows
+    display_sdl2.cpp                    # SDL2+OpenGL display backend
+  system/                               # VirtualDub-derived platform abstraction
+  ATCore/                               # Device framework, schedulers, VFS
+  ATCPU/                                # CPU emulators (6502, Z80, 6809, etc.)
+  ATAudio/                              # POKEY sound emulation, audio pipeline
+  ATEmulation/                          # Common chip emulations
+  ATIO/                                 # Disk/cassette/cartridge image formats
+  ATDevices/                            # Peripheral device implementations
+  ATNetwork/                            # Ethernet emulation
+  ATDebugger/                           # Debug infrastructure
+  ATTest/                               # Test suite
+  h/                                    # Headers (at/ and vd2/ trees)
+```
+
+## License
+
+Altirra is licensed under the GNU General Public License v2 or later. See the original [Altirra website](https://virtualdub.org/altirra.html) for details.
+
+This Linux port maintains the same license. The port modifies no emulation core code; it provides alternative frontend, display, audio, and input implementations for the Linux platform.
+
+## Credits
+
+- **Avery Lee** — Altirra emulator author and all emulation core code
+- **Dear ImGui** — Immediate-mode GUI library by Omar Cornut ([ocornut/imgui](https://github.com/ocornut/imgui))
+- **SDL2** — Cross-platform multimedia library ([libsdl.org](https://www.libsdl.org/))
