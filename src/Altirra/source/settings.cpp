@@ -458,6 +458,7 @@ void ATSettingsExchangeView(bool write, VDRegistryKey& key) {
 
 	ATSettingsExchangeBool(write, key, "View: Auto-hide menu", ATUIIsMenuAutoHideEnabled, ATUISetMenuAutoHideEnabled);
 	ATSettingsExchangeBool(write, key, "View: Show FPS", ATUIGetShowFPS, ATUISetShowFPS);
+	ATSettingsExchangeBool(write, key, "View: Show status bar", ATUIGetShowStatusBar, ATUISetShowStatusBar);
 	ATSettingsExchangeBool(write, key, "View: Vertical sync", [&]() { return gtia.IsVsyncEnabled(); }, [&](bool en) { gtia.SetVsyncEnabled(en); });
 
 	if (write)

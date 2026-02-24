@@ -117,7 +117,7 @@ static bool s_inputCaptureGotResult = false;
 static int s_captureTargetMappingIdx = -1;  // -1 = adding new, >=0 = rebinding existing
 static bool s_quitRequested = false;
 static bool s_quitConfirmed = false;
-static bool s_showStatusBar = true;
+// s_showStatusBar removed — now backed by ATUIGetShowStatusBar()/ATUISetShowStatusBar()
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -1837,7 +1837,11 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Fullscreen", "F11", &fullscreen))
 			ATSetFullscreen(fullscreen);
 
-		ImGui::MenuItem("Status Bar", nullptr, &s_showStatusBar);
+		{
+			bool statusBar = ATUIGetShowStatusBar();
+			if (ImGui::MenuItem("Status Bar", nullptr, &statusBar))
+				ATUISetShowStatusBar(statusBar);
+		}
 
 		{
 			bool autoHide = ATUIGetPointerAutoHide();
@@ -2080,6 +2084,15 @@ static void DrawSystemConfig() {
 
 	ImGui::Separator();
 
+	// Display options
+	{
+		bool statusBar = ATUIGetShowStatusBar();
+		if (ImGui::Checkbox("Show Status Bar", &statusBar))
+			ATUISetShowStatusBar(statusBar);
+	}
+
+	ImGui::Separator();
+
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
 		g_sim.ColdReset();
 	}
@@ -2092,7 +2105,7 @@ static void DrawSystemConfig() {
 static void DrawStatusBar() {
 	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
 
-	if (!s_showStatusBar) {
+	if (!ATUIGetShowStatusBar()) {
 		if (disp)
 			disp->SetBottomMargin(0);
 		return;

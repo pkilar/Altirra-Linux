@@ -216,10 +216,12 @@ bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 ///////////////////////////////////////////////////////////////////////////
 
 static bool s_showFPS = false;
+static bool s_showStatusBar = true;
 static bool s_turbo = false;
 static bool s_fullscreen = false;
 
 bool ATUIGetShowFPS() { return s_showFPS; }
+bool ATUIGetShowStatusBar() { return s_showStatusBar; }
 bool ATUIGetTurbo() { return s_turbo; }
 bool ATUIGetFullscreen() { return s_fullscreen; }
 
@@ -333,6 +335,7 @@ void ATUISetPointerAutoHide(bool v) { s_pointerAutoHide = v; }
 void ATUISetRawInputEnabled(bool v) { s_rawInput = v; }
 void ATUISetResetFlags(uint32 v) { s_resetFlags = v; }
 void ATUISetShowFPS(bool v) { s_showFPS = v; }
+void ATUISetShowStatusBar(bool v) { s_showStatusBar = v; }
 void ATUISetSpeedModifier(float v) {
 	s_speedModifier = v;
 	ATUIUpdateSpeedTiming();
