@@ -2119,12 +2119,48 @@ static void DrawStatusBar() {
 
 		ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s %s", hwName, vsName);
 
-		// Disk status (show dirty indicator when disk has unsaved changes)
-		// Always show D1-D4; show D5-D15 only when loaded
+		// Disk status with activity indicators
+		// Colors per drive (dim/bright pairs, matching Windows palette)
+		static const ImVec4 kDiskDim[8] = {
+			{0.57f, 0.63f, 0.00f, 1.0f}, {0.83f, 0.44f, 0.25f, 1.0f},
+			{0.83f, 0.33f, 0.81f, 1.0f}, {0.57f, 0.40f, 1.00f, 1.0f},
+			{0.28f, 0.59f, 0.93f, 1.0f}, {0.21f, 0.73f, 0.38f, 1.0f},
+			{0.42f, 0.70f, 0.00f, 1.0f}, {0.73f, 0.53f, 0.05f, 1.0f},
+		};
+		static const ImVec4 kDiskBright[8] = {
+			{1.0f, 1.0f, 0.40f, 1.0f}, {1.0f, 0.91f, 0.72f, 1.0f},
+			{1.0f, 0.80f, 1.00f, 1.0f}, {1.0f, 0.87f, 1.00f, 1.0f},
+			{0.75f, 1.0f, 1.00f, 1.0f}, {0.67f, 1.0f, 0.85f, 1.0f},
+			{0.89f, 1.0f, 0.44f, 1.0f}, {1.0f, 0.99f, 0.52f, 1.0f},
+		};
+		static const ImVec4 kDiskIdle = {0.5f, 0.5f, 0.5f, 1.0f};
+		static const ImVec4 kDiskDirty = {1.0f, 0.8f, 0.4f, 1.0f};
+		static const ImVec4 kDiskError = {1.0f, 0.2f, 0.2f, 1.0f};
+
+		ATImGuiIndicatorState& ind = ATImGuiGetIndicatorState();
+		uint32 statusFlags = ind.mStatusFlags | ind.mStatusHoldFlags;
+		bool errorBlink = (SDL_GetTicks() % 1000) >= 500;
+		uint32 diskErrorVis = errorBlink ? ind.mDiskErrorFlags : 0;
+
+		// Tick hold counters (once per frame)
+		for (uint32 f = ind.mStatusHoldFlags; f; f &= f - 1) {
+			int idx = __builtin_ctz(f);
+			if (idx < 17 && ind.mStatusHoldCounters[idx]) {
+				if (!--ind.mStatusHoldCounters[idx])
+					ind.mStatusHoldFlags &= ~(1u << idx);
+			}
+		}
+
+		// Always show D1-D4; show D5-D15 only when loaded or active
 		for (int i = 0; i < 15; ++i) {
 			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+			uint32 flag = 1u << i;
+			bool motorOn = (ind.mDiskMotorFlags & flag) != 0;
+			bool sioActive = (statusFlags & flag) != 0;
+			bool hasError = (diskErrorVis & flag) != 0;
+			bool isActive = sioActive || hasError;
 
-			if (i >= 4 && !di.IsDiskLoaded())
+			if (i >= 4 && !di.IsDiskLoaded() && !motorOn && !sioActive)
 				continue;
 
 			ImGui::SameLine(0, 16);
@@ -2132,13 +2168,75 @@ static void DrawStatusBar() {
 			if (di.IsDiskLoaded()) {
 				const wchar_t *filename = VDFileSplitPath(di.GetPath());
 				VDStringA u8 = VDTextWToU8(VDStringW(filename));
-				if (di.IsDirty())
-					ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.4f, 1.0f), "D%d: %s*", i + 1, u8.c_str());
+
+				const ImVec4 *color;
+				if (hasError)
+					color = &kDiskError;
+				else if (isActive)
+					color = &kDiskBright[i & 7];
+				else if (motorOn)
+					color = &kDiskDim[i & 7];
+				else if (di.IsDirty())
+					color = &kDiskDirty;
+				else
+					color = nullptr;
+
+				if (sioActive)
+					ImGui::TextColored(*color, "D%d: %s [%u]", i + 1, u8.c_str(), ind.mStatusCounter[i]);
+				else if (color)
+					ImGui::TextColored(*color, "D%d: %s%s", i + 1, u8.c_str(), di.IsDirty() ? "*" : "");
 				else
 					ImGui::Text("D%d: %s", i + 1, u8.c_str());
+			} else if (motorOn || sioActive) {
+				const ImVec4& color = isActive ? kDiskBright[i & 7] : kDiskDim[i & 7];
+				ImGui::TextColored(color, "D%d:", i + 1);
 			} else {
-				ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "D%d: -", i + 1);
+				ImGui::TextColored(kDiskIdle, "D%d: -", i + 1);
 			}
+		}
+
+		// H: device indicator
+		if (ind.mHReadCounter || ind.mHWriteCounter) {
+			ImGui::SameLine(0, 16);
+			bool bright = ind.mHReadCounter > 24 || ind.mHWriteCounter > 24;
+			ImVec4 hColor = bright ? ImVec4(0.2f, 1.0f, 0.6f, 1.0f) : ImVec4(0.1f, 0.6f, 0.35f, 1.0f);
+			const char *suffix = (ind.mHReadCounter && ind.mHWriteCounter) ? "H:RW"
+				: ind.mHWriteCounter ? "H:W" : "H:R";
+			ImGui::TextColored(hColor, "%s", suffix);
+			if (ind.mHReadCounter) --ind.mHReadCounter;
+			if (ind.mHWriteCounter) --ind.mHWriteCounter;
+		}
+
+		// PCLink indicator
+		if (ind.mPCLinkReadCounter || ind.mPCLinkWriteCounter) {
+			ImGui::SameLine(0, 16);
+			bool bright = ind.mPCLinkReadCounter > 24 || ind.mPCLinkWriteCounter > 24;
+			ImVec4 pColor = bright ? ImVec4(0.4f, 0.8f, 1.0f, 1.0f) : ImVec4(0.2f, 0.5f, 0.7f, 1.0f);
+			const char *suffix = (ind.mPCLinkReadCounter && ind.mPCLinkWriteCounter) ? "PCL:RW"
+				: ind.mPCLinkWriteCounter ? "PCL:W" : "PCL:R";
+			ImGui::TextColored(pColor, "%s", suffix);
+			if (ind.mPCLinkReadCounter) --ind.mPCLinkReadCounter;
+			if (ind.mPCLinkWriteCounter) --ind.mPCLinkWriteCounter;
+		}
+
+		// IDE/hard disk indicator
+		if (ind.mbHardDiskRead || ind.mbHardDiskWrite) {
+			ImGui::SameLine(0, 16);
+			ImVec4 hdColor = ind.mbHardDiskWrite ? ImVec4(1.0f, 0.6f, 0.2f, 1.0f) : ImVec4(0.5f, 1.0f, 0.5f, 1.0f);
+			ImGui::TextColored(hdColor, "HD:%c%u", ind.mbHardDiskWrite ? 'W' : 'R', ind.mHardDiskLBA);
+			if (ind.mHardDiskCounter) {
+				if (!--ind.mHardDiskCounter) {
+					ind.mbHardDiskRead = false;
+					ind.mbHardDiskWrite = false;
+				}
+			}
+		}
+
+		// Flash write indicator
+		if (ind.mFlashWriteCounter) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.1f, 1.0f), "FL");
+			--ind.mFlashWriteCounter;
 		}
 
 		// Cartridge indicator

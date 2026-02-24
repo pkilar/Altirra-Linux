@@ -40,4 +40,26 @@ void ATImGuiDiskExplorerImportFile(const wchar_t *hostPath);
 bool ATImGuiIsCapturingInput();
 void ATImGuiOnCapturedInput(uint32 inputCode);
 
+// Activity indicator state — written by ATImGuiUIRenderer in stubs_linux.cpp,
+// read by DrawStatusBar() in emulator_imgui.cpp each frame.
+struct ATImGuiIndicatorState {
+	uint32 mDiskMotorFlags = 0;        // Bitmask: drive motors active (bit 0 = D1)
+	uint32 mDiskErrorFlags = 0;        // Bitmask: drive errors (bit 0 = D1)
+	uint32 mStatusFlags = 0;           // Bitmask: SIO activity per drive + cassette (bit 16)
+	uint32 mStatusHoldFlags = 0;       // Bitmask: held status flags (post-activity linger)
+	uint32 mStatusHoldCounters[17] = {};
+	uint32 mStatusCounter[15] = {};    // Sector counters per drive
+	uint8 mHReadCounter = 0;           // H: device read activity countdown (0-30)
+	uint8 mHWriteCounter = 0;          // H: device write activity countdown (0-30)
+	uint8 mHardDiskCounter = 0;        // IDE activity timeout
+	uint32 mHardDiskLBA = 0;           // Current LBA
+	bool mbHardDiskRead = false;
+	bool mbHardDiskWrite = false;
+	uint8 mPCLinkReadCounter = 0;      // PCLink read activity countdown (0-30)
+	uint8 mPCLinkWriteCounter = 0;     // PCLink write activity countdown (0-30)
+	uint8 mFlashWriteCounter = 0;      // Flash write activity countdown (0-20)
+};
+
+ATImGuiIndicatorState& ATImGuiGetIndicatorState();
+
 #endif
