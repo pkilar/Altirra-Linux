@@ -764,6 +764,19 @@ static void DrawDisassembly() {
 					snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", ea);
 					s_showMemory = true;
 				}
+
+				// Quick watch
+				char wbLabel[48], wwLabel[48];
+				snprintf(wbLabel, sizeof(wbLabel), "Watch Byte $%04X", ea);
+				snprintf(wwLabel, sizeof(wwLabel), "Watch Word $%04X", ea);
+				if (ImGui::MenuItem(wbLabel)) {
+					dbg->AddWatch(ea, 1);
+					s_showWatch = true;
+				}
+				if (ImGui::MenuItem(wwLabel)) {
+					dbg->AddWatch(ea, 2);
+					s_showWatch = true;
+				}
 			}
 
 			ImGui::Separator();
