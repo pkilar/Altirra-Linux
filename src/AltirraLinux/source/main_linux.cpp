@@ -1171,6 +1171,10 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "Joystick manager init failed (continuing without joystick support)\n");
 	}
 
+	// Load config variable overrides from persistent storage
+	extern void ATLoadConfigVars();
+	ATLoadConfigVars();
+
 	// Load profiles and last-used settings (must be after simulator, joystick
 	// manager, and audio init — settings load accesses GetJoystickManager(),
 	// GetAudioOutput(), SetHardwareMode(), etc.)
