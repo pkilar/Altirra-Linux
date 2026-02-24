@@ -68,6 +68,9 @@ static char s_memoryAddrBuf[16] = "0000";
 static int s_memEditByteIdx = -1;  // -1 = no byte being edited
 static char s_memEditBuf[4] = "";
 
+// Breakpoint add state
+static char s_bpAddrBuf[16] = "";
+
 // Disassembly state
 static uint32 s_disasmAddr = 0;
 static bool s_disasmFollowPC = true;
@@ -415,6 +418,16 @@ static void DrawMemory() {
 
 	// 16x16 hex dump with inline editing
 	if (ImGui::BeginChild("##memlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		// Scroll wheel: move by 1 row (16 bytes) per notch
+		if (ImGui::IsWindowHovered()) {
+			float wheel = ImGui::GetIO().MouseWheel;
+			if (wheel != 0.0f) {
+				int delta = (int)(-wheel) * 16;
+				s_memoryAddr = (s_memoryAddr + delta) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+		}
+
 		uint8 buf[256];
 		target->DebugReadMemory(s_memoryAddr, buf, 256);
 
@@ -553,6 +566,19 @@ static void DrawBreakpoints() {
 		return;
 	}
 
+	// Add breakpoint input
+	ImGui::SetNextItemWidth(80);
+	bool addBp = ImGui::InputText("##bpaddr", s_bpAddrBuf, sizeof(s_bpAddrBuf),
+		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue);
+	ImGui::SameLine();
+	if ((ImGui::Button("Add##bp") || addBp) && s_bpAddrBuf[0]) {
+		unsigned int addr;
+		if (sscanf(s_bpAddrBuf, "%x", &addr) == 1) {
+			dbg->ToggleBreakpoint(addr & 0xFFFF);
+			s_bpAddrBuf[0] = 0;
+		}
+	}
+	ImGui::SameLine();
 	if (ImGui::Button("Clear All")) {
 		dbg->ClearAllBreakpoints();
 	}
