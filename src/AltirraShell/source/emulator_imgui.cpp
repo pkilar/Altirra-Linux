@@ -77,6 +77,9 @@ uint32 ATCartridgeAutodetectMode(const void *data, uint32 size, vdfastvector<int
 // Firmware search path accessor (defined in main_linux.cpp)
 void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
 
+// Firmware switching (defined in stubs_linux.cpp)
+bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId);
+
 extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
 
@@ -927,6 +930,76 @@ static void DrawMenuBar() {
 					g_sim.SetHardwareMode((ATHardwareMode)i);
 				}
 			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Kernel")) {
+			ATFirmwareManager *fwMgr = g_sim.GetFirmwareManager();
+			uint64 curKernel = g_sim.GetKernelId();
+			ATHardwareMode hwmode = g_sim.GetHardwareMode();
+
+			// Autoselect option (id 0 = let simulator pick)
+			if (ImGui::MenuItem("[Autoselect]", nullptr, curKernel == 0)) {
+				ATUISwitchKernel(nullptr, 0);
+			}
+
+			// Built-in HLE kernels
+			if (hwmode != kATHardwareMode_5200) {
+				if (ImGui::MenuItem("Internal OS-B", nullptr, curKernel == kATFirmwareId_Kernel_LLE)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_Kernel_LLE);
+				}
+				if (ImGui::MenuItem("Internal XL OS", nullptr, curKernel == kATFirmwareId_Kernel_LLEXL)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_Kernel_LLEXL);
+				}
+			} else {
+				if (ImGui::MenuItem("Internal 5200 OS", nullptr, curKernel == kATFirmwareId_5200_LLE)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_5200_LLE);
+				}
+			}
+
+			// User-added firmware ROMs that match current hardware mode
+			if (fwMgr) {
+				vdvector<ATFirmwareInfo> fwList;
+				fwMgr->GetFirmwareList(fwList);
+
+				bool hasSep = false;
+				for (const ATFirmwareInfo& fw : fwList) {
+					if (!fw.mbVisible)
+						continue;
+
+					bool match = false;
+					switch (fw.mType) {
+						case kATFirmwareType_Kernel800_OSA:
+						case kATFirmwareType_Kernel800_OSB:
+							match = (hwmode != kATHardwareMode_5200);
+							break;
+						case kATFirmwareType_KernelXL:
+						case kATFirmwareType_KernelXEGS:
+						case kATFirmwareType_Kernel1200XL:
+							match = kATHardwareModeTraits[hwmode].mbRunsXLOS;
+							break;
+						case kATFirmwareType_Kernel5200:
+							match = (hwmode == kATHardwareMode_5200);
+							break;
+						default:
+							break;
+					}
+
+					if (!match)
+						continue;
+
+					if (!hasSep) {
+						ImGui::Separator();
+						hasSep = true;
+					}
+
+					VDStringA u8name = VDTextWToU8(fw.mName);
+					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw.mId == curKernel)) {
+						ATUISwitchKernel(nullptr, fw.mId);
+					}
+				}
+			}
+
 			ImGui::EndMenu();
 		}
 
