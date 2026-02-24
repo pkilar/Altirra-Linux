@@ -191,8 +191,9 @@ static void SetWindowSizeImpl(int w, int h) {
 // Registry provider (owned, freed at shutdown)
 static VDRegistryProviderMemory *g_pRegistryMemory = nullptr;
 
-// Save settings — used by emulator_imgui.cpp
+// Save settings — used by emulator_imgui.cpp and Ctrl+S shortcut
 void ATLinuxSaveSettings() {
+	ATSaveSettings(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
 	if (!g_settingsPath.empty())
 		ATUISaveRegistry(g_settingsPath.c_str());
 }
@@ -670,10 +671,8 @@ static void ProcessEvents(SDL_Window *window) {
 			// Ctrl+S = save settings
 			if (event.key.keysym.scancode == SDL_SCANCODE_S
 				&& (event.key.keysym.mod & KMOD_CTRL)) {
-				if (!g_settingsPath.empty()) {
-					ATUISaveRegistry(g_settingsPath.c_str());
-					ATImGuiShowToast("Settings saved");
-				}
+				ATLinuxSaveSettings();
+				ATImGuiShowToast("Settings saved");
 				continue;
 			}
 
