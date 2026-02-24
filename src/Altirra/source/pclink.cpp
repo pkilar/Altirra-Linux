@@ -678,7 +678,11 @@ void ATPCLinkDevice::SetBasePath(const wchar_t *basePath) {
 		mBasePathNative = basePath;
 
 	if (!mBasePathNative.empty() && !VDIsPathSeparator(mBasePathNative.back()))
+#ifdef _WIN32
 		mBasePathNative += '\\';
+#else
+		mBasePathNative += '/';
+#endif
 }
 
 void ATPCLinkDevice::GetDeviceInfo(ATDeviceInfo& info) {
@@ -2021,12 +2025,20 @@ bool ATPCLinkDevice::ResolveNativePath(VDStringW& resultPath, const VDStringA& n
 		if (c >= 'A' && c <= 'Z')
 			c &= ~0x20;
 
-		resultPath += (wchar_t)c;	
+#ifndef _WIN32
+		if (c == '\\') c = '/';
+#endif
+		resultPath += (wchar_t)c;
 	}
 
 	// ensure trailing separator
+#ifdef _WIN32
 	if (!resultPath.empty() && resultPath.back() != L'\\')
 		resultPath += L'\\';
+#else
+	if (!resultPath.empty() && resultPath.back() != L'/')
+		resultPath += L'/';
+#endif
 
 	return true;
 }
