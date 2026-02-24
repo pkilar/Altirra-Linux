@@ -412,6 +412,8 @@ static void DrawDisassembly() {
 			}
 		}
 
+		IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
 		for (int i = 0; i < 30; i++) {
 			ATCPUHistoryEntry hent;
 			ATDisassembleCaptureInsnContext(target, addr, 0, hent);
@@ -419,6 +421,16 @@ static void DrawDisassembly() {
 			line.clear();
 			ATDisasmResult result = ATDisassembleInsn(line, target, state.mExecMode, hent,
 				true, false, true, true, true, false, false, true, true, false);
+
+			// Show symbol label if this address has one
+			if (dbs) {
+				ATSymbol sym {};
+				if (dbs->LookupSymbol(addr, kATSymbol_Execute, sym) && sym.mpName
+					&& sym.mOffset == addr) {
+					ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f),
+						"    %s:", sym.mpName);
+				}
+			}
 
 			bool isPC = (addr == pc);
 			bool isBP = dbg->IsBreakpointAtPC(addr);
