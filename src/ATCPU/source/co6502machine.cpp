@@ -52,7 +52,7 @@
 #define INSN_DUMMY_FETCH_NOINC() AT_CPU_DUMMY_EXT_READ_BYTE(mPC, 0)
 #define INSN_FETCH_NOINC() AT_CPU_EXT_READ_BYTE(mPC, 0)
 
-#define AT_CPU_DUMMY_EXT_READ_BYTE(addr, bank) (0)
+#define AT_CPU_DUMMY_EXT_READ_BYTE(addr, bank) ((void)0)
 #define AT_CPU_EXT_READ_BYTE(addr, bank) readData = ATCP_READ_BYTE((addr))
 #define AT_CPU_EXT_READ_BYTE_2(addr, bank) readData = AT_CPU_EXT_READ_BYTE((addr), (bank))
 #define AT_CPU_EXT_WRITE_BYTE(addr, bank, value) AT_CPU_WRITE_BYTE((addr), (value))

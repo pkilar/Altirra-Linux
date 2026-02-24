@@ -435,7 +435,7 @@ struct ATVMThunk<T_Return (*)(T_Args...)> {
 
 	template<T_Return (*T_Fn)(T_Args...), uint32... T_ArgIndices>
 	static constexpr auto GetThunkFunction(std::integer_sequence<uint32, T_ArgIndices...>) {
-		return [](ATVMDomain& domain, const sint32 *args) {
+		return [](ATVMDomain& domain, [[maybe_unused]] const sint32 *args) {
 			return T_Fn(
 				ATVMDecodeThunkArgument<T_Args>(domain, args, T_ArgIndices)...
 			);
