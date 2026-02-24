@@ -71,6 +71,9 @@ static char s_memEditBuf[4] = "";
 // Breakpoint add state
 static char s_bpAddrBuf[16] = "";
 
+// Disassembly context menu state
+static uint16 s_disasmContextAddr = 0;
+
 // Disassembly state
 static uint32 s_disasmAddr = 0;
 static bool s_disasmFollowPC = true;
@@ -385,17 +388,51 @@ static void DrawDisassembly() {
 					IM_COL32(60, 60, 100, 180));
 			}
 
-			// Selectable line — click to toggle breakpoint
+			// Selectable line — click to toggle breakpoint, right-click for context menu
 			char label[256];
-			snprintf(label, sizeof(label), "%c %s", marker, line.c_str());
+			snprintf(label, sizeof(label), "%c %s##d%d", marker, line.c_str(), i);
 
 			ImGui::PushStyleColor(ImGuiCol_Text, color);
 			if (ImGui::Selectable(label, false, ImGuiSelectableFlags_None)) {
 				dbg->ToggleBreakpoint(addr);
 			}
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+				s_disasmContextAddr = addr;
+				ImGui::OpenPopup("##disasmctx");
+			}
 			ImGui::PopStyleColor();
 
 			addr = result.mNextPC;
+		}
+		// Context menu
+		if (ImGui::BeginPopup("##disasmctx")) {
+			ImGui::Text("$%04X", s_disasmContextAddr);
+			ImGui::Separator();
+
+			bool hasBP = dbg->IsBreakpointAtPC(s_disasmContextAddr);
+			if (ImGui::MenuItem(hasBP ? "Remove Breakpoint" : "Set Breakpoint")) {
+				dbg->ToggleBreakpoint(s_disasmContextAddr);
+			}
+
+			if (ImGui::MenuItem("Go to Address")) {
+				s_disasmAddr = s_disasmContextAddr;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X",
+					s_disasmAddr);
+			}
+
+			if (ImGui::MenuItem("Go to PC")) {
+				s_disasmFollowPC = true;
+			}
+
+			if (ImGui::MenuItem("View in Memory")) {
+				s_memoryAddr = s_disasmContextAddr;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X",
+					s_memoryAddr);
+				s_showMemory = true;
+			}
+
+			ImGui::EndPopup();
 		}
 	}
 	ImGui::EndChild();
