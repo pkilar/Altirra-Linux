@@ -93,7 +93,8 @@ void ATConsoleSetFontDpi(unsigned dpi) {
 }
 
 bool ATConsoleShowSource(uint32 addr) {
-	return false;
+	ATImGuiDebuggerNavigateSource(addr);
+	return ATImGuiDebuggerShowSourceCode();
 }
 
 bool ATConsoleCheckBreak() {

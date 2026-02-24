@@ -19,11 +19,21 @@
 #include "debugger.h"
 #include "disasm.h"
 
+// Forward declarations needed by simulator.h transitives
+class ATIRQController;
+
+#include "simulator.h"
+#include "printeroutput.h"
+
 #include <cstdio>
 #include <cstring>
+#include <fstream>
+#include <map>
 #include <mutex>
 #include <vector>
 #include <string>
+
+extern ATSimulator g_sim;
 
 // Console output buffer — written by ATConsoleWrite, read by ImGui draw
 static std::mutex s_consoleMutex;
@@ -50,11 +60,14 @@ public:
 	void OnDebuggerEvent(ATDebugEvent eventId) override {
 		if (eventId == kATDebugEvent_BreakpointsChanged)
 			mbBreakpointsChanged = true;
+		if (eventId == kATDebugEvent_SymbolsChanged)
+			mbSymbolsChanged = true;
 	}
 
 	ATDebuggerSystemState mState {};
 	bool mbStateValid = false;
 	bool mbBreakpointsChanged = false;
+	bool mbSymbolsChanged = false;
 	bool mbJustBroke = false;
 };
 
@@ -77,6 +90,8 @@ static bool s_showBreakpoints = true;
 static bool s_showWatch = false;
 static bool s_showCallStack = false;
 static bool s_showHistory = false;
+static bool s_showSourceCode = false;
+static bool s_showPrinterOutput = false;
 
 // Console search state
 static char s_consoleSearchBuf[128] = "";
@@ -106,6 +121,30 @@ static bool s_disasmFollowPC = true;
 static bool s_disasmShowBytes = true;
 static bool s_disasmShowLabels = true;
 static char s_disasmAddrBuf[16] = "0000";
+
+// Source code window state
+struct SourceFileEntry {
+	VDStringW mPath;
+	uint32 mNumLines;
+};
+static std::vector<SourceFileEntry> s_sourceFiles;
+static int s_sourceSelectedFile = -1;
+static std::vector<std::string> s_sourceLines;
+static std::map<int, uint32> s_lineToAddr;       // 0-based line → CPU address
+static std::map<uint32, int> s_addrToLine;        // CPU address → 0-based line
+static uint32 s_sourceModuleId = 0;
+static uint16 s_sourceFileId = 0;
+static int s_sourcePCLine = -1;                   // 0-based, -1 = none
+static int s_sourceFrameLine = -1;
+static bool s_sourceNeedsFileList = true;
+static bool s_sourceNeedsRebind = true;
+static bool s_sourceScrollToPC = false;
+
+// Printer output window state
+static std::string s_printerText;
+static size_t s_printerLastOffset = 0;
+static bool s_printerNeedsRefresh = true;
+static int s_printerSelectedOutput = 0;
 
 void ATImGuiDebuggerInit() {
 	IATDebugger *dbg = ATGetDebugger();
@@ -1770,6 +1809,501 @@ static void DrawHistory() {
 	ImGui::End();
 }
 
+// ============= Source Code Window =============
+
+static void RefreshSourceFileList() {
+	s_sourceFiles.clear();
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	dbg->EnumSourceFiles(
+		[](const wchar_t *path, uint32 numLines) {
+			if (numLines > 0)
+				s_sourceFiles.push_back({VDStringW(path), numLines});
+		}
+	);
+	s_sourceNeedsFileList = false;
+}
+
+static void LoadSourceFile(int fileIdx) {
+	s_sourceLines.clear();
+	s_lineToAddr.clear();
+	s_addrToLine.clear();
+	s_sourcePCLine = -1;
+	s_sourceFrameLine = -1;
+	s_sourceModuleId = 0;
+	s_sourceFileId = 0;
+
+	if (fileIdx < 0 || fileIdx >= (int)s_sourceFiles.size())
+		return;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+	if (!dbs)
+		return;
+
+	const VDStringW& path = s_sourceFiles[fileIdx].mPath;
+
+	// Bind the file name to module/file IDs
+	uint32 moduleId;
+	uint16 fileId;
+	if (!dbs->LookupFile(path.c_str(), moduleId, fileId))
+		return;
+
+	s_sourceModuleId = moduleId;
+	s_sourceFileId = fileId;
+
+	// Get line→address mappings
+	vdfastvector<ATSourceLineInfo> lines;
+	dbs->GetLinesForFile(moduleId, fileId, lines);
+
+	for (const auto& li : lines) {
+		int lineIdx = (int)li.mLine - 1;  // convert 1-based to 0-based
+		if (lineIdx >= 0) {
+			// Keep the first (lowest) address for each line
+			if (s_lineToAddr.find(lineIdx) == s_lineToAddr.end())
+				s_lineToAddr[lineIdx] = li.mOffset;
+			// Keep the first line for each address
+			if (s_addrToLine.find(li.mOffset) == s_addrToLine.end())
+				s_addrToLine[li.mOffset] = lineIdx;
+		}
+	}
+
+	// Try to load the actual source file from disk
+	ATDebuggerSourceFileInfo sourceFileInfo;
+	if (!dbs->GetSourceFilePath(moduleId, fileId, sourceFileInfo))
+		return;
+
+	// Try source path first, then module path
+	const wchar_t *tryPaths[] = { sourceFileInfo.mSourcePath.c_str(), sourceFileInfo.mModulePath.c_str() };
+	bool loaded = false;
+
+	for (const wchar_t *tryPath : tryPaths) {
+		if (!tryPath || !tryPath[0])
+			continue;
+
+		// Convert wchar_t path to narrow string for ifstream
+		VDStringA narrowPath;
+		for (const wchar_t *p = tryPath; *p; ++p) {
+			if (*p < 128)
+				narrowPath += (char)*p;
+			else
+				narrowPath += '?';
+		}
+
+		std::ifstream ifs(narrowPath.c_str());
+		if (!ifs.is_open())
+			continue;
+
+		std::string line;
+		while (std::getline(ifs, line))
+			s_sourceLines.push_back(std::move(line));
+
+		loaded = true;
+		break;
+	}
+
+	if (!loaded) {
+		// Show placeholder lines indicating the file couldn't be loaded
+		s_sourceLines.push_back("(Source file not found on disk)");
+		s_sourceLines.push_back("");
+		// Still useful: show line numbers that have address mappings
+		if (!s_lineToAddr.empty()) {
+			int maxLine = s_lineToAddr.rbegin()->first;
+			s_sourceLines.resize(maxLine + 1);
+		}
+	}
+
+	s_sourceNeedsRebind = false;
+}
+
+static void DrawSourceCode() {
+	if (!s_showSourceCode)
+		return;
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Source Code", &s_showSourceCode)) {
+		ImGui::End();
+		return;
+	}
+
+	// Refresh file list on symbol changes
+	if (s_pClient && s_pClient->mbSymbolsChanged) {
+		s_pClient->mbSymbolsChanged = false;
+		s_sourceNeedsFileList = true;
+		s_sourceNeedsRebind = true;
+	}
+
+	if (s_sourceNeedsFileList)
+		RefreshSourceFileList();
+
+	if (s_sourceFiles.empty()) {
+		ImGui::TextDisabled("No source files loaded");
+		ImGui::TextDisabled("Use Debug > Load Symbols to load a .lst/.lbl file");
+		ImGui::End();
+		return;
+	}
+
+	// File selector combo
+	{
+		// Build display label for current selection
+		const char *preview = (s_sourceSelectedFile >= 0 && s_sourceSelectedFile < (int)s_sourceFiles.size())
+			? nullptr : "(select file)";
+
+		VDStringA previewStr;
+		if (!preview && s_sourceSelectedFile >= 0) {
+			const VDStringW& wp = s_sourceFiles[s_sourceSelectedFile].mPath;
+			// Extract just the filename for display
+			const wchar_t *slash = wcsrchr(wp.c_str(), '/');
+			const wchar_t *bslash = wcsrchr(wp.c_str(), '\\');
+			const wchar_t *name = wp.c_str();
+			if (slash && slash > name) name = slash + 1;
+			if (bslash && bslash > name) name = bslash + 1;
+			for (const wchar_t *p = name; *p; ++p)
+				previewStr += (*p < 128) ? (char)*p : '?';
+			preview = previewStr.c_str();
+		}
+
+		ImGui::SetNextItemWidth(300);
+		if (ImGui::BeginCombo("##srcfile", preview)) {
+			for (int i = 0; i < (int)s_sourceFiles.size(); i++) {
+				const VDStringW& wp = s_sourceFiles[i].mPath;
+				VDStringA display;
+				for (const wchar_t *p = wp.c_str(); *p; ++p)
+					display += (*p < 128) ? (char)*p : '?';
+
+				char label[512];
+				snprintf(label, sizeof(label), "%s (%u lines)##sf%d",
+					display.c_str(), s_sourceFiles[i].mNumLines, i);
+
+				if (ImGui::Selectable(label, i == s_sourceSelectedFile)) {
+					s_sourceSelectedFile = i;
+					s_sourceNeedsRebind = true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+	}
+
+	if (s_sourceNeedsRebind && s_sourceSelectedFile >= 0)
+		LoadSourceFile(s_sourceSelectedFile);
+
+	if (s_sourceLines.empty()) {
+		ImGui::TextDisabled("Select a source file above");
+		ImGui::End();
+		return;
+	}
+
+	// Update PC line from debugger state
+	s_sourcePCLine = -1;
+	s_sourceFrameLine = -1;
+	if (s_pClient && s_pClient->mbStateValid && !s_pClient->mState.mbRunning) {
+		const auto& st = s_pClient->mState;
+		if (st.mPCModuleId == s_sourceModuleId && st.mPCFileId == s_sourceFileId && st.mPCLine > 0) {
+			s_sourcePCLine = (int)st.mPCLine - 1;
+			s_sourceScrollToPC = true;
+		} else {
+			// Try reverse lookup: find PC address in our addr→line map
+			uint16 pc = st.mPC;
+			auto it = s_addrToLine.find(pc);
+			if (it != s_addrToLine.end()) {
+				s_sourcePCLine = it->second;
+				s_sourceScrollToPC = true;
+			}
+		}
+
+		// Frame PC for call stack navigation
+		uint32 framePC = dbg->GetFrameExtPC() & 0xFFFF;
+		if (framePC != st.mPC) {
+			auto fit = s_addrToLine.find(framePC);
+			if (fit != s_addrToLine.end())
+				s_sourceFrameLine = fit->second;
+		}
+	}
+
+	// Source code display
+	float lineHeight = ImGui::GetTextLineHeightWithSpacing();
+	int totalLines = (int)s_sourceLines.size();
+
+	if (ImGui::BeginChild("##srclines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		ImGuiListClipper clipper;
+		clipper.Begin(totalLines, lineHeight);
+
+		// Scroll to PC line if needed
+		if (s_sourceScrollToPC && s_sourcePCLine >= 0) {
+			float scrollY = (float)s_sourcePCLine * lineHeight - ImGui::GetWindowHeight() * 0.3f;
+			if (scrollY < 0) scrollY = 0;
+			ImGui::SetScrollY(scrollY);
+			s_sourceScrollToPC = false;
+		}
+
+		while (clipper.Step()) {
+			for (int line = clipper.DisplayStart; line < clipper.DisplayEnd; line++) {
+				ImGui::PushID(line);
+
+				// Background highlight for PC/frame lines
+				ImVec2 cursorPos = ImGui::GetCursorScreenPos();
+				float width = ImGui::GetContentRegionAvail().x;
+
+				if (line == s_sourcePCLine) {
+					ImGui::GetWindowDrawList()->AddRectFilled(
+						cursorPos,
+						ImVec2(cursorPos.x + width, cursorPos.y + lineHeight),
+						IM_COL32(100, 100, 0, 80));
+				} else if (line == s_sourceFrameLine) {
+					ImGui::GetWindowDrawList()->AddRectFilled(
+						cursorPos,
+						ImVec2(cursorPos.x + width, cursorPos.y + lineHeight),
+						IM_COL32(0, 60, 120, 60));
+				}
+
+				// Breakpoint indicator
+				auto addrIt = s_lineToAddr.find(line);
+				bool hasMappedAddr = (addrIt != s_lineToAddr.end());
+
+				if (hasMappedAddr && dbg->IsBreakpointAtPC(addrIt->second)) {
+					ImGui::GetWindowDrawList()->AddCircleFilled(
+						ImVec2(cursorPos.x + 6, cursorPos.y + lineHeight * 0.5f),
+						4.0f, IM_COL32(220, 40, 40, 255));
+				}
+
+				// PC arrow indicator
+				if (line == s_sourcePCLine) {
+					ImVec2 arrowPos(cursorPos.x + 14, cursorPos.y + lineHeight * 0.5f);
+					ImGui::GetWindowDrawList()->AddTriangleFilled(
+						ImVec2(arrowPos.x - 3, arrowPos.y - 4),
+						ImVec2(arrowPos.x - 3, arrowPos.y + 4),
+						ImVec2(arrowPos.x + 4, arrowPos.y),
+						IM_COL32(255, 255, 0, 255));
+				}
+
+				// Line number and address columns
+				ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 20);
+
+				if (hasMappedAddr) {
+					ImGui::TextDisabled("%5d %04X ", line + 1, addrIt->second);
+				} else {
+					ImGui::TextDisabled("%5d      ", line + 1);
+				}
+
+				ImGui::SameLine();
+
+				// Source text
+				if (hasMappedAddr) {
+					if (line == s_sourcePCLine)
+						ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 0.3f, 1.0f));
+
+					ImGui::TextUnformatted(
+						line < (int)s_sourceLines.size() ? s_sourceLines[line].c_str() : "");
+
+					if (line == s_sourcePCLine)
+						ImGui::PopStyleColor();
+				} else {
+					ImGui::TextDisabled("%s",
+						line < (int)s_sourceLines.size() ? s_sourceLines[line].c_str() : "");
+				}
+
+				// Click to navigate disassembly
+				if (hasMappedAddr && ImGui::IsItemHovered() && ImGui::IsMouseClicked(0)) {
+					s_disasmAddr = addrIt->second;
+					s_disasmFollowPC = false;
+					snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", addrIt->second);
+					s_showDisassembly = true;
+				}
+
+				// Right-click context menu
+				if (hasMappedAddr && ImGui::BeginPopupContextItem("##srcctx")) {
+					uint32 addr = addrIt->second;
+					if (ImGui::MenuItem("Toggle Breakpoint"))
+						dbg->ToggleBreakpoint(addr);
+					if (ImGui::MenuItem("Run to Cursor", nullptr, false, !dbg->IsRunning())) {
+						char cmd[64];
+						snprintf(cmd, sizeof(cmd), "g %04X", addr);
+						dbg->QueueCommand(cmd, false);
+					}
+					if (ImGui::MenuItem("Go to Disassembly")) {
+						s_disasmAddr = addr;
+						s_disasmFollowPC = false;
+						snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", addr);
+						s_showDisassembly = true;
+					}
+					ImGui::EndPopup();
+				}
+
+				ImGui::PopID();
+			}
+		}
+	}
+	ImGui::EndChild();
+
+	ImGui::End();
+}
+
+// Navigate source code window to a specific address
+void ATImGuiDebuggerNavigateSource(uint32 addr) {
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+	if (!dbs)
+		return;
+
+	// Look up which file/line this address maps to
+	uint32 moduleId;
+	ATSourceLineInfo lineInfo;
+	if (!dbs->LookupLine(addr, false, moduleId, lineInfo))
+		return;
+
+	// Ensure file list is populated
+	if (s_sourceNeedsFileList)
+		RefreshSourceFileList();
+
+	// Find the matching file in our list
+	ATDebuggerSourceFileInfo sourceFileInfo;
+	if (!dbs->GetSourceFilePath(moduleId, lineInfo.mFileId, sourceFileInfo))
+		return;
+
+	// Find this file in s_sourceFiles by trying LookupFile on each entry
+	for (int i = 0; i < (int)s_sourceFiles.size(); i++) {
+		uint32 testModId;
+		uint16 testFileId;
+		if (dbs->LookupFile(s_sourceFiles[i].mPath.c_str(), testModId, testFileId)) {
+			if (testModId == moduleId && testFileId == lineInfo.mFileId) {
+				if (s_sourceSelectedFile != i) {
+					s_sourceSelectedFile = i;
+					LoadSourceFile(i);
+				}
+				s_sourcePCLine = (int)lineInfo.mLine - 1;
+				s_sourceScrollToPC = true;
+				s_showSourceCode = true;
+				return;
+			}
+		}
+	}
+}
+
+// ============= Printer Output Window =============
+
+static void DrawPrinterOutput() {
+	if (!s_showPrinterOutput)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(500, 350), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Printer Output", &s_showPrinterOutput)) {
+		ImGui::End();
+		return;
+	}
+
+	ATPrinterOutputManager *mgr = static_cast<ATPrinterOutputManager *>(
+		&g_sim.GetPrinterOutputManager());
+
+	uint32 outputCount = mgr->GetOutputCount();
+
+	if (outputCount == 0) {
+		ImGui::TextDisabled("No printer outputs active");
+		ImGui::TextDisabled("Add a printer device via System > Devices");
+		ImGui::End();
+		return;
+	}
+
+	// Output selector
+	if (s_printerSelectedOutput >= (int)outputCount)
+		s_printerSelectedOutput = 0;
+
+	if (outputCount > 1) {
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::BeginCombo("##printersel", nullptr)) {
+			for (uint32 i = 0; i < outputCount; i++) {
+				ATPrinterOutput& out = mgr->GetOutput(i);
+				const wchar_t *wname = out.GetName();
+				VDStringA name;
+				for (const wchar_t *p = wname; *p; ++p)
+					name += (*p < 128) ? (char)*p : '?';
+
+				char label[128];
+				snprintf(label, sizeof(label), "%s##po%u", name.c_str(), i);
+				if (ImGui::Selectable(label, (int)i == s_printerSelectedOutput)) {
+					s_printerSelectedOutput = (int)i;
+					s_printerLastOffset = 0;
+					s_printerText.clear();
+					s_printerNeedsRefresh = true;
+				}
+			}
+			ImGui::EndCombo();
+		}
+		ImGui::SameLine();
+	}
+
+	// Clear button
+	if (ImGui::Button("Clear")) {
+		ATPrinterOutput& out = mgr->GetOutput(s_printerSelectedOutput);
+		out.Clear();
+		s_printerLastOffset = 0;
+		s_printerText.clear();
+	}
+
+	ImGui::SameLine();
+	ImGui::TextDisabled("(%zu chars)", s_printerText.size());
+
+	ImGui::Separator();
+
+	// Refresh text from output
+	{
+		ATPrinterOutput& out = mgr->GetOutput(s_printerSelectedOutput);
+		size_t currentLen = out.GetLength();
+
+		if (currentLen > s_printerLastOffset || s_printerNeedsRefresh) {
+			if (s_printerNeedsRefresh) {
+				s_printerLastOffset = 0;
+				s_printerText.clear();
+				s_printerNeedsRefresh = false;
+			}
+
+			// Read new text
+			if (currentLen > s_printerLastOffset) {
+				const wchar_t *ptr = out.GetTextPointer(s_printerLastOffset);
+				size_t newChars = currentLen - s_printerLastOffset;
+
+				// Convert wchar_t to UTF-8
+				for (size_t i = 0; i < newChars; i++) {
+					wchar_t ch = ptr[i];
+					if (ch < 0x80) {
+						s_printerText += (char)ch;
+					} else if (ch < 0x800) {
+						s_printerText += (char)(0xC0 | (ch >> 6));
+						s_printerText += (char)(0x80 | (ch & 0x3F));
+					} else {
+						s_printerText += (char)(0xE0 | (ch >> 12));
+						s_printerText += (char)(0x80 | ((ch >> 6) & 0x3F));
+						s_printerText += (char)(0x80 | (ch & 0x3F));
+					}
+				}
+
+				s_printerLastOffset = currentLen;
+			}
+
+			out.Revalidate();
+		}
+	}
+
+	// Display text
+	if (s_printerText.empty()) {
+		ImGui::TextDisabled("(no output)");
+	} else {
+		if (ImGui::BeginChild("##printertext", ImVec2(0, 0), ImGuiChildFlags_None)) {
+			ImGui::TextUnformatted(s_printerText.c_str(), s_printerText.c_str() + s_printerText.size());
+
+			// Auto-scroll to bottom
+			if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f)
+				ImGui::SetScrollHereY(1.0f);
+		}
+		ImGui::EndChild();
+	}
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -1780,6 +2314,8 @@ bool& ATImGuiDebuggerShowBreakpoints() { return s_showBreakpoints; }
 bool& ATImGuiDebuggerShowWatch() { return s_showWatch; }
 bool& ATImGuiDebuggerShowCallStack() { return s_showCallStack; }
 bool& ATImGuiDebuggerShowHistory() { return s_showHistory; }
+bool& ATImGuiDebuggerShowSourceCode() { return s_showSourceCode; }
+bool& ATImGuiDebuggerShowPrinterOutput() { return s_showPrinterOutput; }
 
 // ============= Main Draw =============
 
@@ -1792,6 +2328,8 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawWatch();
 	DrawCallStack();
 	DrawHistory();
+	DrawSourceCode();
+	DrawPrinterOutput();
 }
 
 void ATImGuiDebuggerDraw() {
