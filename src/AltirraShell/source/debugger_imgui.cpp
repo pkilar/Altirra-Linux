@@ -1079,6 +1079,12 @@ static void DrawConsole() {
 
 // ============= Breakpoints Window =============
 
+// Breakpoint editing state
+static uint32 s_bpEditIdx = 0;
+static char s_bpCondBuf[256] = "";
+static char s_bpCmdBuf[256] = "";
+static bool s_bpLogOnly = false;
+
 static void DrawBreakpoints() {
 	if (!s_showBreakpoints)
 		return;
@@ -1180,6 +1186,20 @@ static void DrawBreakpoints() {
 				}
 			}
 
+			// Right-click opens edit popup
+			if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+				s_bpEditIdx = useridx;
+				s_bpCondBuf[0] = 0;
+				s_bpCmdBuf[0] = 0;
+				s_bpLogOnly = info.mbContinueExecution;
+				// Pre-fill condition text if available
+				if (info.mpCondition)
+					snprintf(s_bpCondBuf, sizeof(s_bpCondBuf), "%s", info.mpCondition);
+				if (info.mpCommand)
+					snprintf(s_bpCmdBuf, sizeof(s_bpCmdBuf), "%s", info.mpCommand);
+				ImGui::OpenPopup("##bpedit");
+			}
+
 			// Show condition/command annotations on the same line
 			if (info.mpCondition || info.mpCommand || info.mbContinueExecution) {
 				ImGui::SameLine();
@@ -1195,6 +1215,18 @@ static void DrawBreakpoints() {
 				}
 			}
 
+			// Tooltip showing full condition/command text
+			if (ImGui::IsItemHovered() && (info.mpCondition || info.mpCommand)) {
+				ImGui::BeginTooltip();
+				if (info.mpCondition)
+					ImGui::Text("Condition: %s", info.mpCondition);
+				if (info.mpCommand)
+					ImGui::Text("Command: %s", info.mpCommand);
+				if (info.mbContinueExecution)
+					ImGui::TextDisabled("(log only, no break)");
+				ImGui::EndTooltip();
+			}
+
 			ImGui::SameLine();
 			if (ImGui::SmallButton("X")) {
 				dbg->ClearUserBreakpoint(useridx, true);
@@ -1202,6 +1234,56 @@ static void DrawBreakpoints() {
 
 			ImGui::PopID();
 		}
+	}
+
+	// Breakpoint edit popup (outside the loop, shared by all entries)
+	if (ImGui::BeginPopup("##bpedit")) {
+		ImGui::Text("Breakpoint #%u", s_bpEditIdx);
+		ImGui::Separator();
+
+		ImGui::TextUnformatted("Condition:");
+		ImGui::SetNextItemWidth(250);
+		ImGui::InputTextWithHint("##bpcond", "e.g. a=#40, x>10", s_bpCondBuf, sizeof(s_bpCondBuf));
+
+		ImGui::TextUnformatted("Command:");
+		ImGui::SetNextItemWidth(250);
+		ImGui::InputTextWithHint("##bpcmd", "e.g. r, db $2000", s_bpCmdBuf, sizeof(s_bpCmdBuf));
+
+		ImGui::Checkbox("Log only (don't break)", &s_bpLogOnly);
+
+		ImGui::Separator();
+		if (ImGui::Button("Apply")) {
+			// Use debugger commands to set condition and command
+			// bx <n> <condition> - set condition
+			// bk <n> <command> - set command
+			// bl <n> - set log-only (continue execution)
+			if (s_bpCondBuf[0]) {
+				char cmd[320];
+				snprintf(cmd, sizeof(cmd), "bx %u %s", s_bpEditIdx, s_bpCondBuf);
+				dbg->QueueCommand(cmd, false);
+			} else {
+				// Clear condition
+				char cmd[64];
+				snprintf(cmd, sizeof(cmd), "bx %u", s_bpEditIdx);
+				dbg->QueueCommand(cmd, false);
+			}
+			if (s_bpCmdBuf[0]) {
+				char cmd[320];
+				snprintf(cmd, sizeof(cmd), "bk %u \"%s\"", s_bpEditIdx, s_bpCmdBuf);
+				dbg->QueueCommand(cmd, false);
+			}
+			if (s_bpLogOnly) {
+				char cmd[64];
+				snprintf(cmd, sizeof(cmd), "bl %u", s_bpEditIdx);
+				dbg->QueueCommand(cmd, false);
+			}
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel")) {
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::EndPopup();
 	}
 
 	ImGui::End();
