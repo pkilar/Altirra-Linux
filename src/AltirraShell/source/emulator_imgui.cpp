@@ -185,6 +185,26 @@ static void DrawToasts() {
 	}
 }
 
+static void DrawSourceMessage() {
+	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	if (!disp)
+		return;
+
+	const char *msg = disp->GetSourceMessage();
+	if (!msg)
+		return;
+
+	ImVec2 vp = ImGui::GetMainViewport()->Size;
+	ImGui::SetNextWindowPos(ImVec2(vp.x * 0.5f, vp.y * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+	ImGui::SetNextWindowBgAlpha(0.75f);
+	ImGui::Begin("##srcmsg", nullptr,
+		ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+		ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
+		ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoInputs);
+	ImGui::Text("%s", msg);
+	ImGui::End();
+}
+
 // FPS counter state
 static double s_lastFpsTime = 0;
 static int s_fpsFrameCount = 0;
@@ -3638,6 +3658,7 @@ void ATImGuiEmulatorDraw() {
 	DrawErrorPopup();
 
 	DrawToasts();
+	DrawSourceMessage();
 
 	// Draw debugger windows (without toolbar — menu bar handles that now)
 	ATImGuiDebuggerDrawWindows();

@@ -20,6 +20,7 @@
 
 #include <vd2/system/thread.h>
 #include <vd2/system/atomic.h>
+#include <vd2/system/VDString.h>
 #include <vd2/Kasumi/pixmaputils.h>
 #include <vd2/VDDisplay/display.h>
 #include "uitypes.h"
@@ -83,6 +84,7 @@ public:
 
 	ATDisplayStretchMode GetStretchMode() const { return mStretchMode; }
 	void SetStretchMode(ATDisplayStretchMode mode) { mStretchMode = mode; }
+	const char *GetSourceMessage() const { return mSourceMessage.empty() ? nullptr : mSourceMessage.c_str(); }
 	float GetSyncDelta() const override;
 
 	int GetQueuedFrames() const override;
@@ -124,6 +126,8 @@ private:
 	ATDisplayStretchMode mStretchMode = kATDisplayStretchMode_PreserveAspectRatio;
 	bool mFullScreen = false;
 	uint32 mBackgroundColor = 0;
+
+	VDStringA mSourceMessage;
 
 	IVDVideoDisplayCallback *mpCallback = nullptr;
 	vdfunction<void(int)> mOnFrameStatusUpdated;

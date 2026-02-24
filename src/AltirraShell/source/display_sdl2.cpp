@@ -16,6 +16,7 @@
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
 #include <display_sdl2.h>
+#include <vd2/system/text.h>
 #include <cstring>
 
 ATDisplaySDL2::ATDisplaySDL2() {
@@ -213,7 +214,10 @@ void ATDisplaySDL2::Reset() {
 }
 
 void ATDisplaySDL2::SetSourceMessage(const wchar_t *msg) {
-	// Stub — message overlay not implemented yet
+	if (msg)
+		mSourceMessage = VDTextWToU8(VDStringW(msg));
+	else
+		mSourceMessage.clear();
 }
 
 bool ATDisplaySDL2::SetSource(bool bAutoUpdate, const VDPixmap& src, bool bAllowConversion) {
