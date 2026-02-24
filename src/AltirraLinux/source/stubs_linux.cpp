@@ -709,28 +709,103 @@ vdrefptr<IVDRefCount> ATCreateNativeTracer(ATTraceContext&, const ATNativeTraceS
 
 // Timer service — provided by ATCore/source/timerserviceimpl_linux.cpp
 
-// UI renderer — null-object implementation
+// UI renderer — captures indicator state for ImGui status bar.
 // The Windows build uses a full GDI/Direct3D overlay renderer. On Linux we
-// provide a minimal stub that satisfies all interface contracts (non-null
-// pointer, unique error source IDs) so simulator.cpp and diskinterface.cpp
-// don't crash on null dereferences.
-class ATNullUIRenderer final : public vdrefcount, public IATUIRenderer {
+// capture indicator data into ATImGuiIndicatorState (emulator_imgui.h) so
+// the ImGui status bar can display drive activity, H:, PCLink, IDE, and
+// flash write indicators. Non-indicator methods remain no-ops.
+
+#include <emulator_imgui.h>
+
+static ATImGuiIndicatorState s_indicatorState;
+
+ATImGuiIndicatorState& ATImGuiGetIndicatorState() {
+	return s_indicatorState;
+}
+
+class ATImGuiUIRenderer final : public vdrefcount, public IATUIRenderer {
 public:
 	int AddRef() override { return vdrefcount::AddRef(); }
 	int Release() override { return vdrefcount::Release(); }
 
-	// IATDeviceIndicatorManager
-	void SetStatusFlags(uint32) override {}
-	void ResetStatusFlags(uint32, uint32) override {}
-	void PulseStatusFlags(uint32) override {}
-	void SetStatusCounter(uint32, uint32) override {}
+	// IATDeviceIndicatorManager — capture state for ImGui rendering
+	void SetStatusFlags(uint32 flags) override {
+		s_indicatorState.mStatusFlags |= flags;
+	}
+
+	void ResetStatusFlags(uint32 flags, uint32 holdTime) override {
+		if (!flags)
+			return;
+
+		s_indicatorState.mStatusFlags &= ~flags;
+
+		if (holdTime) {
+			s_indicatorState.mStatusHoldFlags |= flags;
+			for (uint32 f = flags; f; f &= f - 1) {
+				int idx = __builtin_ctz(f);
+				if (idx < 17)
+					s_indicatorState.mStatusHoldCounters[idx] = holdTime;
+			}
+		}
+	}
+
+	void PulseStatusFlags(uint32 flags) override {
+		SetStatusFlags(flags);
+		ResetStatusFlags(flags, 1);
+	}
+
+	void SetStatusCounter(uint32 index, uint32 value) override {
+		if (index < 15)
+			s_indicatorState.mStatusCounter[index] = value;
+	}
+
 	void SetDiskLEDState(uint32, sint32) override {}
-	void SetDiskMotorActivity(uint32, bool) override {}
-	void SetDiskErrorState(uint32, bool) override {}
-	void SetHActivity(bool) override {}
-	void SetIDEActivity(bool, uint32) override {}
-	void SetPCLinkActivity(bool) override {}
-	void SetFlashWriteActivity() override {}
+
+	void SetDiskMotorActivity(uint32 index, bool on) override {
+		if (on)
+			s_indicatorState.mDiskMotorFlags |= (1u << index);
+		else
+			s_indicatorState.mDiskMotorFlags &= ~(1u << index);
+	}
+
+	void SetDiskErrorState(uint32 index, bool error) override {
+		if (error)
+			s_indicatorState.mDiskErrorFlags |= (1u << index);
+		else
+			s_indicatorState.mDiskErrorFlags &= ~(1u << index);
+	}
+
+	void SetHActivity(bool write) override {
+		if (write)
+			s_indicatorState.mHWriteCounter = 30;
+		else
+			s_indicatorState.mHReadCounter = 30;
+	}
+
+	void SetIDEActivity(bool write, uint32 lba) override {
+		if (s_indicatorState.mHardDiskLBA != lba) {
+			s_indicatorState.mbHardDiskWrite = false;
+			s_indicatorState.mbHardDiskRead = false;
+		}
+		s_indicatorState.mHardDiskCounter = 3;
+		if (write)
+			s_indicatorState.mbHardDiskWrite = true;
+		else
+			s_indicatorState.mbHardDiskRead = true;
+		s_indicatorState.mHardDiskLBA = lba;
+	}
+
+	void SetPCLinkActivity(bool write) override {
+		if (write)
+			s_indicatorState.mPCLinkWriteCounter = 30;
+		else
+			s_indicatorState.mPCLinkReadCounter = 30;
+	}
+
+	void SetFlashWriteActivity() override {
+		s_indicatorState.mFlashWriteCounter = 20;
+	}
+
 	void SetCartridgeActivity(sint32, sint32) override {}
 	void SetCassetteIndicatorVisible(bool) override {}
 	void SetCassettePosition(float, float, bool, bool) override {}
@@ -747,7 +822,7 @@ public:
 	void ClearErrors(uint32) override {}
 	void ReportError(uint32, const wchar_t *) override {}
 
-	// IATUIRenderer
+	// IATUIRenderer — non-indicator methods remain no-ops
 	bool IsVisible() const override { return false; }
 	void SetVisible(bool) override {}
 	void SetCyclesPerSecond(double) override {}
@@ -784,7 +859,7 @@ private:
 };
 
 void ATCreateUIRenderer(IATUIRenderer **r) {
-	auto *p = new ATNullUIRenderer;
+	auto *p = new ATImGuiUIRenderer;
 	p->AddRef();
 	*r = p;
 }
