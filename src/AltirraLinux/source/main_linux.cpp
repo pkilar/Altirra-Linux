@@ -451,8 +451,13 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 		return false;
 	}
 
-	// Enable vsync
-	SDL_GL_SetSwapInterval(1);
+	// Enable vsync (adaptive if supported and configured)
+	if (ATUIGetFrameRateVSyncAdaptive()) {
+		if (SDL_GL_SetSwapInterval(-1) < 0)
+			SDL_GL_SetSwapInterval(1);
+	} else {
+		SDL_GL_SetSwapInterval(1);
+	}
 
 	// On Wayland, the window may not be visible until the first buffer is
 	// committed. Do a clear + swap so the compositor shows the window
