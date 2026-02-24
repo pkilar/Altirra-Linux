@@ -1240,14 +1240,25 @@ static void DrawWatch() {
 		ImGui::PushID(idx);
 
 		uint16 addr = (uint16)info.mAddress;
+		ATSymbol wsym {};
+		IATDebuggerSymbolLookup *wdbs = ATGetDebuggerSymbolLookup();
+		if (wdbs && (info.mMode == ATDebuggerWatchMode::ByteAtAddress || info.mMode == ATDebuggerWatchMode::WordAtAddress))
+			wdbs->LookupSymbol(addr, kATSymbol_Any, wsym);
+
 		if (info.mMode == ATDebuggerWatchMode::ByteAtAddress) {
 			uint8 val = target ? target->DebugReadByte(addr) : 0;
-			ImGui::Text("[%d] $%04X: %02X (%3d)", idx, addr, val, val);
+			if (wsym.mpName)
+				ImGui::Text("[%d] %s: %02X (%3d)", idx, wsym.mpName, val, val);
+			else
+				ImGui::Text("[%d] $%04X: %02X (%3d)", idx, addr, val, val);
 		} else if (info.mMode == ATDebuggerWatchMode::WordAtAddress) {
 			uint8 lo = target ? target->DebugReadByte(addr) : 0;
 			uint8 hi = target ? target->DebugReadByte((addr + 1) & 0xFFFF) : 0;
 			uint16 val = lo | ((uint16)hi << 8);
-			ImGui::Text("[%d] $%04X: %04X (%5d)", idx, addr, val, val);
+			if (wsym.mpName)
+				ImGui::Text("[%d] %s: %04X (%5d)", idx, wsym.mpName, val, val);
+			else
+				ImGui::Text("[%d] $%04X: %04X (%5d)", idx, addr, val, val);
 		} else if (info.mpExpr) {
 			auto result = dbg->Evaluate(info.mpExpr);
 			if (result.first) {
@@ -1265,6 +1276,14 @@ static void DrawWatch() {
 			}
 		} else {
 			ImGui::TextDisabled("[%d] (unknown)", idx);
+		}
+
+		// Double-click to view address in memory
+		if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)
+			&& (info.mMode == ATDebuggerWatchMode::ByteAtAddress || info.mMode == ATDebuggerWatchMode::WordAtAddress)) {
+			s_memoryAddr = addr;
+			snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", addr);
+			s_showMemory = true;
 		}
 
 		ImGui::SameLine();
