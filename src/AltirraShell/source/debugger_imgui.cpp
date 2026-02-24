@@ -358,7 +358,7 @@ static void DrawRegisters() {
 			ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), ".");
 	}
 
-	// Hardware register readouts (ANTIC/GTIA via debug reads)
+	// Hardware register readouts via debug reads
 	if (target) {
 		ImGui::Separator();
 		ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.8f, 1.0f), "Hardware:");
@@ -366,6 +366,12 @@ static void DrawRegisters() {
 		uint8 nmist  = target->DebugReadByte(0xD40F);  // ANTIC NMIST
 		uint8 dmactl = target->DebugReadByte(0xD400);  // ANTIC DMACTL
 		ImGui::Text("VCOUNT:%3d  NMIST:%02X  DMA:%02X", vcount, nmist, dmactl);
+		uint8 irqst  = target->DebugReadByte(0xD20E);  // POKEY IRQST
+		uint8 audctl = target->DebugReadByte(0xD208);  // POKEY AUDCTL
+		ImGui::Text("IRQST: %02X  AUDCTL:%02X", irqst, audctl);
+		uint8 porta = target->DebugReadByte(0xD300);   // PIA PORTA
+		uint8 portb = target->DebugReadByte(0xD301);   // PIA PORTB
+		ImGui::Text("PORTA: %02X  PORTB:%02X", porta, portb);
 	}
 
 	ImGui::End();
@@ -625,6 +631,13 @@ static void DrawDisassembly() {
 				}
 			}
 
+			ImGui::Separator();
+			char addrStr[8];
+			snprintf(addrStr, sizeof(addrStr), "$%04X", s_disasmContextAddr);
+			if (ImGui::MenuItem("Copy Address")) {
+				ImGui::SetClipboardText(addrStr);
+			}
+
 			ImGui::EndPopup();
 		}
 	}
@@ -662,6 +675,20 @@ static void DrawMemory() {
 		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
 	memGo = ImGui::Button("Go##mem") || memGo;
+
+	// Quick-nav buttons for common memory regions
+	ImGui::SameLine(0, 8);
+	auto QuickNav = [](const char *label, uint16 addr) {
+		if (ImGui::SmallButton(label)) {
+			s_memoryAddr = addr;
+			snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", addr);
+		}
+		ImGui::SameLine(0, 2);
+	};
+	QuickNav("ZP", 0x0000);
+	QuickNav("Stk", 0x0100);
+	QuickNav("HW", 0xD000);
+	ImGui::NewLine();
 
 	if (memGo && s_memoryAddrBuf[0]) {
 		unsigned int addr;
@@ -799,6 +826,15 @@ static void DrawMemory() {
 			}
 			if (ImGui::MenuItem("Break on Write")) {
 				dbg->ToggleAccessBreakpoint(s_disasmContextAddr, true);
+			}
+
+			ImGui::Separator();
+			{
+				char addrStr[8];
+				snprintf(addrStr, sizeof(addrStr), "$%04X", s_disasmContextAddr);
+				if (ImGui::MenuItem("Copy Address")) {
+					ImGui::SetClipboardText(addrStr);
+				}
 			}
 
 			ImGui::EndPopup();
@@ -992,22 +1028,43 @@ static void DrawBreakpoints() {
 			if (dbs)
 				dbs->LookupSymbol(info.mAddress, info.mbBreakOnPC ? kATSymbol_Execute : kATSymbol_Any, sym);
 
+			char bpText[128];
 			if (sym.mpName)
-				ImGui::Text("[%d] %s $%04X (%s)", info.mNumber, type, info.mAddress, sym.mpName);
+				snprintf(bpText, sizeof(bpText), "[%d] %s $%04X (%s)", info.mNumber, type, info.mAddress, sym.mpName);
 			else
-				ImGui::Text("[%d] %s $%04X", info.mNumber, type, info.mAddress);
+				snprintf(bpText, sizeof(bpText), "[%d] %s $%04X", info.mNumber, type, info.mAddress);
 
 			if (info.mLength > 1) {
-				ImGui::SameLine();
-				ImGui::Text("len=%u", info.mLength);
+				int len = (int)strlen(bpText);
+				snprintf(bpText + len, sizeof(bpText) - len, " len=%u", info.mLength);
 			}
 
-			// Click breakpoint address to go to it in disassembly
-			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && info.mbBreakOnPC) {
-				s_disasmAddr = info.mAddress;
-				s_disasmFollowPC = false;
-				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", info.mAddress);
-				s_showDisassembly = true;
+			if (ImGui::Selectable(bpText, false, ImGuiSelectableFlags_None)) {
+				if (info.mbBreakOnPC) {
+					s_disasmAddr = info.mAddress;
+					s_disasmFollowPC = false;
+					snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", info.mAddress);
+					s_showDisassembly = true;
+				} else {
+					s_memoryAddr = info.mAddress;
+					snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", info.mAddress);
+					s_showMemory = true;
+				}
+			}
+
+			// Show condition/command annotations on the same line
+			if (info.mpCondition || info.mpCommand || info.mbContinueExecution) {
+				ImGui::SameLine();
+				if (info.mpCondition)
+					ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.3f, 1.0f), "[cond]");
+				if (info.mpCommand) {
+					ImGui::SameLine();
+					ImGui::TextColored(ImVec4(0.5f, 0.8f, 0.5f, 1.0f), "[cmd]");
+				}
+				if (info.mbContinueExecution) {
+					ImGui::SameLine();
+					ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "[log]");
+				}
 			}
 
 			ImGui::SameLine();
