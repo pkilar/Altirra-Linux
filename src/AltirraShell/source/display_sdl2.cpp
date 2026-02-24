@@ -118,15 +118,20 @@ void ATDisplaySDL2::RenderQuad() {
 	if (winW <= 0 || winH <= 0)
 		return;
 
+	// Reserve space at the bottom for the ImGui status bar
+	int availH = winH - mBottomMargin;
+	if (availH <= 0)
+		availH = winH;
+
 	// Calculate destination rect based on stretch mode
 	float destX0, destY0, destX1, destY1;
 
 	if (mStretchMode == kATDisplayStretchMode_Unconstrained) {
-		// Fill entire window
+		// Fill available area (above status bar)
 		destX0 = 0;
 		destY0 = 0;
 		destX1 = (float)winW;
-		destY1 = (float)winH;
+		destY1 = (float)availH;
 	} else if (mStretchMode == kATDisplayStretchMode_SquarePixels
 		|| mStretchMode == kATDisplayStretchMode_Integral) {
 		// These modes ignore PAR — use raw pixel dimensions
@@ -134,14 +139,14 @@ void ATDisplaySDL2::RenderQuad() {
 		float srcH = (float)mSourceH;
 
 		if (mStretchMode == kATDisplayStretchMode_Integral) {
-			int scale = std::min(winW / mSourceW, winH / mSourceH);
+			int scale = std::min(winW / mSourceW, availH / mSourceH);
 			if (scale < 1) scale = 1;
 			srcW *= scale;
 			srcH *= scale;
 		}
 
 		destX0 = ((float)winW - srcW) * 0.5f;
-		destY0 = ((float)winH - srcH) * 0.5f;
+		destY0 = ((float)availH - srcH) * 0.5f;
 		destX1 = destX0 + srcW;
 		destY1 = destY0 + srcH;
 	} else {
@@ -149,7 +154,7 @@ void ATDisplaySDL2::RenderQuad() {
 		// Apply pixel aspect ratio correction (NTSC ~0.857, PAL ~1.04)
 		float fsw = (float)mSourceW * (float)mPixelAspectRatio;
 		float fsh = (float)mSourceH;
-		float zoom = std::min((float)winW / fsw, (float)winH / fsh);
+		float zoom = std::min((float)winW / fsw, (float)availH / fsh);
 
 		if (mStretchMode == kATDisplayStretchMode_IntegralPreserveAspectRatio && zoom > 1.0f)
 			zoom = floorf(zoom * 1.0001f);
@@ -157,12 +162,12 @@ void ATDisplaySDL2::RenderQuad() {
 		float destW = fsw * zoom;
 		float destH = fsh * zoom;
 		destX0 = ((float)winW - destW) * 0.5f;
-		destY0 = ((float)winH - destH) * 0.5f;
+		destY0 = ((float)availH - destH) * 0.5f;
 		destX1 = destX0 + destW;
 		destY1 = destY0 + destH;
 	}
 
-	// Set up orthographic projection
+	// Set up orthographic projection (full window for glClear)
 	glViewport(0, 0, winW, winH);
 	glMatrixMode(GL_PROJECTION);
 	glLoadIdentity();

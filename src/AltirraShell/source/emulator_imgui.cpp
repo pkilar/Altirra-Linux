@@ -2090,11 +2090,23 @@ static void DrawSystemConfig() {
 // ============= Status Bar =============
 
 static void DrawStatusBar() {
-	if (!s_showStatusBar)
+	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+
+	if (!s_showStatusBar) {
+		if (disp)
+			disp->SetBottomMargin(0);
 		return;
+	}
 
 	ImGuiIO& io = ImGui::GetIO();
 	float barHeight = ImGui::GetFrameHeight() + 4.0f;
+
+	// Tell display backend to reserve space so emulator output doesn't
+	// render behind the status bar. Convert logical pixels to physical.
+	if (disp) {
+		float scale = io.DisplayFramebufferScale.y;
+		disp->SetBottomMargin((int)(barHeight * scale + 0.5f));
+	}
 
 	ImGui::SetNextWindowPos(ImVec2(0, io.DisplaySize.y - barHeight));
 	ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, barHeight));
