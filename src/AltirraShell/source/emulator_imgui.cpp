@@ -1126,7 +1126,8 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Quick Save State", "F7")) {
 			try {
 				s_pQuickState.clear();
-				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
+				vdrefptr<IATSerializable> snapInfo;
+				g_sim.CreateSnapshot(~s_pQuickState, ~snapInfo);
 				ShowToast("State saved");
 			} catch (...) {
 				ShowToast("Save state failed");

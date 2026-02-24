@@ -582,7 +582,8 @@ static void HandleShortcuts(const SDL_Event& event) {
 		case SDL_SCANCODE_F7: {
 			try {
 				s_pQuickState.clear();
-				g_sim.CreateSnapshot(~s_pQuickState, nullptr);
+				vdrefptr<IATSerializable> snapInfo;
+				g_sim.CreateSnapshot(~s_pQuickState, ~snapInfo);
 				ATImGuiShowToast("State saved");
 			} catch (...) {
 				ATImGuiShowToast("Save state failed");
