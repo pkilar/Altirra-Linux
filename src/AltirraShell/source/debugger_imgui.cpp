@@ -334,21 +334,27 @@ static void DrawDisassembly() {
 	ImGui::Checkbox("Follow PC", &s_disasmFollowPC);
 	ImGui::SameLine();
 
-	ImGui::SetNextItemWidth(80);
-	if (ImGui::InputText("##addr", s_disasmAddrBuf, sizeof(s_disasmAddrBuf),
-		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue)) {
-		unsigned int addr;
-		if (sscanf(s_disasmAddrBuf, "%x", &addr) == 1) {
-			s_disasmAddr = addr & 0xFFFF;
-			s_disasmFollowPC = false;
-		}
-	}
+	// Address or symbol input
+	ImGui::SetNextItemWidth(120);
+	bool goPressed = ImGui::InputText("##addr", s_disasmAddrBuf, sizeof(s_disasmAddrBuf),
+		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
-	if (ImGui::Button("Go"))  {
+	goPressed = ImGui::Button("Go") || goPressed;
+
+	if (goPressed && s_disasmAddrBuf[0]) {
+		// Try hex address first, then symbol lookup
 		unsigned int addr;
 		if (sscanf(s_disasmAddrBuf, "%x", &addr) == 1) {
 			s_disasmAddr = addr & 0xFFFF;
 			s_disasmFollowPC = false;
+		} else {
+			sint32 symAddr = dbg->ResolveSymbol(s_disasmAddrBuf, true, true, false);
+			if (symAddr >= 0) {
+				s_disasmAddr = (uint16)symAddr;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X",
+					s_disasmAddr);
+			}
 		}
 	}
 
@@ -535,19 +541,28 @@ static void DrawMemory() {
 		return;
 	}
 
-	// Address input
-	ImGui::SetNextItemWidth(80);
-	if (ImGui::InputText("##memaddr", s_memoryAddrBuf, sizeof(s_memoryAddrBuf),
-		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue)) {
-		unsigned int addr;
-		if (sscanf(s_memoryAddrBuf, "%x", &addr) == 1)
-			s_memoryAddr = addr & 0xFFFF;
-	}
+	// Address or symbol input
+	ImGui::SetNextItemWidth(120);
+	bool memGo = ImGui::InputText("##memaddr", s_memoryAddrBuf, sizeof(s_memoryAddrBuf),
+		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
-	if (ImGui::Button("Go##mem")) {
+	memGo = ImGui::Button("Go##mem") || memGo;
+
+	if (memGo && s_memoryAddrBuf[0]) {
 		unsigned int addr;
-		if (sscanf(s_memoryAddrBuf, "%x", &addr) == 1)
+		if (sscanf(s_memoryAddrBuf, "%x", &addr) == 1) {
 			s_memoryAddr = addr & 0xFFFF;
+		} else {
+			IATDebugger *dbgMem = ATGetDebugger();
+			if (dbgMem) {
+				sint32 symAddr = dbgMem->ResolveSymbol(s_memoryAddrBuf, true, true, false);
+				if (symAddr >= 0) {
+					s_memoryAddr = (uint16)symAddr;
+					snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X",
+						s_memoryAddr);
+				}
+			}
+		}
 	}
 
 	ImGui::Separator();
@@ -747,16 +762,22 @@ static void DrawBreakpoints() {
 		return;
 	}
 
-	// Add breakpoint input
-	ImGui::SetNextItemWidth(80);
+	// Add breakpoint input (hex address or symbol name)
+	ImGui::SetNextItemWidth(120);
 	bool addBp = ImGui::InputText("##bpaddr", s_bpAddrBuf, sizeof(s_bpAddrBuf),
-		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue);
+		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
 	if ((ImGui::Button("Add##bp") || addBp) && s_bpAddrBuf[0]) {
 		unsigned int addr;
 		if (sscanf(s_bpAddrBuf, "%x", &addr) == 1) {
 			dbg->ToggleBreakpoint(addr & 0xFFFF);
 			s_bpAddrBuf[0] = 0;
+		} else {
+			sint32 symAddr = dbg->ResolveSymbol(s_bpAddrBuf, true, true, false);
+			if (symAddr >= 0) {
+				dbg->ToggleBreakpoint((uint16)symAddr);
+				s_bpAddrBuf[0] = 0;
+			}
 		}
 	}
 	ImGui::SameLine();
