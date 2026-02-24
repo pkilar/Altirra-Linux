@@ -69,6 +69,7 @@ class ATIRQController;
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <set>
 #include <vector>
 
 // Forward declarations for functions defined in cartdetect.cpp (compiled in Linux build)
@@ -76,6 +77,9 @@ uint32 ATCartridgeAutodetectMode(const void *data, uint32 size, vdfastvector<int
 
 // Firmware search path accessor (defined in main_linux.cpp)
 void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
+
+// Firmware switching (defined in stubs_linux.cpp)
+bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId);
 
 extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
@@ -402,7 +406,9 @@ static vdrefptr<IATDiskImage> s_diskStandaloneImage;  // holds image for standal
 static std::string s_diskExplorerTitle;  // custom title for standalone mode
 static ATDiskFSKey s_diskCurDir = ATDiskFSKey::None;
 static std::vector<ATDiskFSEntryInfo> s_diskEntries;
-static int s_diskSelectedIdx = -1;
+static int s_diskSelectedIdx = -1;  // last clicked item (for single-item ops like rename)
+static std::set<int> s_diskSelection;  // multi-select set
+static int s_diskShiftAnchor = -1;  // anchor for shift-click range selection
 static std::vector<ATDiskFSKey> s_diskDirStack;
 static bool s_diskReadOnly = false;
 static bool s_diskTextMode = false;  // Atari EOL (0x9B) ↔ Unix LF (0x0A) conversion
@@ -493,16 +499,14 @@ static std::string s_errorMessage;
 static enum class PendingDialog {
 	kNone,
 	kOpenImage,
-	kMountDisk1,
-	kMountDisk2,
-	kMountDisk3,
-	kMountDisk4,
+	kMountDisk,
 	kSaveState,
 	kLoadState,
 	kLoadTape,
 	kSaveTape,
 	kBootImage
 } s_pendingDialog = PendingDialog::kNone;
+static int s_pendingMountDiskSlot = 0;
 
 static const char *kDiskFilters =
 	"Disk Images|*.atr;*.xfd;*.dcm;*.pro;*.atx"
@@ -684,6 +688,129 @@ static const char *ATGetControllerTypeName(ATInputControllerType type) {
 		case kATInputControllerType_PowerPad:		return "Power Pad";
 		case kATInputControllerType_LightPenStack:	return "Light Pen Stack";
 		default:									return "Unknown";
+	}
+}
+
+static const char *ATGetInputCodeName(uint32 code) {
+	static char buf[32];
+	uint32 id = code & kATInputCode_IdMask;
+
+	if (id >= kATInputCode_JoyClass) {
+		if (id >= kATInputCode_JoyButton0) {
+			snprintf(buf, sizeof(buf), "Joy Btn%d", id - kATInputCode_JoyButton0);
+			return buf;
+		}
+		switch (id) {
+			case kATInputCode_JoyStick1Left:	return "Joy Left";
+			case kATInputCode_JoyStick1Right:	return "Joy Right";
+			case kATInputCode_JoyStick1Up:		return "Joy Up";
+			case kATInputCode_JoyStick1Down:	return "Joy Down";
+			case kATInputCode_JoyHoriz1:		return "Joy Axis X";
+			case kATInputCode_JoyVert1:			return "Joy Axis Y";
+			case kATInputCode_JoyPOVLeft:		return "Joy POV Left";
+			case kATInputCode_JoyPOVRight:		return "Joy POV Right";
+			case kATInputCode_JoyPOVUp:			return "Joy POV Up";
+			case kATInputCode_JoyPOVDown:		return "Joy POV Down";
+			default: snprintf(buf, sizeof(buf), "Joy 0x%X", id); return buf;
+		}
+	} else if (id >= kATInputCode_MouseClass) {
+		switch (id) {
+			case kATInputCode_MouseHoriz:		return "Mouse X";
+			case kATInputCode_MouseVert:		return "Mouse Y";
+			case kATInputCode_MouseLMB:			return "Mouse LMB";
+			case kATInputCode_MouseRMB:			return "Mouse RMB";
+			case kATInputCode_MouseMMB:			return "Mouse MMB";
+			case kATInputCode_MouseLeft:		return "Mouse Left";
+			case kATInputCode_MouseRight:		return "Mouse Right";
+			case kATInputCode_MouseUp:			return "Mouse Up";
+			case kATInputCode_MouseDown:		return "Mouse Down";
+			default: snprintf(buf, sizeof(buf), "Mouse 0x%X", id); return buf;
+		}
+	} else {
+		// Key codes
+		if (id >= kATInputCode_KeyA && id <= kATInputCode_KeyZ) {
+			snprintf(buf, sizeof(buf), "Key %c", (char)id);
+			return buf;
+		}
+		if (id >= kATInputCode_Key0 && id <= kATInputCode_Key9) {
+			snprintf(buf, sizeof(buf), "Key %c", (char)id);
+			return buf;
+		}
+		switch (id) {
+			case kATInputCode_KeyUp:		return "Up";
+			case kATInputCode_KeyDown:		return "Down";
+			case kATInputCode_KeyLeft:		return "Left";
+			case kATInputCode_KeyRight:		return "Right";
+			case kATInputCode_KeySpace:		return "Space";
+			case kATInputCode_KeyReturn:	return "Enter";
+			case kATInputCode_KeyEscape:	return "Escape";
+			case kATInputCode_KeyTab:		return "Tab";
+			case kATInputCode_KeyBack:		return "Backspace";
+			case kATInputCode_KeyInsert:	return "Insert";
+			case kATInputCode_KeyDelete:	return "Delete";
+			case kATInputCode_KeyHome:		return "Home";
+			case kATInputCode_KeyEnd:		return "End";
+			case kATInputCode_KeyPrior:		return "Page Up";
+			case kATInputCode_KeyNext:		return "Page Down";
+			case kATInputCode_KeyLShift:	return "L.Shift";
+			case kATInputCode_KeyRShift:	return "R.Shift";
+			case kATInputCode_KeyLControl:	return "L.Ctrl";
+			case kATInputCode_KeyRControl:	return "R.Ctrl";
+			case kATInputCode_KeyNumpadEnter: return "Numpad Enter";
+			default:
+				if (id >= kATInputCode_KeyNumpad0 && id <= kATInputCode_KeyNumpad9) {
+					snprintf(buf, sizeof(buf), "Numpad %d", id - kATInputCode_KeyNumpad0);
+					return buf;
+				}
+				if (id >= kATInputCode_KeyF1 && id <= kATInputCode_KeyF12) {
+					snprintf(buf, sizeof(buf), "F%d", id - kATInputCode_KeyF1 + 1);
+					return buf;
+				}
+				snprintf(buf, sizeof(buf), "Key 0x%X", id);
+				return buf;
+		}
+	}
+}
+
+static const char *ATGetInputTriggerName(uint32 code) {
+	static char buf[32];
+	uint32 trigger = code & kATInputTrigger_Mask;
+	switch (trigger) {
+		case kATInputTrigger_Button0:		return "Button";
+		case kATInputTrigger_Up:			return "Up";
+		case kATInputTrigger_Down:			return "Down";
+		case kATInputTrigger_Left:			return "Left";
+		case kATInputTrigger_Right:			return "Right";
+		case kATInputTrigger_ScrollUp:		return "Scroll Up";
+		case kATInputTrigger_ScrollDown:	return "Scroll Down";
+		case kATInputTrigger_Start:			return "Start";
+		case kATInputTrigger_Select:		return "Select";
+		case kATInputTrigger_Option:		return "Option";
+		case kATInputTrigger_Turbo:			return "Turbo";
+		case kATInputTrigger_ColdReset:		return "Cold Reset";
+		case kATInputTrigger_WarmReset:		return "Warm Reset";
+		case kATInputTrigger_Rewind:		return "Rewind";
+		case kATInputTrigger_RewindMenu:	return "Rewind Menu";
+		case kATInputTrigger_KeySpace:		return "Key Space";
+		case kATInputTrigger_5200_Start:	return "5200 Start";
+		case kATInputTrigger_5200_Pause:	return "5200 Pause";
+		case kATInputTrigger_5200_Reset:	return "5200 Reset";
+		case kATInputTrigger_Axis0:			return "Axis";
+		case kATInputTrigger_Flag0:			return "Flag";
+		default:
+			if (trigger >= kATInputTrigger_5200_0 && trigger <= kATInputTrigger_5200_Pound) {
+				const char *k5200Keys[] = {"0","1","2","3","4","5","6","7","8","9","*","#"};
+				snprintf(buf, sizeof(buf), "5200 [%s]", k5200Keys[trigger - kATInputTrigger_5200_0]);
+			} else if (trigger >= kATInputTrigger_UILeft && trigger <= kATInputTrigger_UIRightShift) {
+				const char *kUINames[] = {"UI Left","UI Right","UI Up","UI Down","UI Accept","UI Reject","UI Menu","UI Option","UI Switch L","UI Switch R","UI L.Shift","UI R.Shift"};
+				uint32 idx = trigger - kATInputTrigger_UILeft;
+				if (idx < 12)
+					return kUINames[idx];
+				snprintf(buf, sizeof(buf), "UI 0x%X", trigger);
+			} else {
+				snprintf(buf, sizeof(buf), "Trigger 0x%X", trigger);
+			}
+			return buf;
 	}
 }
 
@@ -929,6 +1056,76 @@ static void DrawMenuBar() {
 					g_sim.SetHardwareMode((ATHardwareMode)i);
 				}
 			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Kernel")) {
+			ATFirmwareManager *fwMgr = g_sim.GetFirmwareManager();
+			uint64 curKernel = g_sim.GetKernelId();
+			ATHardwareMode hwmode = g_sim.GetHardwareMode();
+
+			// Autoselect option (id 0 = let simulator pick)
+			if (ImGui::MenuItem("[Autoselect]", nullptr, curKernel == 0)) {
+				ATUISwitchKernel(nullptr, 0);
+			}
+
+			// Built-in HLE kernels
+			if (hwmode != kATHardwareMode_5200) {
+				if (ImGui::MenuItem("Internal OS-B", nullptr, curKernel == kATFirmwareId_Kernel_LLE)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_Kernel_LLE);
+				}
+				if (ImGui::MenuItem("Internal XL OS", nullptr, curKernel == kATFirmwareId_Kernel_LLEXL)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_Kernel_LLEXL);
+				}
+			} else {
+				if (ImGui::MenuItem("Internal 5200 OS", nullptr, curKernel == kATFirmwareId_5200_LLE)) {
+					ATUISwitchKernel(nullptr, kATFirmwareId_5200_LLE);
+				}
+			}
+
+			// User-added firmware ROMs that match current hardware mode
+			if (fwMgr) {
+				vdvector<ATFirmwareInfo> fwList;
+				fwMgr->GetFirmwareList(fwList);
+
+				bool hasSep = false;
+				for (const ATFirmwareInfo& fw : fwList) {
+					if (!fw.mbVisible)
+						continue;
+
+					bool match = false;
+					switch (fw.mType) {
+						case kATFirmwareType_Kernel800_OSA:
+						case kATFirmwareType_Kernel800_OSB:
+							match = (hwmode != kATHardwareMode_5200);
+							break;
+						case kATFirmwareType_KernelXL:
+						case kATFirmwareType_KernelXEGS:
+						case kATFirmwareType_Kernel1200XL:
+							match = kATHardwareModeTraits[hwmode].mbRunsXLOS;
+							break;
+						case kATFirmwareType_Kernel5200:
+							match = (hwmode == kATHardwareMode_5200);
+							break;
+						default:
+							break;
+					}
+
+					if (!match)
+						continue;
+
+					if (!hasSep) {
+						ImGui::Separator();
+						hasSep = true;
+					}
+
+					VDStringA u8name = VDTextWToU8(fw.mName);
+					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw.mId == curKernel)) {
+						ATUISwitchKernel(nullptr, fw.mId);
+					}
+				}
+			}
+
 			ImGui::EndMenu();
 		}
 
@@ -1188,9 +1385,13 @@ static void DrawMenuBar() {
 		ImGui::Separator();
 
 		if (ImGui::BeginMenu("Disk Drives")) {
-			for (int i = 0; i < 4; ++i) {
+			for (int i = 0; i < 15; ++i) {
 				char label[32];
 				ATDiskInterface& di = g_sim.GetDiskInterface(i);
+
+				// Always show D1-D4; only show D5-D15 if a disk is loaded
+				if (i >= 4 && !di.IsDiskLoaded())
+					continue;
 
 				if (ImGui::BeginMenu(di.IsDiskLoaded()
 					? (snprintf(label, sizeof(label), "D%d: %ls", i + 1,
@@ -1203,7 +1404,8 @@ static void DrawMenuBar() {
 						if (!path.empty()) {
 							TryMountDisk(i, path);
 						} else if (ATLinuxFileDialogIsFallbackOpen()) {
-							s_pendingDialog = (PendingDialog)((int)PendingDialog::kMountDisk1 + i);
+							s_pendingDialog = PendingDialog::kMountDisk;
+							s_pendingMountDiskSlot = i;
 						}
 					}
 
@@ -1266,6 +1468,8 @@ static void DrawMenuBar() {
 							s_diskDirStack.clear();
 							s_diskCurDir = ATDiskFSKey::None;
 							s_diskSelectedIdx = -1;
+							s_diskSelection.clear();
+							s_diskShiftAnchor = -1;
 							s_diskReadOnly = readOnly;
 							s_diskFSInfoStr.clear();
 							try {
@@ -1407,6 +1611,8 @@ static void DrawMenuBar() {
 					s_diskDirStack.clear();
 					s_diskCurDir = ATDiskFSKey::None;
 					s_diskSelectedIdx = -1;
+					s_diskSelection.clear();
+					s_diskShiftAnchor = -1;
 					s_showDiskExplorer = true;
 				} catch (const std::exception& e) {
 					s_diskFS.reset();
@@ -1908,8 +2114,13 @@ static void DrawStatusBar() {
 		ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s %s", hwName, vsName);
 
 		// Disk status (show dirty indicator when disk has unsaved changes)
-		for (int i = 0; i < 4; ++i) {
+		// Always show D1-D4; show D5-D15 only when loaded
+		for (int i = 0; i < 15; ++i) {
 			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+
+			if (i >= 4 && !di.IsDiskLoaded())
+				continue;
+
 			ImGui::SameLine(0, 16);
 
 			if (di.IsDiskLoaded()) {
@@ -2104,11 +2315,8 @@ static void PollFileDialogFallback() {
 			case PendingDialog::kOpenImage:
 				TryLoadImage(result);
 				break;
-			case PendingDialog::kMountDisk1:
-			case PendingDialog::kMountDisk2:
-			case PendingDialog::kMountDisk3:
-			case PendingDialog::kMountDisk4:
-				TryMountDisk((int)s_pendingDialog - (int)PendingDialog::kMountDisk1, result);
+			case PendingDialog::kMountDisk:
+				TryMountDisk(s_pendingMountDiskSlot, result);
 				break;
 			case PendingDialog::kSaveState:
 				if (!result.empty()) {
@@ -2802,6 +3010,8 @@ static void DrawAudioOptions() {
 static void DiskExplorerRefresh() {
 	s_diskEntries.clear();
 	s_diskSelectedIdx = -1;
+	s_diskSelection.clear();
+	s_diskShiftAnchor = -1;
 	if (!s_diskFS)
 		return;
 
@@ -2833,6 +3043,8 @@ static void DiskExplorerClose() {
 	s_diskEntries.clear();
 	s_diskDirStack.clear();
 	s_diskSelectedIdx = -1;
+	s_diskSelection.clear();
+	s_diskShiftAnchor = -1;
 	s_diskCurDir = ATDiskFSKey::None;
 	s_showDiskExplorer = false;
 }
@@ -2872,6 +3084,8 @@ void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool
 		s_diskDirStack.clear();
 		s_diskCurDir = ATDiskFSKey::None;
 		s_diskSelectedIdx = -1;
+		s_diskSelection.clear();
+		s_diskShiftAnchor = -1;
 		s_showDiskExplorer = true;
 	} catch (const std::exception& e) {
 		s_diskFS.reset();
@@ -2935,8 +3149,16 @@ static void DrawDiskExplorer() {
 	}
 
 	ImGui::SameLine();
-	bool hasSel = s_diskSelectedIdx >= 0 && s_diskSelectedIdx < (int)s_diskEntries.size();
-	bool selIsFile = hasSel && !s_diskEntries[s_diskSelectedIdx].mbIsDirectory;
+	bool hasSel = !s_diskSelection.empty();
+	bool selIsFile = hasSel && s_diskSelectedIdx >= 0 && s_diskSelectedIdx < (int)s_diskEntries.size()
+		&& !s_diskEntries[s_diskSelectedIdx].mbIsDirectory;
+
+	// Count selected files (non-directories) for bulk ops
+	int selFileCount = 0;
+	for (int idx : s_diskSelection) {
+		if (idx >= 0 && idx < (int)s_diskEntries.size() && !s_diskEntries[idx].mbIsDirectory)
+			++selFileCount;
+	}
 
 	if (ImGui::Button("Extract") && selIsFile) {
 		const ATDiskFSEntryInfo& entry = s_diskEntries[s_diskSelectedIdx];
@@ -2959,6 +3181,51 @@ static void DrawDiskExplorer() {
 			} catch (const std::exception& e) {
 				char msg[256];
 				snprintf(msg, sizeof(msg), "Extract failed: %s", e.what());
+				ShowToast(msg);
+			}
+		}
+	}
+
+	// Bulk extract: extract all selected files to a directory
+	if (selFileCount > 1) {
+		ImGui::SameLine();
+		char bulkLabel[32];
+		snprintf(bulkLabel, sizeof(bulkLabel), "Extract %d", selFileCount);
+		if (ImGui::Button(bulkLabel)) {
+			VDStringW dirPath = ATLinuxOpenFileDialog("Select Directory for Extraction", "All Files|*");
+			if (!dirPath.empty()) {
+				// Use the selected path as a directory (strip filename if one was selected)
+				VDStringW dir = dirPath;
+				int extracted = 0, failed = 0;
+				for (int idx : s_diskSelection) {
+					if (idx < 0 || idx >= (int)s_diskEntries.size() || s_diskEntries[idx].mbIsDirectory)
+						continue;
+					const ATDiskFSEntryInfo& e = s_diskEntries[idx];
+					try {
+						vdfastvector<uint8> data;
+						s_diskFS->ReadFile(e.mKey, data);
+						if (s_diskTextMode) {
+							for (auto& b : data) {
+								if (b == 0x9B) b = 0x0A;
+							}
+						}
+						VDStringW filePath = dir;
+						filePath += L'/';
+						filePath += VDTextU8ToW(VDStringA(e.mFileName.c_str()));
+						VDFile f(filePath.c_str(), nsVDFile::kWrite | nsVDFile::kCreateAlways);
+						if (!data.empty())
+							f.write(data.data(), (long)data.size());
+						f.close();
+						++extracted;
+					} catch (...) {
+						++failed;
+					}
+				}
+				char msg[128];
+				if (failed)
+					snprintf(msg, sizeof(msg), "Extracted %d file(s), %d failed", extracted, failed);
+				else
+					snprintf(msg, sizeof(msg), "Extracted %d file(s)", extracted);
 				ShowToast(msg);
 			}
 		}
@@ -3070,23 +3337,40 @@ static void DrawDiskExplorer() {
 
 	// Delete confirmation popup
 	if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		if (hasSel) {
-			ImGui::Text("Delete \"%s\"?", s_diskEntries[s_diskSelectedIdx].mFileName.c_str());
+		if (s_diskSelection.size() == 1) {
+			int idx = *s_diskSelection.begin();
+			if (idx >= 0 && idx < (int)s_diskEntries.size())
+				ImGui::Text("Delete \"%s\"?", s_diskEntries[idx].mFileName.c_str());
+		} else if (s_diskSelection.size() > 1) {
+			ImGui::Text("Delete %d selected item(s)?", (int)s_diskSelection.size());
 		}
 
 		if (ImGui::Button("Delete", ImVec2(80, 0))) {
-			if (hasSel) {
+			int deleted = 0, failed = 0;
+			// Delete in reverse order to preserve indices during iteration
+			for (auto it = s_diskSelection.rbegin(); it != s_diskSelection.rend(); ++it) {
+				int idx = *it;
+				if (idx < 0 || idx >= (int)s_diskEntries.size())
+					continue;
 				try {
-					s_diskFS->DeleteFile(s_diskEntries[s_diskSelectedIdx].mKey);
-					s_diskFS->Flush();
-					DiskExplorerRefresh();
-					ShowToast("File deleted");
-				} catch (const std::exception& e) {
-					char msg[256];
-					snprintf(msg, sizeof(msg), "Delete failed: %s", e.what());
-					ShowToast(msg);
+					s_diskFS->DeleteFile(s_diskEntries[idx].mKey);
+					++deleted;
+				} catch (...) {
+					++failed;
 				}
 			}
+			if (deleted > 0) {
+				try { s_diskFS->Flush(); } catch (...) {}
+				DiskExplorerRefresh();
+			}
+			char msg[128];
+			if (failed)
+				snprintf(msg, sizeof(msg), "Deleted %d, %d failed", deleted, failed);
+			else if (deleted == 1)
+				snprintf(msg, sizeof(msg), "File deleted");
+			else
+				snprintf(msg, sizeof(msg), "Deleted %d item(s)", deleted);
+			ShowToast(msg);
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::SameLine();
@@ -3161,6 +3445,15 @@ static void DrawDiskExplorer() {
 
 	ImGui::Separator();
 
+	// Ctrl+A: select all
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+		&& ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A))
+	{
+		s_diskSelection.clear();
+		for (int i = 0; i < (int)s_diskEntries.size(); ++i)
+			s_diskSelection.insert(i);
+	}
+
 	// File listing table
 	if (ImGui::BeginTable("##diskfiles", 4,
 		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
@@ -3185,10 +3478,32 @@ static void DrawDiskExplorer() {
 			else
 				snprintf(nameStr, sizeof(nameStr), "%s", entry.mFileName.c_str());
 
-			bool selected = (s_diskSelectedIdx == i);
+			bool selected = s_diskSelection.count(i) > 0;
 			if (ImGui::Selectable(nameStr, selected,
 				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
 			{
+				ImGuiIO& io = ImGui::GetIO();
+
+				if (io.KeyShift && s_diskShiftAnchor >= 0) {
+					// Shift+click: range select from anchor
+					s_diskSelection.clear();
+					int lo = std::min(s_diskShiftAnchor, i);
+					int hi = std::max(s_diskShiftAnchor, i);
+					for (int j = lo; j <= hi; ++j)
+						s_diskSelection.insert(j);
+				} else if (io.KeyCtrl) {
+					// Ctrl+click: toggle individual item
+					if (selected)
+						s_diskSelection.erase(i);
+					else
+						s_diskSelection.insert(i);
+					s_diskShiftAnchor = i;
+				} else {
+					// Plain click: single select
+					s_diskSelection.clear();
+					s_diskSelection.insert(i);
+					s_diskShiftAnchor = i;
+				}
 				s_diskSelectedIdx = i;
 
 				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && entry.mbIsDirectory) {
@@ -3879,8 +4194,8 @@ static void DrawInputSetup() {
 		}
 
 		// Scrollable list of maps
+		static int s_selectedMapIdx = -1;
 		if (ImGui::BeginChild("##maplist", ImVec2(0, 280), ImGuiChildFlags_Borders)) {
-			static int s_selectedMapIdx = -1;
 
 			for (uint32 i = 0; i < mapCount; ++i) {
 				ATInputMap *imap = nullptr;
@@ -3937,17 +4252,148 @@ static void DrawInputSetup() {
 			ImGui::Spacing();
 			ImGui::Separator();
 
-			ATInputMap *selMap = nullptr;
-			if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount) {
-				inputMgr->GetInputMapByIndex(s_selectedMapIdx, &selMap);
-			}
-
-			if (ImGui::Button("Remove") && selMap) {
-				inputMgr->RemoveInputMap(selMap);
-				s_selectedMapIdx = -1;
+			{
+				ATInputMap *imap = nullptr;
+				if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount)
+					inputMgr->GetInputMapByIndex(s_selectedMapIdx, &imap);
+				if (ImGui::Button("Remove") && imap) {
+					inputMgr->RemoveInputMap(imap);
+					s_selectedMapIdx = -1;
+				}
 			}
 		}
 		ImGui::EndChild();
+
+		// --- Selected map binding viewer/editor ---
+		ATInputMap *selMap = nullptr;
+		if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount) {
+			inputMgr->GetInputMapByIndex(s_selectedMapIdx, &selMap);
+		}
+
+		if (selMap) {
+			ImGui::Spacing();
+			VDStringA mapTitle = VDTextWToU8(VDStringW(selMap->GetName()));
+			ImGui::Text("Bindings: %s", mapTitle.c_str());
+
+			// Controllers summary
+			uint32 ctrlCount = selMap->GetControllerCount();
+			if (ctrlCount > 0) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("(");
+				for (uint32 c = 0; c < ctrlCount; ++c) {
+					const ATInputMap::Controller& ctrl = selMap->GetController(c);
+					if (c > 0) {
+						ImGui::SameLine(0, 0);
+						ImGui::TextDisabled(", ");
+					}
+					ImGui::SameLine(0, 0);
+					ImGui::TextDisabled("%s P%u", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+				}
+				ImGui::SameLine(0, 0);
+				ImGui::TextDisabled(")");
+			}
+
+			uint32 mappingCount = selMap->GetMappingCount();
+
+			if (mappingCount == 0) {
+				ImGui::TextDisabled("No bindings in this map.");
+			} else if (ImGui::BeginTable("##bindings", 4,
+					ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+					| ImGuiTableFlags_Sortable | ImGuiTableFlags_SizingStretchProp,
+					ImVec2(0, 200))) {
+				ImGui::TableSetupScrollFreeze(0, 1);
+				ImGui::TableSetupColumn("Input", ImGuiTableColumnFlags_DefaultSort, 0.30f);
+				ImGui::TableSetupColumn("Controller", 0, 0.25f);
+				ImGui::TableSetupColumn("Target", 0, 0.25f);
+				ImGui::TableSetupColumn("Mode", 0, 0.20f);
+				ImGui::TableHeadersRow();
+
+				// Build sortable mapping list
+				struct MappingEntry {
+					uint32 idx;
+					const char *inputName;
+					const char *ctrlName;
+					uint32 ctrlPort;
+					const char *triggerName;
+					const char *modeName;
+				};
+
+				static vdfastvector<MappingEntry> sortedMappings;
+				sortedMappings.clear();
+				sortedMappings.reserve(mappingCount);
+
+				for (uint32 m = 0; m < mappingCount; ++m) {
+					const ATInputMap::Mapping& mapping = selMap->GetMapping(m);
+					MappingEntry entry;
+					entry.idx = m;
+					entry.inputName = ATGetInputCodeName(mapping.mInputCode);
+
+					uint32 cid = mapping.mControllerId;
+					if (cid < ctrlCount) {
+						const ATInputMap::Controller& ctrl = selMap->GetController(cid);
+						entry.ctrlName = ATGetControllerTypeName(ctrl.mType);
+						entry.ctrlPort = ctrl.mIndex + 1;
+					} else {
+						entry.ctrlName = "?";
+						entry.ctrlPort = 0;
+					}
+
+					entry.triggerName = ATGetInputTriggerName(mapping.mCode);
+
+					uint32 mode = mapping.mCode & kATInputTriggerMode_Mask;
+					switch (mode) {
+						case kATInputTriggerMode_AutoFire:	entry.modeName = "Auto-fire"; break;
+						case kATInputTriggerMode_Toggle:	entry.modeName = "Toggle"; break;
+						case kATInputTriggerMode_ToggleAF:	entry.modeName = "Toggle AF"; break;
+						case kATInputTriggerMode_Relative:	entry.modeName = "Relative"; break;
+						case kATInputTriggerMode_Absolute:	entry.modeName = "Absolute"; break;
+						case kATInputTriggerMode_Inverted:	entry.modeName = "Inverted"; break;
+						default:							entry.modeName = ""; break;
+					}
+
+					sortedMappings.push_back(entry);
+				}
+
+				// Apply sort
+				if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
+					if (sortSpecs->SpecsDirty && sortSpecs->SpecsCount > 0) {
+						int col = sortSpecs->Specs[0].ColumnIndex;
+						bool asc = (sortSpecs->Specs[0].SortDirection == ImGuiSortDirection_Ascending);
+						std::sort(sortedMappings.begin(), sortedMappings.end(),
+							[col, asc](const MappingEntry& a, const MappingEntry& b) {
+								int cmp = 0;
+								switch (col) {
+									case 0: cmp = strcmp(a.inputName, b.inputName); break;
+									case 1: cmp = strcmp(a.ctrlName, b.ctrlName); break;
+									case 2: cmp = strcmp(a.triggerName, b.triggerName); break;
+									case 3: cmp = strcmp(a.modeName, b.modeName); break;
+								}
+								return asc ? (cmp < 0) : (cmp > 0);
+							});
+						sortSpecs->SpecsDirty = false;
+					}
+				}
+
+				for (const auto& entry : sortedMappings) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.inputName);
+					ImGui::TableNextColumn();
+					if (entry.ctrlPort > 0)
+						ImGui::Text("%s P%u", entry.ctrlName, entry.ctrlPort);
+					else
+						ImGui::TextUnformatted(entry.ctrlName);
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.triggerName);
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.modeName);
+				}
+
+				ImGui::EndTable();
+			}
+
+			ImGui::Text("%u binding(s)", mappingCount);
+		}
 	}
 
 	// --- Add from presets ---
