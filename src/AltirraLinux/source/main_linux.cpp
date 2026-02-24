@@ -167,6 +167,9 @@ static Uint32 g_lastMouseMoveTime = 0;
 static bool g_cursorHidden = false;
 static const Uint32 kCursorHideDelayMs = 3000;
 
+// Tracks whether we paused due to window losing focus (vs. user manual pause)
+static bool g_pausedByInactive = false;
+
 // Global accessor for the display backend — used by emulator_imgui.cpp
 ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
 
@@ -720,12 +723,16 @@ static void ProcessEvents(SDL_Window *window) {
 						g_pImGui->ToggleVisible();
 				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
 					ATUISetAppActive(false);
-					if (ATUIGetPauseWhenInactive() && !g_sim.IsPaused())
+					if (ATUIGetPauseWhenInactive() && !g_sim.IsPaused()) {
 						g_sim.Pause();
+						g_pausedByInactive = true;
+					}
 				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
 					ATUISetAppActive(true);
-					if (ATUIGetPauseWhenInactive() && g_sim.IsPaused())
+					if (g_pausedByInactive) {
+						g_pausedByInactive = false;
 						g_sim.Resume();
+					}
 				}
 				break;
 
