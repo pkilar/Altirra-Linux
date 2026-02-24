@@ -42,7 +42,7 @@ public:
 	// Used when main loop needs to composite ImGui on top before swap.
 	void RenderFrame();
 
-	// Get window dimensions for aspect ratio calculation
+	// Get drawable dimensions in physical pixels (HiDPI-aware)
 	void GetWindowSize(int& w, int& h) const;
 
 	// IVDVideoDisplay

@@ -71,7 +71,7 @@ void ATDisplaySDL2::RenderFrame() {
 
 void ATDisplaySDL2::GetWindowSize(int& w, int& h) const {
 	if (mpWindow)
-		SDL_GetWindowSize(mpWindow, &w, &h);
+		SDL_GL_GetDrawableSize(mpWindow, &w, &h);
 	else {
 		w = 0;
 		h = 0;
