@@ -521,10 +521,13 @@ static void HandleShortcuts(const SDL_Event& event) {
 		// F6: warm reset (Shift+F6: cold reset)
 		case SDL_SCANCODE_F6: {
 			bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-			if (shift)
+			if (shift) {
 				g_sim.ColdReset();
-			else
+				ATImGuiShowToast("Cold reset");
+			} else {
 				g_sim.WarmReset();
+				ATImGuiShowToast("Warm reset");
+			}
 			return;
 		}
 
@@ -560,10 +563,13 @@ static void HandleShortcuts(const SDL_Event& event) {
 
 		// Pause key: toggle emulation pause
 		case SDL_SCANCODE_PAUSE: {
-			if (g_sim.IsPaused())
+			if (g_sim.IsPaused()) {
 				g_sim.Resume();
-			else
+				ATImGuiShowToast("Resumed");
+			} else {
 				g_sim.Pause();
+				ATImGuiShowToast("Paused");
+			}
 			return;
 		}
 
