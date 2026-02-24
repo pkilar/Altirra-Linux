@@ -282,14 +282,14 @@ uint32 ATTimerServiceLinux::Sink(uint32 pos, uint64 val) {
 			uint32 rightIdx = mHeap[rightPos];
 			auto rightVal = mSlots[rightIdx].mDeadline;
 
-			if (childVal < rightVal) {
+			if (rightVal < childVal) {
 				childVal = rightVal;
 				childIdx = rightIdx;
 				childPos = rightPos;
 			}
 		}
 
-		if (val < childVal)
+		if (val <= childVal)
 			break;
 
 		mSlots[childIdx].mHeapIndex = pos;
