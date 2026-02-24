@@ -31,4 +31,9 @@ void ATImGuiBootImage();
 class IATDiskImage;
 void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool readOnly);
 
+// Input capture for binding editor
+#include <vd2/system/vdtypes.h>
+bool ATImGuiIsCapturingInput();
+void ATImGuiOnCapturedInput(uint32 inputCode);
+
 #endif
