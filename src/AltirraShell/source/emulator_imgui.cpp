@@ -115,6 +115,260 @@ static int s_devAddSelectedIdx = -1;
 static ATPropertySet s_devEditProps;
 static std::string s_devEditTag;
 
+// ============= Device config descriptor system =============
+
+enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect };
+
+struct DevCfgChoice { int value; const char *name; };
+
+struct DevCfgControl {
+	DevCfgType type;
+	const char *propKey;       // property key in ATPropertySet
+	const char *label;         // display label
+	const DevCfgChoice *choices; // for dropdown (null-terminated by name==nullptr)
+	int choiceCount;
+	bool defaultBool;          // for checkbox
+	const char *browseTitle;   // for path select
+};
+
+struct DevCfgDescriptor {
+	const char *title;
+	const DevCfgControl *controls;
+	int controlCount;
+};
+
+// --- Dropdown choices ---
+
+static const DevCfgChoice kIDChoices[] = {
+	{0, "ID 0"}, {1, "ID 1"}, {2, "ID 2"}, {3, "ID 3"},
+	{4, "ID 4"}, {5, "ID 5"}, {6, "ID 6"}, {7, "ID 7"},
+};
+
+static const DevCfgChoice kSIDE3VersionChoices[] = {
+	{10, "V1.0"}, {14, "V1.4"},
+};
+
+static const DevCfgChoice kMyIDECPLDChoices[] = {
+	{1, "V1"}, {2, "V2Ex"},
+};
+
+// --- Per-device control arrays ---
+
+static const DevCfgControl kCfgVirtHD[] = {
+	{ DevCfgType::PathSelect, "path", "Directory Path", nullptr, 0, false, "Select Directory" },
+};
+
+static const DevCfgControl kCfgHardDisk[] = {
+	{ DevCfgType::PathSelect, "path", "Image Path", nullptr, 0, false, "Select Disk Image" },
+	{ DevCfgType::Checkbox, "write_enabled", "Write Enabled", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "solid_state", "Solid State (SSD)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgKMKJZIDE[] = {
+	{ DevCfgType::IntDropdown, "id", "Device ID", kIDChoices, 8, false, nullptr },
+	{ DevCfgType::Checkbox, "enablesdx", "Enable SDX Switch", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "writeprotect", "Write Protect", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "nvramguard", "NVRAM Guard", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgSIDE3[] = {
+	{ DevCfgType::IntDropdown, "version", "Hardware Version", kSIDE3VersionChoices, 2, false, nullptr },
+	{ DevCfgType::Checkbox, "led_enable", "Activity LED", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "recovery", "Recovery Mode", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgMyIDE[] = {
+	{ DevCfgType::IntDropdown, "cpldver", "CPLD Version", kMyIDECPLDChoices, 2, false, nullptr },
+};
+
+static const DevCfgControl kCfgModem[] = {
+	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "telnet", "Telnet Emulation", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "ipv6", "Listen IPv6", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialaddr", "Dial Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialsvc", "Dial Service", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "termtype", "Terminal Type", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPrinter[] = {
+	{ DevCfgType::Checkbox, "graphics", "Graphics Mode", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "accurate_timing", "Accurate Timing", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "sound", "Sound Emulation", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPCLink[] = {
+	{ DevCfgType::PathSelect, "path", "Base Directory", nullptr, 0, false, "Select Directory" },
+	{ DevCfgType::Checkbox, "write", "Write Access", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "set_timestamps", "Set Timestamps", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgHostFS[] = {
+	{ DevCfgType::PathSelect, "path1", "Drive 1 Path", nullptr, 0, false, "Select Directory" },
+	{ DevCfgType::PathSelect, "path2", "Drive 2 Path", nullptr, 0, false, "Select Directory" },
+	{ DevCfgType::PathSelect, "path3", "Drive 3 Path", nullptr, 0, false, "Select Directory" },
+	{ DevCfgType::PathSelect, "path4", "Drive 4 Path", nullptr, 0, false, "Select Directory" },
+	{ DevCfgType::Checkbox, "readonly", "Read Only", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "longfilenames", "Long Filenames", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "lowercase", "Lowercase Names", nullptr, 0, true, nullptr },
+};
+
+static const DevCfgControl kCfgCustomDev[] = {
+	{ DevCfgType::PathSelect, "path", "Config File Path", nullptr, 0, false, "Select Config File" },
+	{ DevCfgType::Checkbox, "hotreload", "Hot Reload", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "allowunsafe", "Allow Unsafe Ops", nullptr, 0, false, nullptr },
+};
+
+// --- Tag → descriptor lookup ---
+
+struct DevCfgTagMapping {
+	const char *tag;
+	const char *title;
+	const DevCfgControl *controls;
+	int controlCount;
+};
+
+#define DEVCFG_ENTRY(tag, title, arr) { tag, title, arr, (int)(sizeof(arr)/sizeof(arr[0])) }
+
+static const DevCfgTagMapping kDevCfgMappings[] = {
+	DEVCFG_ENTRY("hdvirtfat16", "Virtual FAT16 Hard Disk", kCfgVirtHD),
+	DEVCFG_ENTRY("hdvirtfat32", "Virtual FAT32 Hard Disk", kCfgVirtHD),
+	DEVCFG_ENTRY("hdvirtsdfs", "Virtual SDFS Hard Disk", kCfgVirtHD),
+	DEVCFG_ENTRY("harddisk", "Hard Disk Image", kCfgHardDisk),
+	DEVCFG_ENTRY("kmkjzide", "KMK/JZ IDE", kCfgKMKJZIDE),
+	DEVCFG_ENTRY("kmkjzide2", "KMK/JZ IDE II", kCfgKMKJZIDE),
+	DEVCFG_ENTRY("side3", "SIDE 3", kCfgSIDE3),
+	DEVCFG_ENTRY("myide-d1xx", "MyIDE Internal", kCfgMyIDE),
+	DEVCFG_ENTRY("myide-d5xx", "MyIDE Cartridge", kCfgMyIDE),
+	DEVCFG_ENTRY("myide-d2xx", "MyIDE-II", kCfgMyIDE),
+	DEVCFG_ENTRY("myide2", "MyIDE-II", kCfgMyIDE),
+	DEVCFG_ENTRY("835", "835 Modem", kCfgModem),
+	DEVCFG_ENTRY("835full", "835 Modem (Full)", kCfgModem),
+	DEVCFG_ENTRY("1030", "1030 Modem", kCfgModem),
+	DEVCFG_ENTRY("1030full", "1030 Modem (Full)", kCfgModem),
+	DEVCFG_ENTRY("sx212", "SX212 Modem", kCfgModem),
+	DEVCFG_ENTRY("820", "820 Printer", kCfgPrinter),
+	DEVCFG_ENTRY("1025", "1025 Printer", kCfgPrinter),
+	DEVCFG_ENTRY("1029", "1029 Printer", kCfgPrinter),
+	DEVCFG_ENTRY("pclink", "PCLink", kCfgPCLink),
+	DEVCFG_ENTRY("hostfs", "Host FS Bridge", kCfgHostFS),
+	DEVCFG_ENTRY("customdev", "Custom Device", kCfgCustomDev),
+};
+
+#undef DEVCFG_ENTRY
+
+static const DevCfgTagMapping *FindDevCfgMapping(const char *tag) {
+	for (const auto& m : kDevCfgMappings) {
+		if (strcmp(m.tag, tag) == 0)
+			return &m;
+	}
+	return nullptr;
+}
+
+// Structured device config editor — returns true if values were changed
+static bool DrawStructuredDeviceConfig(ATPropertySet& props, const DevCfgTagMapping& mapping) {
+	bool changed = false;
+
+	for (int i = 0; i < mapping.controlCount; i++) {
+		const DevCfgControl& ctrl = mapping.controls[i];
+		ImGui::PushID(ctrl.propKey);
+
+		switch (ctrl.type) {
+			case DevCfgType::Checkbox: {
+				bool val = props.GetBool(ctrl.propKey, ctrl.defaultBool);
+				if (ImGui::Checkbox(ctrl.label, &val)) {
+					props.SetBool(ctrl.propKey, val);
+					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::IntDropdown: {
+				int val = (int)props.GetUint32(ctrl.propKey, 0);
+
+				// Find current selection index
+				int selIdx = 0;
+				for (int j = 0; j < ctrl.choiceCount; j++) {
+					if (ctrl.choices[j].value == val) {
+						selIdx = j;
+						break;
+					}
+				}
+
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::BeginCombo(ctrl.label, ctrl.choices[selIdx].name)) {
+					for (int j = 0; j < ctrl.choiceCount; j++) {
+						bool selected = (j == selIdx);
+						if (ImGui::Selectable(ctrl.choices[j].name, selected)) {
+							props.SetUint32(ctrl.propKey, (uint32)ctrl.choices[j].value);
+							changed = true;
+						}
+						if (selected)
+							ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+				break;
+			}
+
+			case DevCfgType::StringEdit: {
+				VDStringA u8val;
+				const wchar_t *wval = props.GetString(ctrl.propKey);
+				if (wval)
+					u8val = VDTextWToU8(VDStringW(wval));
+
+				char buf[512];
+				strncpy(buf, u8val.c_str(), sizeof(buf) - 1);
+				buf[sizeof(buf) - 1] = 0;
+
+				ImGui::SetNextItemWidth(300);
+				if (ImGui::InputText(ctrl.label, buf, sizeof(buf))) {
+					VDStringW wstr = VDTextU8ToW(VDStringA(buf));
+					props.SetString(ctrl.propKey, wstr.c_str());
+					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::PathSelect: {
+				VDStringA u8val;
+				const wchar_t *wval = props.GetString(ctrl.propKey);
+				if (wval)
+					u8val = VDTextWToU8(VDStringW(wval));
+
+				char buf[512];
+				strncpy(buf, u8val.c_str(), sizeof(buf) - 1);
+				buf[sizeof(buf) - 1] = 0;
+
+				ImGui::SetNextItemWidth(250);
+				if (ImGui::InputText(ctrl.label, buf, sizeof(buf))) {
+					VDStringW wstr = VDTextU8ToW(VDStringA(buf));
+					props.SetString(ctrl.propKey, wstr.c_str());
+					changed = true;
+				}
+
+				ImGui::SameLine();
+				char browseId[32];
+				snprintf(browseId, sizeof(browseId), "Browse##%s", ctrl.propKey);
+				if (ImGui::Button(browseId)) {
+					VDStringW path = ATLinuxOpenFileDialog(
+						ctrl.browseTitle ? ctrl.browseTitle : "Select Path",
+						"All Files|*");
+					if (!path.empty()) {
+						props.SetString(ctrl.propKey, path.c_str());
+						changed = true;
+					}
+				}
+				break;
+			}
+		}
+
+		ImGui::PopID();
+	}
+
+	return changed;
+}
+
 // Cartridge browser state
 static bool s_cartMapperActive = false;
 static vdfastvector<uint8> s_cartLoadBuffer;
@@ -137,6 +391,19 @@ static bool s_showNewDisk = false;
 static int s_newDiskSlot = 0;
 static int s_newDiskFormat = 1;  // 0=Custom, 1=SD 720, 2=MD 1040, 3=DD 720, 4=DSDD 1440
 static int s_newDiskFS = 0;      // 0=None, 1=DOS 2, 2=MyDOS
+
+// Disk explorer state
+static bool s_showDiskExplorer = false;
+static int s_diskExplorerSlot = -1;
+static IATDiskFS *s_diskFS = nullptr;
+static ATDiskFSKey s_diskCurDir = ATDiskFSKey::None;
+static std::vector<ATDiskFSEntryInfo> s_diskEntries;
+static int s_diskSelectedIdx = -1;
+static std::vector<ATDiskFSKey> s_diskDirStack;
+static bool s_diskReadOnly = false;
+static std::string s_diskFSInfoStr;
+static char s_diskRenameBuffer[64] = {};
+static bool s_diskRenameActive = false;
 
 // Toast notification system
 struct Toast {
@@ -981,6 +1248,40 @@ static void DrawMenuBar() {
 							di.SetWriteMode(readOnly ? kATMediaWriteMode_VRW : kATMediaWriteMode_RO);
 						}
 
+						if (ImGui::MenuItem("Explore...")) {
+							s_showDiskExplorer = true;
+							s_diskExplorerSlot = i;
+							// Will open FS on first draw
+							if (s_diskFS) {
+								try { s_diskFS->Flush(); } catch (...) {}
+								delete s_diskFS;
+								s_diskFS = nullptr;
+							}
+							s_diskEntries.clear();
+							s_diskDirStack.clear();
+							s_diskCurDir = ATDiskFSKey::None;
+							s_diskSelectedIdx = -1;
+							s_diskReadOnly = readOnly;
+							s_diskFSInfoStr.clear();
+							try {
+								IATDiskImage *img = di.GetDiskImage();
+								if (img) {
+									s_diskFS = ATDiskMountImage(img, readOnly);
+									ATDiskFSInfo fsInfo;
+									s_diskFS->GetInfo(fsInfo);
+									char infoStr[128];
+									snprintf(infoStr, sizeof(infoStr), "%s  |  %u free blocks (%u bytes/block)",
+										fsInfo.mFSType.c_str(), fsInfo.mFreeBlocks, fsInfo.mBlockSize);
+									s_diskFSInfoStr = infoStr;
+								}
+							} catch (const std::exception& e) {
+								char msg[256];
+								snprintf(msg, sizeof(msg), "Mount FS failed: %s", e.what());
+								ShowToast(msg);
+								s_showDiskExplorer = false;
+							}
+						}
+
 						ImGui::Separator();
 
 						snprintf(label, sizeof(label), "Unmount D%d", i + 1);
@@ -1367,6 +1668,7 @@ static void DrawMenuBar() {
 			ImGui::Separator();
 			ImGui::MenuItem("Source Code", nullptr, &ATImGuiDebuggerShowSourceCode());
 			ImGui::MenuItem("Printer Output", nullptr, &ATImGuiDebuggerShowPrinterOutput());
+			ImGui::MenuItem("Profiler", nullptr, &ATImGuiDebuggerShowProfiler());
 			ImGui::EndMenu();
 		}
 
@@ -2430,6 +2732,329 @@ static void DrawAudioOptions() {
 	ImGui::End();
 }
 
+// ============= Disk Explorer =============
+
+static void DiskExplorerRefresh() {
+	s_diskEntries.clear();
+	s_diskSelectedIdx = -1;
+	if (!s_diskFS)
+		return;
+
+	ATDiskFSEntryInfo info;
+	ATDiskFSFindHandle h = s_diskFS->FindFirst(s_diskCurDir, info);
+	if (h != ATDiskFSFindHandle::Invalid) {
+		do {
+			s_diskEntries.push_back(info);
+		} while (s_diskFS->FindNext(h, info));
+		s_diskFS->FindEnd(h);
+	}
+
+	// Sort: directories first, then alphabetical
+	std::sort(s_diskEntries.begin(), s_diskEntries.end(),
+		[](const ATDiskFSEntryInfo& a, const ATDiskFSEntryInfo& b) {
+			if (a.mbIsDirectory != b.mbIsDirectory)
+				return a.mbIsDirectory > b.mbIsDirectory;
+			return a.mFileName < b.mFileName;
+		});
+}
+
+static void DiskExplorerClose() {
+	if (s_diskFS) {
+		try { s_diskFS->Flush(); } catch (...) {}
+		delete s_diskFS;
+		s_diskFS = nullptr;
+	}
+	s_diskEntries.clear();
+	s_diskDirStack.clear();
+	s_diskSelectedIdx = -1;
+	s_diskCurDir = ATDiskFSKey::None;
+	s_showDiskExplorer = false;
+}
+
+static void DrawDiskExplorer() {
+	if (!s_showDiskExplorer)
+		return;
+
+	if (!s_diskFS) {
+		s_showDiskExplorer = false;
+		return;
+	}
+
+	// First open: refresh listing
+	if (s_diskEntries.empty() && s_diskSelectedIdx == -1)
+		DiskExplorerRefresh();
+
+	char title[64];
+	snprintf(title, sizeof(title), "Disk Explorer - D%d###diskexp", s_diskExplorerSlot + 1);
+
+	ImGui::SetNextWindowSize(ImVec2(550, 400), ImGuiCond_FirstUseEver);
+	bool open = true;
+	if (!ImGui::Begin(title, &open)) {
+		ImGui::End();
+		if (!open)
+			DiskExplorerClose();
+		return;
+	}
+
+	if (!open) {
+		ImGui::End();
+		DiskExplorerClose();
+		return;
+	}
+
+	// FS info bar
+	if (!s_diskFSInfoStr.empty()) {
+		ImGui::TextDisabled("%s", s_diskFSInfoStr.c_str());
+		if (s_diskReadOnly) {
+			ImGui::SameLine();
+			ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.3f, 1.0f), "[READ ONLY]");
+		}
+	}
+
+	// Toolbar
+	bool canUp = !s_diskDirStack.empty();
+	if (ImGui::Button("Up") && canUp) {
+		s_diskCurDir = s_diskDirStack.back();
+		s_diskDirStack.pop_back();
+		DiskExplorerRefresh();
+	}
+
+	ImGui::SameLine();
+	bool hasSel = s_diskSelectedIdx >= 0 && s_diskSelectedIdx < (int)s_diskEntries.size();
+	bool selIsFile = hasSel && !s_diskEntries[s_diskSelectedIdx].mbIsDirectory;
+
+	if (ImGui::Button("Extract") && selIsFile) {
+		const ATDiskFSEntryInfo& entry = s_diskEntries[s_diskSelectedIdx];
+		VDStringW savePath = ATLinuxSaveFileDialog("Extract File", "All Files|*");
+		if (!savePath.empty()) {
+			try {
+				vdfastvector<uint8> data;
+				s_diskFS->ReadFile(entry.mKey, data);
+				VDFile f(savePath.c_str(), nsVDFile::kWrite | nsVDFile::kCreateAlways);
+				if (!data.empty())
+					f.write(data.data(), (long)data.size());
+				f.close();
+				ShowToast("File extracted");
+			} catch (const std::exception& e) {
+				char msg[256];
+				snprintf(msg, sizeof(msg), "Extract failed: %s", e.what());
+				ShowToast(msg);
+			}
+		}
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Import") && !s_diskReadOnly) {
+		VDStringW importPath = ATLinuxOpenFileDialog("Import File", "All Files|*");
+		if (!importPath.empty()) {
+			try {
+				VDFile f(importPath.c_str(), nsVDFile::kRead | nsVDFile::kOpenExisting);
+				sint64 len = f.size();
+				if (len > 0x1000000) {
+					ShowToast("File too large (>16MB)");
+				} else {
+					vdfastvector<uint8> data((size_t)len);
+					if (len > 0)
+						f.read(data.data(), (long)len);
+					f.close();
+
+					// Use filename from path
+					const wchar_t *fname = VDFileSplitPath(importPath.c_str());
+					VDStringA u8name = VDTextWToU8(VDStringW(fname));
+					// Truncate to 8.3 if needed (Atari DOS)
+					if (u8name.size() > 12)
+						u8name.resize(12);
+					// Convert to uppercase
+					for (char& c : u8name)
+						c = (char)toupper((unsigned char)c);
+
+					s_diskFS->WriteFile(s_diskCurDir, u8name.c_str(), data.data(), (uint32)data.size());
+					s_diskFS->Flush();
+					DiskExplorerRefresh();
+					ShowToast("File imported");
+				}
+			} catch (const std::exception& e) {
+				char msg[256];
+				snprintf(msg, sizeof(msg), "Import failed: %s", e.what());
+				ShowToast(msg);
+			}
+		}
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Delete") && hasSel && !s_diskReadOnly) {
+		ImGui::OpenPopup("Confirm Delete");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Rename") && selIsFile && !s_diskReadOnly) {
+		const ATDiskFSEntryInfo& entry = s_diskEntries[s_diskSelectedIdx];
+		strncpy(s_diskRenameBuffer, entry.mFileName.c_str(), sizeof(s_diskRenameBuffer) - 1);
+		s_diskRenameBuffer[sizeof(s_diskRenameBuffer) - 1] = 0;
+		s_diskRenameActive = true;
+		ImGui::OpenPopup("Rename File");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("New Dir") && !s_diskReadOnly) {
+		ImGui::OpenPopup("New Directory");
+	}
+
+	// Delete confirmation popup
+	if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		if (hasSel) {
+			ImGui::Text("Delete \"%s\"?", s_diskEntries[s_diskSelectedIdx].mFileName.c_str());
+		}
+
+		if (ImGui::Button("Delete", ImVec2(80, 0))) {
+			if (hasSel) {
+				try {
+					s_diskFS->DeleteFile(s_diskEntries[s_diskSelectedIdx].mKey);
+					s_diskFS->Flush();
+					DiskExplorerRefresh();
+					ShowToast("File deleted");
+				} catch (const std::exception& e) {
+					char msg[256];
+					snprintf(msg, sizeof(msg), "Delete failed: %s", e.what());
+					ShowToast(msg);
+				}
+			}
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(80, 0)))
+			ImGui::CloseCurrentPopup();
+
+		ImGui::EndPopup();
+	}
+
+	// Rename popup
+	if (ImGui::BeginPopupModal("Rename File", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::SetNextItemWidth(200);
+		bool apply = ImGui::InputText("##rename", s_diskRenameBuffer, sizeof(s_diskRenameBuffer),
+			ImGuiInputTextFlags_EnterReturnsTrue);
+
+		if (apply || ImGui::Button("OK", ImVec2(80, 0))) {
+			if (hasSel && s_diskRenameBuffer[0]) {
+				try {
+					s_diskFS->RenameFile(s_diskEntries[s_diskSelectedIdx].mKey, s_diskRenameBuffer);
+					s_diskFS->Flush();
+					DiskExplorerRefresh();
+					ShowToast("File renamed");
+				} catch (const std::exception& e) {
+					char msg[256];
+					snprintf(msg, sizeof(msg), "Rename failed: %s", e.what());
+					ShowToast(msg);
+				}
+			}
+			s_diskRenameActive = false;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+			s_diskRenameActive = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+
+	// New directory popup
+	static char s_newDirName[64] = {};
+	if (ImGui::BeginPopupModal("New Directory", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::SetNextItemWidth(200);
+		bool apply = ImGui::InputText("Name##newdir", s_newDirName, sizeof(s_newDirName),
+			ImGuiInputTextFlags_EnterReturnsTrue);
+
+		if (apply || ImGui::Button("Create", ImVec2(80, 0))) {
+			if (s_newDirName[0]) {
+				try {
+					s_diskFS->CreateDir(s_diskCurDir, s_newDirName);
+					s_diskFS->Flush();
+					DiskExplorerRefresh();
+					ShowToast("Directory created");
+				} catch (const std::exception& e) {
+					char msg[256];
+					snprintf(msg, sizeof(msg), "Create dir failed: %s", e.what());
+					ShowToast(msg);
+				}
+			}
+			s_newDirName[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+			s_newDirName[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+
+	ImGui::Separator();
+
+	// File listing table
+	if (ImGui::BeginTable("##diskfiles", 4,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+		ImVec2(0, -ImGui::GetFrameHeightWithSpacing())))
+	{
+		ImGui::TableSetupColumn("Name", 0, 3.0f);
+		ImGui::TableSetupColumn("Sectors", 0, 1.0f);
+		ImGui::TableSetupColumn("Bytes", 0, 1.0f);
+		ImGui::TableSetupColumn("Date", 0, 2.0f);
+		ImGui::TableHeadersRow();
+
+		for (int i = 0; i < (int)s_diskEntries.size(); ++i) {
+			const ATDiskFSEntryInfo& entry = s_diskEntries[i];
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			char nameStr[64];
+			if (entry.mbIsDirectory)
+				snprintf(nameStr, sizeof(nameStr), "[%s]", entry.mFileName.c_str());
+			else
+				snprintf(nameStr, sizeof(nameStr), "%s", entry.mFileName.c_str());
+
+			bool selected = (s_diskSelectedIdx == i);
+			if (ImGui::Selectable(nameStr, selected,
+				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
+			{
+				s_diskSelectedIdx = i;
+
+				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && entry.mbIsDirectory) {
+					s_diskDirStack.push_back(s_diskCurDir);
+					s_diskCurDir = entry.mKey;
+					DiskExplorerRefresh();
+				}
+			}
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%u", entry.mSectors);
+
+			ImGui::TableNextColumn();
+			ImGui::Text("%u", entry.mBytes);
+
+			ImGui::TableNextColumn();
+			if (entry.mbDateValid) {
+				ImGui::Text("%04u-%02u-%02u %02u:%02u",
+					entry.mDate.mYear, entry.mDate.mMonth, entry.mDate.mDay,
+					entry.mDate.mHour, entry.mDate.mMinute);
+			} else {
+				ImGui::TextDisabled("---");
+			}
+		}
+
+		ImGui::EndTable();
+	}
+
+	// Status bar
+	ImGui::Text("%d items", (int)s_diskEntries.size());
+
+	ImGui::End();
+}
+
 // ============= Device Configuration Window =============
 
 // Generic property set editor - renders ImGui controls for each property
@@ -2690,10 +3315,18 @@ static void DrawDeviceManager() {
 		const wchar_t *devName = info.mpDef ? info.mpDef->mpName : L"Device";
 		VDStringA u8name = VDTextWToU8(VDStringW(devName));
 
-		ImGui::Text("Configure: %s", u8name.c_str());
+		const DevCfgTagMapping *mapping = FindDevCfgMapping(s_devEditTag.c_str());
 
-		ImGui::BeginChild("##devcfg", ImVec2(0, 150), ImGuiChildFlags_Borders);
-		DrawPropertySetEditor(s_devEditProps);
+		if (mapping)
+			ImGui::Text("Configure: %s", mapping->title);
+		else
+			ImGui::Text("Configure: %s", u8name.c_str());
+
+		ImGui::BeginChild("##devcfg", ImVec2(0, 180), ImGuiChildFlags_Borders);
+		if (mapping)
+			DrawStructuredDeviceConfig(s_devEditProps, *mapping);
+		else
+			DrawPropertySetEditor(s_devEditProps);
 		ImGui::EndChild();
 
 		if (ImGui::Button("Apply")) {
@@ -3725,6 +4358,7 @@ void ATImGuiEmulatorDraw() {
 	DrawKeyboardConfig();
 	DrawInputSetup();
 	DrawDeviceManager();
+	DrawDiskExplorer();
 	DrawStatusBar();
 	DrawAbout();
 	DrawShortcuts();
@@ -3750,6 +4384,12 @@ void ATImGuiEmulatorShutdown() {
 	s_fwList.clear();
 	s_devSelectedDevice = nullptr;
 	s_devEditProps.Clear();
+	if (s_diskFS) {
+		try { s_diskFS->Flush(); } catch (...) {}
+		delete s_diskFS;
+		s_diskFS = nullptr;
+	}
+	s_diskEntries.clear();
 }
 
 void ATImGuiRequestQuit() {

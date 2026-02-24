@@ -23,6 +23,7 @@
 class ATIRQController;
 
 #include "simulator.h"
+#include "profiler.h"
 #include "printeroutput.h"
 
 #include <cstdio>
@@ -146,6 +147,28 @@ static size_t s_printerLastOffset = 0;
 static bool s_printerNeedsRefresh = true;
 static int s_printerSelectedOutput = 0;
 
+// Profiler window state
+static bool s_showProfiler = false;
+static bool s_profilerRunning = false;
+static ATProfileMode s_profilerMode = kATProfileMode_Insns;
+static ATProfileCounterMode s_profilerC1 = kATProfileCounterMode_None;
+static ATProfileCounterMode s_profilerC2 = kATProfileCounterMode_None;
+static ATProfileSession s_profilerSession;
+static bool s_profilerHasData = false;
+static vdrefptr<ATProfileMergedFrame> s_profilerMerged;
+
+struct ProfileEntry {
+	uint32 addr;
+	std::string sym;
+	uint32 calls;
+	uint32 insns;
+	uint32 cycles;
+};
+
+static std::vector<ProfileEntry> s_profilerEntries;
+static int s_profilerSortCol = 3; // default: cycles
+static bool s_profilerSortAsc = false;
+
 void ATImGuiDebuggerInit() {
 	IATDebugger *dbg = ATGetDebugger();
 	if (!dbg)
@@ -156,6 +179,17 @@ void ATImGuiDebuggerInit() {
 }
 
 void ATImGuiDebuggerShutdown() {
+	// Stop profiling if running
+	if (s_profilerRunning) {
+		ATCPUProfiler *prof = g_sim.GetProfiler();
+		if (prof && prof->IsRunning())
+			prof->End();
+		s_profilerRunning = false;
+		g_sim.SetProfilingEnabled(false);
+	}
+	s_profilerMerged.clear();
+	s_profilerEntries.clear();
+
 	if (s_pClient) {
 		IATDebugger *dbg = ATGetDebugger();
 		if (dbg)
@@ -2304,6 +2338,244 @@ static void DrawPrinterOutput() {
 	ImGui::End();
 }
 
+// ============= Profiler Window =============
+
+static void ProfilerBuildEntries() {
+	s_profilerEntries.clear();
+	if (!s_profilerMerged)
+		return;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	for (const ATProfileRecord& rec : s_profilerMerged->mRecords) {
+		ProfileEntry e;
+		e.addr = rec.mAddress;
+		e.calls = rec.mCalls;
+		e.insns = rec.mInsns;
+		e.cycles = rec.mCycles;
+
+		if (dbs) {
+			ATSymbol sym {};
+			if (dbs->LookupSymbol(rec.mAddress, kATSymbol_Execute, sym) && sym.mpName)
+				e.sym = sym.mpName;
+		}
+
+		s_profilerEntries.push_back(std::move(e));
+	}
+}
+
+static void ProfilerSort() {
+	std::sort(s_profilerEntries.begin(), s_profilerEntries.end(),
+		[](const ProfileEntry& a, const ProfileEntry& b) {
+			switch (s_profilerSortCol) {
+				case 0: return s_profilerSortAsc ? a.addr < b.addr : a.addr > b.addr;
+				case 1: return s_profilerSortAsc ? a.sym < b.sym : a.sym > b.sym;
+				case 2: return s_profilerSortAsc ? a.calls < b.calls : a.calls > b.calls;
+				case 3: return s_profilerSortAsc ? a.cycles < b.cycles : a.cycles > b.cycles;
+				case 4: return s_profilerSortAsc ? a.insns < b.insns : a.insns > b.insns;
+				default: return false;
+			}
+		});
+}
+
+static void ProfilerStart() {
+	g_sim.SetProfilingEnabled(true);
+	ATCPUProfiler *prof = g_sim.GetProfiler();
+	if (prof) {
+		prof->Start(s_profilerMode, s_profilerC1, s_profilerC2);
+		s_profilerRunning = true;
+		s_profilerHasData = false;
+		s_profilerEntries.clear();
+		s_profilerMerged.clear();
+	}
+}
+
+static void ProfilerStop() {
+	ATCPUProfiler *prof = g_sim.GetProfiler();
+	if (prof && prof->IsRunning()) {
+		prof->End();
+		prof->GetSession(s_profilerSession);
+
+		uint32 frameCount = (uint32)s_profilerSession.mpFrames.size();
+		if (frameCount > 0) {
+			ATProfileMergedFrame *merged = nullptr;
+			ATProfileMergeFrames(s_profilerSession, 0, frameCount, &merged);
+			s_profilerMerged.clear();
+			s_profilerMerged.set(merged);  // takes ownership without extra AddRef
+
+			ProfilerBuildEntries();
+			ProfilerSort();
+			s_profilerHasData = true;
+		}
+	}
+	s_profilerRunning = false;
+	g_sim.SetProfilingEnabled(false);
+}
+
+static const char *kProfileModeNames[] = {
+	"Instructions",
+	"Functions",
+	"Call Graph",
+	"Basic Block",
+	"Basic Lines",
+};
+
+static const char *kCounterModeNames[] = {
+	"None",
+	"Branch Taken",
+	"Branch Not Taken",
+	"Page Crossing",
+	"Redundant Op",
+};
+
+static void DrawProfiler() {
+	if (!s_showProfiler)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Profiler", &s_showProfiler)) {
+		ImGui::End();
+		return;
+	}
+
+	// Mode selection (disabled while running)
+	ImGui::Text("Mode:");
+	ImGui::SameLine();
+	for (int i = 0; i < kATProfileModeCount; i++) {
+		if (i > 0)
+			ImGui::SameLine();
+		ImGui::BeginDisabled(s_profilerRunning);
+		if (ImGui::RadioButton(kProfileModeNames[i], (int)s_profilerMode == i))
+			s_profilerMode = (ATProfileMode)i;
+		ImGui::EndDisabled();
+	}
+
+	// Counter mode dropdowns
+	ImGui::BeginDisabled(s_profilerRunning);
+	ImGui::SetNextItemWidth(140);
+	if (ImGui::BeginCombo("Counter 1", kCounterModeNames[(int)s_profilerC1])) {
+		for (int i = 0; i <= (int)kATProfileCounterMode_RedundantOp; i++) {
+			bool sel = ((int)s_profilerC1 == i);
+			if (ImGui::Selectable(kCounterModeNames[i], sel))
+				s_profilerC1 = (ATProfileCounterMode)i;
+			if (sel)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::SameLine();
+	ImGui::SetNextItemWidth(140);
+	if (ImGui::BeginCombo("Counter 2", kCounterModeNames[(int)s_profilerC2])) {
+		for (int i = 0; i <= (int)kATProfileCounterMode_RedundantOp; i++) {
+			bool sel = ((int)s_profilerC2 == i);
+			if (ImGui::Selectable(kCounterModeNames[i], sel))
+				s_profilerC2 = (ATProfileCounterMode)i;
+			if (sel)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+	ImGui::EndDisabled();
+
+	// Start/Stop button
+	if (s_profilerRunning) {
+		if (ImGui::Button("Stop Profiling")) {
+			ProfilerStop();
+		}
+		ImGui::SameLine();
+		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "RECORDING");
+	} else {
+		if (ImGui::Button("Start Profiling")) {
+			ProfilerStart();
+		}
+	}
+
+	// Summary line
+	if (s_profilerHasData && s_profilerMerged) {
+		uint32 frameCount = (uint32)s_profilerSession.mpFrames.size();
+		ImGui::Text("Frames: %u  |  Cycles: %u  |  Insns: %u  |  Entries: %u",
+			frameCount, s_profilerMerged->mTotalCycles, s_profilerMerged->mTotalInsns,
+			(uint32)s_profilerEntries.size());
+	}
+
+	ImGui::Separator();
+
+	// Results table
+	if (s_profilerHasData && !s_profilerEntries.empty()) {
+		uint32 totalCycles = s_profilerMerged ? s_profilerMerged->mTotalCycles : 1;
+		if (totalCycles == 0) totalCycles = 1;
+
+		if (ImGui::BeginTable("##profresults", 5,
+			ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+				| ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable
+				| ImGuiTableFlags_SizingStretchProp,
+			ImVec2(0, 0)))
+		{
+			ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_DefaultSort, 1.0f);
+			ImGui::TableSetupColumn("Symbol", 0, 2.0f);
+			ImGui::TableSetupColumn("Calls", 0, 1.0f);
+			ImGui::TableSetupColumn("Cycles", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 1.5f);
+			ImGui::TableSetupColumn("Insns", 0, 1.0f);
+			ImGui::TableSetupScrollFreeze(0, 1);
+			ImGui::TableHeadersRow();
+
+			// Handle sorting
+			if (ImGuiTableSortSpecs *sorts = ImGui::TableGetSortSpecs()) {
+				if (sorts->SpecsDirty && sorts->SpecsCount > 0) {
+					s_profilerSortCol = sorts->Specs[0].ColumnIndex;
+					s_profilerSortAsc = (sorts->Specs[0].SortDirection == ImGuiSortDirection_Ascending);
+					ProfilerSort();
+					sorts->SpecsDirty = false;
+				}
+			}
+
+			// Use clipper for large result sets
+			ImGuiListClipper clipper;
+			clipper.Begin((int)s_profilerEntries.size());
+			while (clipper.Step()) {
+				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+					const ProfileEntry& e = s_profilerEntries[row];
+					float pct = (float)e.cycles * 100.0f / (float)totalCycles;
+
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+
+					char addrStr[16];
+					snprintf(addrStr, sizeof(addrStr), "$%04X", e.addr);
+					if (ImGui::Selectable(addrStr, false, ImGuiSelectableFlags_SpanAllColumns)) {
+						// Navigate disassembly to this address
+						s_disasmAddr = e.addr;
+						s_disasmFollowPC = false;
+						snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", e.addr);
+						s_showDisassembly = true;
+					}
+
+					ImGui::TableNextColumn();
+					if (!e.sym.empty())
+						ImGui::Text("%s", e.sym.c_str());
+					else
+						ImGui::TextDisabled("---");
+
+					ImGui::TableNextColumn();
+					ImGui::Text("%u", e.calls);
+
+					ImGui::TableNextColumn();
+					ImGui::Text("%u (%.1f%%)", e.cycles, pct);
+
+					ImGui::TableNextColumn();
+					ImGui::Text("%u", e.insns);
+				}
+			}
+
+			ImGui::EndTable();
+		}
+	} else if (!s_profilerRunning) {
+		ImGui::TextDisabled("No profiling data. Click \"Start Profiling\" to begin.");
+	}
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -2316,6 +2588,7 @@ bool& ATImGuiDebuggerShowCallStack() { return s_showCallStack; }
 bool& ATImGuiDebuggerShowHistory() { return s_showHistory; }
 bool& ATImGuiDebuggerShowSourceCode() { return s_showSourceCode; }
 bool& ATImGuiDebuggerShowPrinterOutput() { return s_showPrinterOutput; }
+bool& ATImGuiDebuggerShowProfiler() { return s_showProfiler; }
 
 // ============= Main Draw =============
 
@@ -2330,6 +2603,7 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawHistory();
 	DrawSourceCode();
 	DrawPrinterOutput();
+	DrawProfiler();
 }
 
 void ATImGuiDebuggerDraw() {
