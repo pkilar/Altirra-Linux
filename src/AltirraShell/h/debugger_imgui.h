@@ -13,5 +13,7 @@ bool& ATImGuiDebuggerShowDisassembly();
 bool& ATImGuiDebuggerShowMemory();
 bool& ATImGuiDebuggerShowConsole();
 bool& ATImGuiDebuggerShowBreakpoints();
+bool& ATImGuiDebuggerShowWatch();
+bool& ATImGuiDebuggerShowCallStack();
 
 #endif

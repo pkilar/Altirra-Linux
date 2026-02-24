@@ -62,6 +62,7 @@ static bool s_showMemory = true;
 static bool s_showConsole = true;
 static bool s_showBreakpoints = true;
 static bool s_showWatch = false;
+static bool s_showCallStack = false;
 
 // Watch window state
 static char s_watchAddrBuf[16] = "";
@@ -185,6 +186,7 @@ static void DrawToolbar() {
 			ImGui::MenuItem("Console", nullptr, &s_showConsole);
 			ImGui::MenuItem("Breakpoints", nullptr, &s_showBreakpoints);
 			ImGui::MenuItem("Watch", nullptr, &s_showWatch);
+			ImGui::MenuItem("Call Stack", nullptr, &s_showCallStack);
 			ImGui::EndMenu();
 		}
 
@@ -663,6 +665,17 @@ static void DrawConsole() {
 		return;
 	}
 
+	// Copy / Clear buttons
+	if (ImGui::SmallButton("Copy All")) {
+		std::lock_guard<std::mutex> lock(s_consoleMutex);
+		ImGui::SetClipboardText(s_consoleBuffer.c_str());
+	}
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Clear")) {
+		std::lock_guard<std::mutex> lock(s_consoleMutex);
+		s_consoleBuffer.clear();
+	}
+
 	// Output area
 	float inputHeight = ImGui::GetFrameHeightWithSpacing();
 	if (ImGui::BeginChild("##consoleout", ImVec2(0, -inputHeight), ImGuiChildFlags_Border)) {
@@ -848,6 +861,65 @@ static void DrawWatch() {
 	ImGui::End();
 }
 
+// ============= Call Stack Window =============
+
+static void DrawCallStack() {
+	if (!s_showCallStack)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(340, 250), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Call Stack", &s_showCallStack)) {
+		ImGui::End();
+		return;
+	}
+
+	IATDebugger *dbg = ATGetDebugger();
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	if (!dbg || !s_pClient || !s_pClient->mbStateValid) {
+		ImGui::TextDisabled("No debugger state available");
+		ImGui::End();
+		return;
+	}
+
+	ATCallStackFrame frames[16];
+	uint32 n = dbg->GetCallStack(frames, 16);
+	uint32 framePC = dbg->GetFrameExtPC();
+
+	for (uint32 i = 0; i < n; ++i) {
+		const ATCallStackFrame& fr = frames[i];
+
+		ATSymbol sym {};
+		const char *symname = "";
+		if (dbs)
+			dbs->LookupSymbol(fr.mPC, kATSymbol_Execute, sym);
+		if (sym.mpName)
+			symname = sym.mpName;
+
+		bool isCurrent = ((framePC ^ fr.mPC) & 0xFFFF) == 0;
+		char label[128];
+		snprintf(label, sizeof(label), "%c%04X: %c%04X  %s",
+			isCurrent ? '>' : ' ',
+			fr.mSP,
+			(fr.mP & 0x04) ? '*' : ' ',
+			fr.mPC,
+			symname);
+
+		if (ImGui::Selectable(label, isCurrent)) {
+			dbg->SetFramePC(fr.mPC);
+			// Navigate disassembly to this frame
+			s_disasmAddr = fr.mPC;
+			s_disasmFollowPC = false;
+			snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", fr.mPC);
+		}
+	}
+
+	if (n == 0)
+		ImGui::TextDisabled("(empty)");
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -855,6 +927,8 @@ bool& ATImGuiDebuggerShowDisassembly() { return s_showDisassembly; }
 bool& ATImGuiDebuggerShowMemory() { return s_showMemory; }
 bool& ATImGuiDebuggerShowConsole() { return s_showConsole; }
 bool& ATImGuiDebuggerShowBreakpoints() { return s_showBreakpoints; }
+bool& ATImGuiDebuggerShowWatch() { return s_showWatch; }
+bool& ATImGuiDebuggerShowCallStack() { return s_showCallStack; }
 
 // ============= Main Draw =============
 
@@ -865,6 +939,7 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawConsole();
 	DrawBreakpoints();
 	DrawWatch();
+	DrawCallStack();
 }
 
 void ATImGuiDebuggerDraw() {

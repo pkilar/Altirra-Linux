@@ -1361,6 +1361,8 @@ static void DrawMenuBar() {
 			ImGui::MenuItem("Memory", nullptr, &ATImGuiDebuggerShowMemory());
 			ImGui::MenuItem("Console", nullptr, &ATImGuiDebuggerShowConsole());
 			ImGui::MenuItem("Breakpoints", nullptr, &ATImGuiDebuggerShowBreakpoints());
+			ImGui::MenuItem("Watch", nullptr, &ATImGuiDebuggerShowWatch());
+			ImGui::MenuItem("Call Stack", nullptr, &ATImGuiDebuggerShowCallStack());
 			ImGui::EndMenu();
 		}
 
