@@ -740,6 +740,53 @@ static void DrawMemory() {
 		}
 	}
 
+	// Memory search (hex byte pattern)
+	static char s_memSearchBuf[64] = "";
+	static bool s_memSearchActive = false;
+	ImGui::SameLine(0, 8);
+	if (ImGui::SmallButton("Find"))
+		s_memSearchActive = !s_memSearchActive;
+	if (s_memSearchActive) {
+		ImGui::SetNextItemWidth(160);
+		bool doSearch = ImGui::InputText("##memsearch", s_memSearchBuf, sizeof(s_memSearchBuf),
+			ImGuiInputTextFlags_EnterReturnsTrue);
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Next") || doSearch) {
+			// Parse hex bytes from search string
+			uint8 pattern[32];
+			int patLen = 0;
+			const char *p = s_memSearchBuf;
+			while (*p && patLen < 32) {
+				while (*p == ' ') p++;
+				unsigned int b;
+				if (sscanf(p, "%2x", &b) == 1) {
+					pattern[patLen++] = (uint8)b;
+					p += 2;
+				} else {
+					break;
+				}
+			}
+			if (patLen > 0) {
+				// Search from current address + 1
+				for (uint32 off = 1; off < 0x10000; off++) {
+					uint16 testAddr = (s_memoryAddr + off) & 0xFFFF;
+					bool match = true;
+					for (int j = 0; j < patLen && match; j++) {
+						if (target->DebugReadByte((testAddr + j) & 0xFFFF) != pattern[j])
+							match = false;
+					}
+					if (match) {
+						s_memoryAddr = testAddr;
+						snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", testAddr);
+						break;
+					}
+				}
+			}
+		}
+		ImGui::SameLine();
+		ImGui::TextDisabled("hex bytes (e.g. A9 00 8D)");
+	}
+
 	ImGui::Separator();
 
 	// 16x16 hex dump with inline editing
