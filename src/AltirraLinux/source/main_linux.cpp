@@ -452,6 +452,14 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 	// Enable vsync
 	SDL_GL_SetSwapInterval(1);
 
+	// On Wayland, the window may not be visible until the first buffer is
+	// committed. Do a clear + swap so the compositor shows the window
+	// immediately, and raise the window to request focus.
+	glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+	glClear(GL_COLOR_BUFFER_BIT);
+	SDL_GL_SwapWindow(window);
+	SDL_RaiseWindow(window);
+
 	return true;
 }
 
@@ -978,7 +986,8 @@ int main(int argc, char *argv[]) {
 	ATSetFullscreenCallback(SetFullscreenImpl);
 	ATSetWindowSizeCallback(SetWindowSizeImpl);
 
-	fprintf(stderr, "SDL2/OpenGL initialized\n");
+	const char *videoDriver = SDL_GetCurrentVideoDriver();
+	fprintf(stderr, "SDL2/OpenGL initialized (video driver: %s)\n", videoDriver ? videoDriver : "unknown");
 
 	// Init display backend
 	g_pDisplay = new ATDisplaySDL2;
