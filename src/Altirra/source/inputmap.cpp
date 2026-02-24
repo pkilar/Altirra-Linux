@@ -143,7 +143,9 @@ bool ATInputMap::Load(VDRegistryKey& key, const char *name) {
 		return false;
 
 	uint32 nameLen = heap[1];
-	uint32 nameWords = (nameLen + 1) >> 1;
+	// On Windows sizeof(wchar_t)==2, so two wchar_t fit in one uint32.
+	// On Linux sizeof(wchar_t)==4, so each wchar_t needs one uint32.
+	uint32 nameWords = (uint32)((nameLen * sizeof(wchar_t) + sizeof(uint32) - 1) / sizeof(uint32));
 	uint32 ctrlCount = heap[2];
 	uint32 mapCount = heap[3];
 
@@ -193,7 +195,11 @@ void ATInputMap::Save(VDRegistryKey& key, const char *name) {
 	heap.push_back(mSpecificInputUnit);
 
 	uint32 offset = (uint32)heap.size();
-	heap.resize(heap.size() + ((mName.size() + 1) >> 1), 0);
+	// Calculate uint32 words needed for the name string.
+	// On Windows sizeof(wchar_t)==2 so two chars fit in one uint32.
+	// On Linux sizeof(wchar_t)==4 so each char needs one uint32.
+	const uint32 nameWords = (uint32)((mName.size() * sizeof(wchar_t) + sizeof(uint32) - 1) / sizeof(uint32));
+	heap.resize(heap.size() + nameWords, 0);
 
 	mName.copy((wchar_t *)&heap[offset], mName.size());
 

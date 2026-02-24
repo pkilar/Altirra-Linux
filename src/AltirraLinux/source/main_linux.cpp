@@ -1134,7 +1134,6 @@ int main(int argc, char *argv[]) {
 
 	try {
 		ATUISaveRegistry(g_settingsPath.c_str());
-		fprintf(stderr, "Settings saved to %s\n", VDTextWToU8(g_settingsPath).c_str());
 	} catch (...) {
 		fprintf(stderr, "Warning: Failed to save settings\n");
 	}
