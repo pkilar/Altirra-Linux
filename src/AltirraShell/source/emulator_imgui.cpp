@@ -691,6 +691,129 @@ static const char *ATGetControllerTypeName(ATInputControllerType type) {
 	}
 }
 
+static const char *ATGetInputCodeName(uint32 code) {
+	static char buf[32];
+	uint32 id = code & kATInputCode_IdMask;
+
+	if (id >= kATInputCode_JoyClass) {
+		if (id >= kATInputCode_JoyButton0) {
+			snprintf(buf, sizeof(buf), "Joy Btn%d", id - kATInputCode_JoyButton0);
+			return buf;
+		}
+		switch (id) {
+			case kATInputCode_JoyStick1Left:	return "Joy Left";
+			case kATInputCode_JoyStick1Right:	return "Joy Right";
+			case kATInputCode_JoyStick1Up:		return "Joy Up";
+			case kATInputCode_JoyStick1Down:	return "Joy Down";
+			case kATInputCode_JoyHoriz1:		return "Joy Axis X";
+			case kATInputCode_JoyVert1:			return "Joy Axis Y";
+			case kATInputCode_JoyPOVLeft:		return "Joy POV Left";
+			case kATInputCode_JoyPOVRight:		return "Joy POV Right";
+			case kATInputCode_JoyPOVUp:			return "Joy POV Up";
+			case kATInputCode_JoyPOVDown:		return "Joy POV Down";
+			default: snprintf(buf, sizeof(buf), "Joy 0x%X", id); return buf;
+		}
+	} else if (id >= kATInputCode_MouseClass) {
+		switch (id) {
+			case kATInputCode_MouseHoriz:		return "Mouse X";
+			case kATInputCode_MouseVert:		return "Mouse Y";
+			case kATInputCode_MouseLMB:			return "Mouse LMB";
+			case kATInputCode_MouseRMB:			return "Mouse RMB";
+			case kATInputCode_MouseMMB:			return "Mouse MMB";
+			case kATInputCode_MouseLeft:		return "Mouse Left";
+			case kATInputCode_MouseRight:		return "Mouse Right";
+			case kATInputCode_MouseUp:			return "Mouse Up";
+			case kATInputCode_MouseDown:		return "Mouse Down";
+			default: snprintf(buf, sizeof(buf), "Mouse 0x%X", id); return buf;
+		}
+	} else {
+		// Key codes
+		if (id >= kATInputCode_KeyA && id <= kATInputCode_KeyZ) {
+			snprintf(buf, sizeof(buf), "Key %c", (char)id);
+			return buf;
+		}
+		if (id >= kATInputCode_Key0 && id <= kATInputCode_Key9) {
+			snprintf(buf, sizeof(buf), "Key %c", (char)id);
+			return buf;
+		}
+		switch (id) {
+			case kATInputCode_KeyUp:		return "Up";
+			case kATInputCode_KeyDown:		return "Down";
+			case kATInputCode_KeyLeft:		return "Left";
+			case kATInputCode_KeyRight:		return "Right";
+			case kATInputCode_KeySpace:		return "Space";
+			case kATInputCode_KeyReturn:	return "Enter";
+			case kATInputCode_KeyEscape:	return "Escape";
+			case kATInputCode_KeyTab:		return "Tab";
+			case kATInputCode_KeyBack:		return "Backspace";
+			case kATInputCode_KeyInsert:	return "Insert";
+			case kATInputCode_KeyDelete:	return "Delete";
+			case kATInputCode_KeyHome:		return "Home";
+			case kATInputCode_KeyEnd:		return "End";
+			case kATInputCode_KeyPrior:		return "Page Up";
+			case kATInputCode_KeyNext:		return "Page Down";
+			case kATInputCode_KeyLShift:	return "L.Shift";
+			case kATInputCode_KeyRShift:	return "R.Shift";
+			case kATInputCode_KeyLControl:	return "L.Ctrl";
+			case kATInputCode_KeyRControl:	return "R.Ctrl";
+			case kATInputCode_KeyNumpadEnter: return "Numpad Enter";
+			default:
+				if (id >= kATInputCode_KeyNumpad0 && id <= kATInputCode_KeyNumpad9) {
+					snprintf(buf, sizeof(buf), "Numpad %d", id - kATInputCode_KeyNumpad0);
+					return buf;
+				}
+				if (id >= kATInputCode_KeyF1 && id <= kATInputCode_KeyF12) {
+					snprintf(buf, sizeof(buf), "F%d", id - kATInputCode_KeyF1 + 1);
+					return buf;
+				}
+				snprintf(buf, sizeof(buf), "Key 0x%X", id);
+				return buf;
+		}
+	}
+}
+
+static const char *ATGetInputTriggerName(uint32 code) {
+	static char buf[32];
+	uint32 trigger = code & kATInputTrigger_Mask;
+	switch (trigger) {
+		case kATInputTrigger_Button0:		return "Button";
+		case kATInputTrigger_Up:			return "Up";
+		case kATInputTrigger_Down:			return "Down";
+		case kATInputTrigger_Left:			return "Left";
+		case kATInputTrigger_Right:			return "Right";
+		case kATInputTrigger_ScrollUp:		return "Scroll Up";
+		case kATInputTrigger_ScrollDown:	return "Scroll Down";
+		case kATInputTrigger_Start:			return "Start";
+		case kATInputTrigger_Select:		return "Select";
+		case kATInputTrigger_Option:		return "Option";
+		case kATInputTrigger_Turbo:			return "Turbo";
+		case kATInputTrigger_ColdReset:		return "Cold Reset";
+		case kATInputTrigger_WarmReset:		return "Warm Reset";
+		case kATInputTrigger_Rewind:		return "Rewind";
+		case kATInputTrigger_RewindMenu:	return "Rewind Menu";
+		case kATInputTrigger_KeySpace:		return "Key Space";
+		case kATInputTrigger_5200_Start:	return "5200 Start";
+		case kATInputTrigger_5200_Pause:	return "5200 Pause";
+		case kATInputTrigger_5200_Reset:	return "5200 Reset";
+		case kATInputTrigger_Axis0:			return "Axis";
+		case kATInputTrigger_Flag0:			return "Flag";
+		default:
+			if (trigger >= kATInputTrigger_5200_0 && trigger <= kATInputTrigger_5200_Pound) {
+				const char *k5200Keys[] = {"0","1","2","3","4","5","6","7","8","9","*","#"};
+				snprintf(buf, sizeof(buf), "5200 [%s]", k5200Keys[trigger - kATInputTrigger_5200_0]);
+			} else if (trigger >= kATInputTrigger_UILeft && trigger <= kATInputTrigger_UIRightShift) {
+				const char *kUINames[] = {"UI Left","UI Right","UI Up","UI Down","UI Accept","UI Reject","UI Menu","UI Option","UI Switch L","UI Switch R","UI L.Shift","UI R.Shift"};
+				uint32 idx = trigger - kATInputTrigger_UILeft;
+				if (idx < 12)
+					return kUINames[idx];
+				snprintf(buf, sizeof(buf), "UI 0x%X", trigger);
+			} else {
+				snprintf(buf, sizeof(buf), "Trigger 0x%X", trigger);
+			}
+			return buf;
+	}
+}
+
 // ============= Helper: load file via dialog =============
 
 static void MRUAdd(const wchar_t *path);  // forward declaration
@@ -4071,8 +4194,8 @@ static void DrawInputSetup() {
 		}
 
 		// Scrollable list of maps
+		static int s_selectedMapIdx = -1;
 		if (ImGui::BeginChild("##maplist", ImVec2(0, 280), ImGuiChildFlags_Borders)) {
-			static int s_selectedMapIdx = -1;
 
 			for (uint32 i = 0; i < mapCount; ++i) {
 				ATInputMap *imap = nullptr;
@@ -4129,17 +4252,148 @@ static void DrawInputSetup() {
 			ImGui::Spacing();
 			ImGui::Separator();
 
-			ATInputMap *selMap = nullptr;
-			if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount) {
-				inputMgr->GetInputMapByIndex(s_selectedMapIdx, &selMap);
-			}
-
-			if (ImGui::Button("Remove") && selMap) {
-				inputMgr->RemoveInputMap(selMap);
-				s_selectedMapIdx = -1;
+			{
+				ATInputMap *imap = nullptr;
+				if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount)
+					inputMgr->GetInputMapByIndex(s_selectedMapIdx, &imap);
+				if (ImGui::Button("Remove") && imap) {
+					inputMgr->RemoveInputMap(imap);
+					s_selectedMapIdx = -1;
+				}
 			}
 		}
 		ImGui::EndChild();
+
+		// --- Selected map binding viewer/editor ---
+		ATInputMap *selMap = nullptr;
+		if (s_selectedMapIdx >= 0 && (uint32)s_selectedMapIdx < mapCount) {
+			inputMgr->GetInputMapByIndex(s_selectedMapIdx, &selMap);
+		}
+
+		if (selMap) {
+			ImGui::Spacing();
+			VDStringA mapTitle = VDTextWToU8(VDStringW(selMap->GetName()));
+			ImGui::Text("Bindings: %s", mapTitle.c_str());
+
+			// Controllers summary
+			uint32 ctrlCount = selMap->GetControllerCount();
+			if (ctrlCount > 0) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("(");
+				for (uint32 c = 0; c < ctrlCount; ++c) {
+					const ATInputMap::Controller& ctrl = selMap->GetController(c);
+					if (c > 0) {
+						ImGui::SameLine(0, 0);
+						ImGui::TextDisabled(", ");
+					}
+					ImGui::SameLine(0, 0);
+					ImGui::TextDisabled("%s P%u", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+				}
+				ImGui::SameLine(0, 0);
+				ImGui::TextDisabled(")");
+			}
+
+			uint32 mappingCount = selMap->GetMappingCount();
+
+			if (mappingCount == 0) {
+				ImGui::TextDisabled("No bindings in this map.");
+			} else if (ImGui::BeginTable("##bindings", 4,
+					ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+					| ImGuiTableFlags_Sortable | ImGuiTableFlags_SizingStretchProp,
+					ImVec2(0, 200))) {
+				ImGui::TableSetupScrollFreeze(0, 1);
+				ImGui::TableSetupColumn("Input", ImGuiTableColumnFlags_DefaultSort, 0.30f);
+				ImGui::TableSetupColumn("Controller", 0, 0.25f);
+				ImGui::TableSetupColumn("Target", 0, 0.25f);
+				ImGui::TableSetupColumn("Mode", 0, 0.20f);
+				ImGui::TableHeadersRow();
+
+				// Build sortable mapping list
+				struct MappingEntry {
+					uint32 idx;
+					const char *inputName;
+					const char *ctrlName;
+					uint32 ctrlPort;
+					const char *triggerName;
+					const char *modeName;
+				};
+
+				static vdfastvector<MappingEntry> sortedMappings;
+				sortedMappings.clear();
+				sortedMappings.reserve(mappingCount);
+
+				for (uint32 m = 0; m < mappingCount; ++m) {
+					const ATInputMap::Mapping& mapping = selMap->GetMapping(m);
+					MappingEntry entry;
+					entry.idx = m;
+					entry.inputName = ATGetInputCodeName(mapping.mInputCode);
+
+					uint32 cid = mapping.mControllerId;
+					if (cid < ctrlCount) {
+						const ATInputMap::Controller& ctrl = selMap->GetController(cid);
+						entry.ctrlName = ATGetControllerTypeName(ctrl.mType);
+						entry.ctrlPort = ctrl.mIndex + 1;
+					} else {
+						entry.ctrlName = "?";
+						entry.ctrlPort = 0;
+					}
+
+					entry.triggerName = ATGetInputTriggerName(mapping.mCode);
+
+					uint32 mode = mapping.mCode & kATInputTriggerMode_Mask;
+					switch (mode) {
+						case kATInputTriggerMode_AutoFire:	entry.modeName = "Auto-fire"; break;
+						case kATInputTriggerMode_Toggle:	entry.modeName = "Toggle"; break;
+						case kATInputTriggerMode_ToggleAF:	entry.modeName = "Toggle AF"; break;
+						case kATInputTriggerMode_Relative:	entry.modeName = "Relative"; break;
+						case kATInputTriggerMode_Absolute:	entry.modeName = "Absolute"; break;
+						case kATInputTriggerMode_Inverted:	entry.modeName = "Inverted"; break;
+						default:							entry.modeName = ""; break;
+					}
+
+					sortedMappings.push_back(entry);
+				}
+
+				// Apply sort
+				if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
+					if (sortSpecs->SpecsDirty && sortSpecs->SpecsCount > 0) {
+						int col = sortSpecs->Specs[0].ColumnIndex;
+						bool asc = (sortSpecs->Specs[0].SortDirection == ImGuiSortDirection_Ascending);
+						std::sort(sortedMappings.begin(), sortedMappings.end(),
+							[col, asc](const MappingEntry& a, const MappingEntry& b) {
+								int cmp = 0;
+								switch (col) {
+									case 0: cmp = strcmp(a.inputName, b.inputName); break;
+									case 1: cmp = strcmp(a.ctrlName, b.ctrlName); break;
+									case 2: cmp = strcmp(a.triggerName, b.triggerName); break;
+									case 3: cmp = strcmp(a.modeName, b.modeName); break;
+								}
+								return asc ? (cmp < 0) : (cmp > 0);
+							});
+						sortSpecs->SpecsDirty = false;
+					}
+				}
+
+				for (const auto& entry : sortedMappings) {
+					ImGui::TableNextRow();
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.inputName);
+					ImGui::TableNextColumn();
+					if (entry.ctrlPort > 0)
+						ImGui::Text("%s P%u", entry.ctrlName, entry.ctrlPort);
+					else
+						ImGui::TextUnformatted(entry.ctrlName);
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.triggerName);
+					ImGui::TableNextColumn();
+					ImGui::TextUnformatted(entry.modeName);
+				}
+
+				ImGui::EndTable();
+			}
+
+			ImGui::Text("%u binding(s)", mappingCount);
+		}
 	}
 
 	// --- Add from presets ---
