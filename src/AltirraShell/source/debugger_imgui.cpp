@@ -98,6 +98,7 @@ static char s_bpAddrBuf[16] = "";
 // Disassembly context menu state
 static uint16 s_disasmContextAddr = 0;
 static uint32 s_disasmContextEA = 0xFFFFFFFF;  // effective address of context instruction
+static char s_disasmContextText[128] = "";     // disassembly text of context line
 
 // Disassembly state
 static uint32 s_disasmAddr = 0;
@@ -677,6 +678,7 @@ static void DrawDisassembly() {
 			if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
 				s_disasmContextAddr = addr;
 				s_disasmContextEA = lineEA[i];
+				snprintf(s_disasmContextText, sizeof(s_disasmContextText), "%s", line.c_str());
 				ImGui::OpenPopup("##disasmctx");
 			}
 			ImGui::PopStyleColor();
@@ -769,6 +771,9 @@ static void DrawDisassembly() {
 			snprintf(addrStr, sizeof(addrStr), "$%04X", s_disasmContextAddr);
 			if (ImGui::MenuItem("Copy Address")) {
 				ImGui::SetClipboardText(addrStr);
+			}
+			if (ImGui::MenuItem("Copy Instruction")) {
+				ImGui::SetClipboardText(s_disasmContextText);
 			}
 
 			ImGui::EndPopup();
