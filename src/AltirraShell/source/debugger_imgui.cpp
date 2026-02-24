@@ -1031,12 +1031,36 @@ static void DrawConsole() {
 	}
 	ImGui::EndChild();
 
-	// Input line
+	// Input line with hint and help button
+	if (ImGui::SmallButton("?")) {
+		ImGui::OpenPopup("CmdHelp");
+	}
+	if (ImGui::BeginPopup("CmdHelp")) {
+		ImGui::TextUnformatted("Common debugger commands:");
+		ImGui::Separator();
+		ImGui::TextUnformatted("g          - Go (run)");
+		ImGui::TextUnformatted("t          - Trace (step into)");
+		ImGui::TextUnformatted("o          - Step over");
+		ImGui::TextUnformatted("bp <addr>  - Set PC breakpoint");
+		ImGui::TextUnformatted("bl         - List breakpoints");
+		ImGui::TextUnformatted("bc <n>     - Clear breakpoint");
+		ImGui::TextUnformatted("ba r <addr>- Break on read");
+		ImGui::TextUnformatted("ba w <addr>- Break on write");
+		ImGui::TextUnformatted("d <addr>   - Disassemble");
+		ImGui::TextUnformatted("db <addr>  - Dump bytes");
+		ImGui::TextUnformatted("e <addr> <val> - Edit byte");
+		ImGui::TextUnformatted("r          - Show registers");
+		ImGui::TextUnformatted("? <expr>   - Evaluate expression");
+		ImGui::TextUnformatted(".modules   - List loaded modules");
+		ImGui::TextUnformatted(".help      - Full command list");
+		ImGui::EndPopup();
+	}
+	ImGui::SameLine();
 	ImGui::SetNextItemWidth(-1);
 	ImGuiInputTextFlags inputFlags = ImGuiInputTextFlags_EnterReturnsTrue
 		| ImGuiInputTextFlags_CallbackHistory;
 
-	if (ImGui::InputText("##cmdinput", s_cmdInputBuf, sizeof(s_cmdInputBuf), inputFlags, ConsoleInputCallback)) {
+	if (ImGui::InputTextWithHint("##cmdinput", "Enter debugger command...", s_cmdInputBuf, sizeof(s_cmdInputBuf), inputFlags, ConsoleInputCallback)) {
 		if (s_cmdInputBuf[0]) {
 			// Add to history
 			s_cmdHistory.push_back(s_cmdInputBuf);
@@ -1207,24 +1231,32 @@ static void DrawWatch() {
 		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
 
-	static int s_watchMode = 0;  // 0=byte, 1=word
+	static int s_watchMode = 0;  // 0=byte, 1=word, 2=expr
 	ImGui::SetNextItemWidth(60);
-	const char *modes[] = { "Byte", "Word" };
-	ImGui::Combo("##wmode", &s_watchMode, modes, 2);
+	const char *modes[] = { "Byte", "Word", "Expr" };
+	ImGui::Combo("##wmode", &s_watchMode, modes, 3);
 	ImGui::SameLine();
 
 	if ((ImGui::Button("Add##w") || addWatch) && s_watchAddrBuf[0]) {
-		int len = (s_watchMode == 1) ? 2 : 1;
-		unsigned int addr;
-		if (sscanf(s_watchAddrBuf, "%x", &addr) == 1) {
-			dbg->AddWatch(addr & 0xFFFF, len);
+		if (s_watchMode == 2) {
+			// Expression watch via debugger command
+			char cmd[192];
+			snprintf(cmd, sizeof(cmd), "we %s", s_watchAddrBuf);
+			dbg->QueueCommand(cmd, false);
 			s_watchAddrBuf[0] = 0;
 		} else {
-			// Try symbol lookup
-			sint32 symAddr = dbg->ResolveSymbol(s_watchAddrBuf, true, true, false);
-			if (symAddr >= 0) {
-				dbg->AddWatch((uint16)symAddr, len);
+			int len = (s_watchMode == 1) ? 2 : 1;
+			unsigned int addr;
+			if (sscanf(s_watchAddrBuf, "%x", &addr) == 1) {
+				dbg->AddWatch(addr & 0xFFFF, len);
 				s_watchAddrBuf[0] = 0;
+			} else {
+				// Try symbol lookup
+				sint32 symAddr = dbg->ResolveSymbol(s_watchAddrBuf, true, true, false);
+				if (symAddr >= 0) {
+					dbg->AddWatch((uint16)symAddr, len);
+					s_watchAddrBuf[0] = 0;
+				}
 			}
 		}
 	}
@@ -1345,6 +1377,11 @@ static void DrawCallStack() {
 	ATCallStackFrame frames[16];
 	uint32 n = dbg->GetCallStack(frames, 16);
 	uint32 framePC = dbg->GetFrameExtPC();
+
+	if (n > 0) {
+		ImGui::TextDisabled("  SP    PC    Symbol");
+		ImGui::Separator();
+	}
 
 	for (uint32 i = 0; i < n; ++i) {
 		const ATCallStackFrame& fr = frames[i];
