@@ -36,6 +36,7 @@
 #include <at/atio/image.h>
 
 #include "simulator.h"
+#include "devicemanager.h"
 #include "joystick.h"
 #include "debugger.h"
 #include "settings.h"
@@ -930,6 +931,10 @@ int main(int argc, char *argv[]) {
 	// SetHardwareMode and other methods that access the device manager)
 	g_sim.Init();
 	g_sim.SetRandomSeed(rand() ^ (rand() << 15));
+
+	// Register all device definitions (must be before settings load)
+	extern void ATRegisterDevices(ATDeviceManager& dm);
+	ATRegisterDevices(*g_sim.GetDeviceManager());
 
 	fprintf(stderr, "Simulator initialized\n");
 

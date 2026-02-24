@@ -110,6 +110,8 @@ static bool s_showStatusBar = true;
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
 static bool s_devShowConfig = false;
+static bool s_devShowAddPopup = false;
+static int s_devAddSelectedIdx = -1;
 static ATPropertySet s_devEditProps;
 static std::string s_devEditTag;
 
@@ -2540,6 +2542,14 @@ static void DrawDeviceManager() {
 	}
 
 	// Toolbar
+	if (ImGui::Button("Add...")) {
+		s_devShowAddPopup = true;
+		s_devAddSelectedIdx = -1;
+		ImGui::OpenPopup("Add Device");
+	}
+
+	ImGui::SameLine();
+
 	if (ImGui::Button("Configure...") && s_devSelectedDevice) {
 		ATDeviceInfo info;
 		s_devSelectedDevice->GetDeviceInfo(info);
@@ -2555,6 +2565,48 @@ static void DrawDeviceManager() {
 		devMgr->RemoveDevice(s_devSelectedDevice);
 		s_devSelectedDevice = nullptr;
 		s_devShowConfig = false;
+	}
+
+	// Add Device popup
+	if (ImGui::BeginPopupModal("Add Device", &s_devShowAddPopup, ImGuiWindowFlags_AlwaysAutoResize)) {
+		const auto& defs = devMgr->GetDeviceDefinitions();
+
+		ImGui::Text("Select device type:");
+		if (ImGui::BeginListBox("##devlist", ImVec2(400, 250))) {
+			for (int i = 0; i < (int)defs.size(); ++i) {
+				const ATDeviceDefinition *def = defs[i];
+				if (def->mFlags & (kATDeviceDefFlag_Internal | kATDeviceDefFlag_Hidden))
+					continue;
+
+				VDStringA u8name = VDTextWToU8(VDStringW(def->mpName));
+				if (ImGui::Selectable(u8name.c_str(), s_devAddSelectedIdx == i))
+					s_devAddSelectedIdx = i;
+			}
+			ImGui::EndListBox();
+		}
+
+		if (ImGui::Button("Add", ImVec2(80, 0)) && s_devAddSelectedIdx >= 0
+			&& s_devAddSelectedIdx < (int)defs.size()) {
+			const ATDeviceDefinition *def = defs[s_devAddSelectedIdx];
+			ATPropertySet props;
+			try {
+				devMgr->AddDevice(def->mpTag, props);
+			} catch (const MyError& e) {
+				extern void ATUIShowError(const VDException& e);
+				ATUIShowError(e);
+			}
+			s_devShowAddPopup = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::SameLine();
+
+		if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+			s_devShowAddPopup = false;
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
 	}
 
 	// Device list

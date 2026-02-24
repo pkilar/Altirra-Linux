@@ -201,6 +201,7 @@ public:
 	ATDeviceConfigureFn GetDeviceConfigureFn(const char *tag) const;
 
 	void AddDeviceDefinition(const ATDeviceDefinition *def);
+	const vdfastvector<const ATDeviceDefinition *>& GetDeviceDefinitions() const { return mDeviceDefinitions; }
 	void AddDeviceConfigurer(const char *tag, ATDeviceConfigureFn configurer);
 
 	void AddDeviceChangeCallback(uint32 iid, IATDeviceChangeCallback *cb);
