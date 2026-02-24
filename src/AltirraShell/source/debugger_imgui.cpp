@@ -84,6 +84,7 @@ static char s_bpAddrBuf[16] = "";
 
 // Disassembly context menu state
 static uint16 s_disasmContextAddr = 0;
+static uint32 s_disasmContextEA = 0xFFFFFFFF;  // effective address of context instruction
 
 // Disassembly state
 static uint32 s_disasmAddr = 0;
@@ -466,6 +467,7 @@ static void DrawDisassembly() {
 		}
 
 		IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+		uint32 lineEA[30];
 
 		for (int i = 0; i < 30; i++) {
 			ATCPUHistoryEntry hent;
@@ -474,6 +476,8 @@ static void DrawDisassembly() {
 			line.clear();
 			ATDisasmResult result = ATDisassembleInsn(line, target, state.mExecMode, hent,
 				true, false, true, true, true, false, false, true, true, false);
+
+			lineEA[i] = hent.mEA;
 
 			// Show symbol label if this address has one
 			if (dbs) {
@@ -520,6 +524,7 @@ static void DrawDisassembly() {
 			}
 			if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
 				s_disasmContextAddr = addr;
+				s_disasmContextEA = lineEA[i];
 				ImGui::OpenPopup("##disasmctx");
 			}
 			ImGui::PopStyleColor();
@@ -573,6 +578,38 @@ static void DrawDisassembly() {
 				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X",
 					s_memoryAddr);
 				s_showMemory = true;
+			}
+
+			// Follow operand effective address (e.g. JMP $addr, LDA $addr)
+			if (s_disasmContextEA != 0xFFFFFFFF && (s_disasmContextEA & 0xFFFF) != s_disasmContextAddr) {
+				uint16 ea = (uint16)(s_disasmContextEA & 0xFFFF);
+				char eaLabel[48];
+
+				ATSymbol eaSym {};
+				if (dbs)
+					dbs->LookupSymbol(ea, kATSymbol_Any, eaSym);
+				if (eaSym.mpName)
+					snprintf(eaLabel, sizeof(eaLabel), "Follow $%04X (%s)", ea, eaSym.mpName);
+				else
+					snprintf(eaLabel, sizeof(eaLabel), "Follow $%04X", ea);
+
+				if (ImGui::MenuItem(eaLabel)) {
+					s_disasmAddr = ea;
+					s_disasmFollowPC = false;
+					snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", ea);
+				}
+
+				char memLabel[48];
+				if (eaSym.mpName)
+					snprintf(memLabel, sizeof(memLabel), "View $%04X in Memory (%s)", ea, eaSym.mpName);
+				else
+					snprintf(memLabel, sizeof(memLabel), "View $%04X in Memory", ea);
+
+				if (ImGui::MenuItem(memLabel)) {
+					s_memoryAddr = ea;
+					snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", ea);
+					s_showMemory = true;
+				}
 			}
 
 			ImGui::EndPopup();
