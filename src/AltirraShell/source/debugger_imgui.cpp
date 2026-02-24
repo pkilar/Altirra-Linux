@@ -217,34 +217,78 @@ static void DrawRegisters() {
 		return;
 	}
 
+	IATDebugger *dbg = ATGetDebugger();
+	IATDebugTarget *target = dbg ? dbg->GetTarget() : nullptr;
 	const auto& state = s_pClient->mState;
 	const auto& regs = state.mExecState.m6502;
 
-	// 6502 registers
-	ImGui::Text("PC: %04X", state.mPC);
+	// Helper: editable hex register field (double-click to edit)
+	static int s_regEditId = -1;
+	static char s_regEditBuf[8] = "";
+
+	auto EditableReg = [&](const char *name, int id, uint32 val, int hexDigits) {
+		if (s_regEditId == id) {
+			ImGui::Text("%s:", name);
+			ImGui::SameLine();
+			ImGui::SetNextItemWidth((float)(hexDigits * 10 + 8));
+			bool commit = ImGui::InputText("##regedit", s_regEditBuf,
+				sizeof(s_regEditBuf),
+				ImGuiInputTextFlags_CharsHexadecimal
+				| ImGuiInputTextFlags_EnterReturnsTrue
+				| ImGuiInputTextFlags_AutoSelectAll);
+
+			if (commit) {
+				unsigned int newVal;
+				if (sscanf(s_regEditBuf, "%x", &newVal) == 1 && target) {
+					ATCPUExecState es;
+					target->GetExecState(es);
+					switch (id) {
+						case 0: es.m6502.mPC = (uint16)newVal; break;
+						case 1: es.m6502.mA = (uint8)newVal; break;
+						case 2: es.m6502.mX = (uint8)newVal; break;
+						case 3: es.m6502.mY = (uint8)newVal; break;
+						case 4: es.m6502.mS = (uint8)newVal; break;
+						case 5: es.m6502.mP = (uint8)newVal; break;
+					}
+					target->SetExecState(es);
+				}
+				s_regEditId = -1;
+			} else if (!ImGui::IsItemActive() && ImGui::IsItemDeactivated()) {
+				s_regEditId = -1;
+			}
+		} else {
+			if (hexDigits == 4)
+				ImGui::Text("%s: %04X", name, val);
+			else if (hexDigits == 2)
+				ImGui::Text("%s: %02X (%3d)", name, val, val);
+			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
+				s_regEditId = id;
+				snprintf(s_regEditBuf, sizeof(s_regEditBuf),
+					hexDigits == 4 ? "%04X" : "%02X", val);
+			}
+		}
+	};
+
+	// 6502 registers (double-click to edit)
+	EditableReg("PC", 0, state.mPC, 4);
 	ImGui::SameLine(140);
 	ImGui::Text("Cycle: %u", state.mCycle);
 
 	ImGui::Separator();
 
-	ImGui::Text(" A: %02X (%3d)", regs.mA, regs.mA);
-	ImGui::Text(" X: %02X (%3d)", regs.mX, regs.mX);
-	ImGui::Text(" Y: %02X (%3d)", regs.mY, regs.mY);
-	ImGui::Text(" S: %02X", regs.mS);
+	EditableReg(" A", 1, regs.mA, 2);
+	EditableReg(" X", 2, regs.mX, 2);
+	EditableReg(" Y", 3, regs.mY, 2);
+	EditableReg(" S", 4, regs.mS, 2);
 
 	ImGui::Separator();
 
-	// Processor status flags
+	// Processor status flags (double-click to edit)
 	uint8 p = regs.mP;
-	ImGui::Text("P: %02X  ", p);
+	EditableReg(" P", 5, p, 2);
 	ImGui::SameLine();
 
 	const char flags[] = "NV-BDIZC";
-	char flagStr[9];
-	for (int i = 0; i < 8; i++) {
-		flagStr[i] = (p & (0x80 >> i)) ? flags[i] : '.';
-	}
-	flagStr[8] = 0;
 
 	// Color active flags
 	for (int i = 0; i < 8; i++) {
@@ -545,7 +589,7 @@ static void DrawMemory() {
 					}
 				} else {
 					// Clickable hex byte
-					char label[8];
+					char label[16];
 					snprintf(label, sizeof(label), "%02X##b%d", buf[byteIdx], byteIdx);
 					if (ImGui::Selectable(label, false,
 						ImGuiSelectableFlags_None, ImVec2(22, 0))) {
