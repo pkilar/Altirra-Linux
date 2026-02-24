@@ -2907,7 +2907,7 @@ void ATDiskImage::SaveATX(IVDRandomAccessStream& fs, PhysSectors& phySecs) {
 			trkhdr.mNumSectors = psecCount;
 			trkhdr.mDefSectSize = defaultSectorSize > 512 ? 3 : defaultSectorSize > 256 ? 2 : defaultSectorSize > 128 ? 1 : 0;
 			trkhdr.mDataOffset = sizeof(ATXTrackHeader);
-			trkhdr.mFlags = isTrackMFM ? ATXTrackHeader::kFlag_MFM : 0;
+			trkhdr.mFlags = isTrackMFM ? (uint32)ATXTrackHeader::kFlag_MFM : 0;
 
 			if (trackHasLongStoredSectors)
 				trkhdr.mFlags |= ATXTrackHeader::kFlag_FullSects;

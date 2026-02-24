@@ -23,7 +23,7 @@
 
 #define AT_CPU_READ_BYTE(addr) ATCP_READ_BYTE((addr))
 #define AT_CPU_READ_BYTE_ADDR16(addr) ATCP_READ_BYTE((addr))
-#define AT_CPU_DUMMY_READ_BYTE(addr) (0)
+#define AT_CPU_DUMMY_READ_BYTE(addr) ((void)0)
 #define AT_CPU_READ_BYTE_HL(addrhi, addrlo) ATCP_READ_BYTE(((uint32)(uint8)(addrhi) << 8) + (uint8)(addrlo))
 #define AT_CPU_WRITE_BYTE(addr, value) ATCP_WRITE_BYTE((addr), (value))
 #define AT_CPU_WRITE_BYTE_HL(addrhi, addrlo, value) ATCP_WRITE_BYTE(((uint32)(uint8)(addrhi) << 8) + (uint8)(addrlo), (value))
@@ -34,7 +34,7 @@
 #define INSN_DUMMY_FETCH_NOINC() AT_CPU_DUMMY_EXT_READ_BYTE(rPC, rK)
 #define INSN_FETCH_NOINC() AT_CPU_EXT_READ_BYTE(rPC, rK)
 
-#define AT_CPU_DUMMY_EXT_READ_BYTE(addr, bank) (0)
+#define AT_CPU_DUMMY_EXT_READ_BYTE(addr, bank) ((void)0)
 #define AT_CPU_EXT_READ_BYTE(addr, bank) readData = ATCP_READ_BYTE((addr))
 #define AT_CPU_EXT_READ_BYTE_2(addr, bank) readData = AT_CPU_EXT_READ_BYTE((addr), (bank))
 #define AT_CPU_EXT_WRITE_BYTE(addr, bank, value) AT_CPU_WRITE_BYTE((addr), (value))

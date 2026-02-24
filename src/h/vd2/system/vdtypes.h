@@ -283,8 +283,8 @@ extern void VDDebugPrint(const char *format, ...);
 		#define VDASSERT(exp)		((void)0)
 		#define VDASSERTPTR(exp)	((void)0)
 	#elif defined(__GNUC__)
-		#define VDASSERT(exp)		__builtin_expect(0 != (exp), 1)
-		#define VDASSERTPTR(exp)	__builtin_expect(0 != (exp), 1)
+		#define VDASSERT(exp)		((void)0)
+		#define VDASSERTPTR(exp)	((void)0)
 	#endif
 
 	#define VDFAIL(str)			(void)(str)

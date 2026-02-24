@@ -57,7 +57,7 @@ class ATLogChannel {
 public:
 	ATLogChannel(bool enabled, bool tagged, const char *shortName, const char *longDesc)
 		: mbEnabled(enabled)
-		, mTagFlags(tagged ? kATLogFlags_Timestamp : 0)
+		, mTagFlags(tagged ? kATLogFlags_Timestamp : kATLogFlags_None)
 		, mpShortName(shortName)
 		, mpLongDesc(longDesc)
 	{

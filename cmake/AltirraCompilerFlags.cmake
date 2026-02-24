@@ -27,6 +27,26 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
 		# Warnings disabled to match MSVC W4 profile (4100, 4127, 4245, 4310, 4389, 4456, 4457, 4701, 4702, 4706)
 		-Wno-implicit-fallthrough
 		-Wno-type-limits
+
+		# Upstream code patterns — safe to suppress
+		-Wno-multichar              # FourCC constants used throughout for type IDs
+		-Wno-ignored-qualifiers     # const return types in VD2 headers
+		-Wno-unknown-pragmas        # MSVC #pragma warning directives
+		-Wno-reorder                # Member initialization order in upstream headers
+		-Wno-attributes             # packed attribute on template types in binary.h
+		-Wno-comment                # Multi-line comments in upstream headers
+		-Wno-sequence-point         # hash.cpp upstream code
+		-Wno-inaccessible-base      # COM-like diamond inheritance in device framework
+		-Wno-unused-but-set-variable # Upstream code with conditional compilation
+		-Wno-delete-non-virtual-dtor # Controlled deletion through correct type
+		-Wno-class-memaccess        # VD2 fast containers use memcpy/memset
+		-Wno-cast-function-type     # Function pointer casts in upstream code
+		-Wno-conversion-null        # NULL to non-pointer conversions
+		-Wno-invalid-offsetof       # offsetof on non-standard-layout types
+		-Wno-catch-value            # Catch by value in upstream code
+		-Wno-range-loop-construct   # Range loop copy in upstream code
+		-Wno-nonnull                # Upstream null argument patterns
+		-Wno-format-overflow        # Format overflow in upstream code
 	)
 
 	# Optimization flags for Release/Profile builds

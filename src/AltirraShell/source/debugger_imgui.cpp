@@ -1401,7 +1401,7 @@ static void DrawBreakpoints() {
 				s_bpLogOnly = info.mbContinueExecution;
 				// Pre-fill condition text if available
 				if (info.mpCondition)
-					snprintf(s_bpCondBuf, sizeof(s_bpCondBuf), "%s", info.mpCondition);
+					snprintf(s_bpCondBuf, sizeof(s_bpCondBuf), "<expr>");
 				if (info.mpCommand)
 					snprintf(s_bpCmdBuf, sizeof(s_bpCmdBuf), "%s", info.mpCommand);
 				ImGui::OpenPopup("##bpedit");
@@ -1426,7 +1426,7 @@ static void DrawBreakpoints() {
 			if (ImGui::IsItemHovered() && (info.mpCondition || info.mpCommand)) {
 				ImGui::BeginTooltip();
 				if (info.mpCondition)
-					ImGui::Text("Condition: %s", info.mpCondition);
+					ImGui::Text("Condition: <expr>");
 				if (info.mpCommand)
 					ImGui::Text("Command: %s", info.mpCommand);
 				if (info.mbContinueExecution)

@@ -460,7 +460,8 @@ public:
 	}
 
 	VDStringA(const this_type& x)
-		: mpEOS(const_cast<value_type *>(sNull))
+		: VDStringSpanA()
+		, mpEOS(const_cast<value_type *>(sNull))
 	{
 		assign(x);
 	}
@@ -1169,7 +1170,8 @@ public:
 	}
 
 	VDStringW(const this_type& x)
-		: mpEOS(const_cast<value_type *>(sNull))
+		: VDStringSpanW()
+		, mpEOS(const_cast<value_type *>(sNull))
 	{
 		assign(x);
 	}
