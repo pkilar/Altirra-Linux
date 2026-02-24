@@ -720,6 +720,15 @@ static void DrawMemory() {
 					s_memoryAddr);
 			}
 
+			ImGui::Separator();
+
+			if (ImGui::MenuItem("Break on Read")) {
+				dbg->ToggleAccessBreakpoint(s_disasmContextAddr, false);
+			}
+			if (ImGui::MenuItem("Break on Write")) {
+				dbg->ToggleAccessBreakpoint(s_disasmContextAddr, true);
+			}
+
 			ImGui::EndPopup();
 		}
 	}
@@ -853,17 +862,29 @@ static void DrawBreakpoints() {
 	bool addBp = ImGui::InputText("##bpaddr", s_bpAddrBuf, sizeof(s_bpAddrBuf),
 		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
+
+	// Breakpoint type selector
+	static int s_bpType = 0;  // 0=PC, 1=Read, 2=Write
+	ImGui::SetNextItemWidth(70);
+	const char *bpTypes[] = { "PC", "Read", "Write" };
+	ImGui::Combo("##bptype", &s_bpType, bpTypes, 3);
+	ImGui::SameLine();
+
 	if ((ImGui::Button("Add##bp") || addBp) && s_bpAddrBuf[0]) {
 		unsigned int addr;
+		sint32 resolved = -1;
 		if (sscanf(s_bpAddrBuf, "%x", &addr) == 1) {
-			dbg->ToggleBreakpoint(addr & 0xFFFF);
-			s_bpAddrBuf[0] = 0;
+			resolved = (sint32)(addr & 0xFFFF);
 		} else {
-			sint32 symAddr = dbg->ResolveSymbol(s_bpAddrBuf, true, true, false);
-			if (symAddr >= 0) {
-				dbg->ToggleBreakpoint((uint16)symAddr);
-				s_bpAddrBuf[0] = 0;
-			}
+			resolved = dbg->ResolveSymbol(s_bpAddrBuf, true, true, false);
+		}
+
+		if (resolved >= 0) {
+			if (s_bpType == 0)
+				dbg->ToggleBreakpoint((uint16)resolved);
+			else
+				dbg->ToggleAccessBreakpoint((uint16)resolved, s_bpType == 2);
+			s_bpAddrBuf[0] = 0;
 		}
 	}
 	ImGui::SameLine();
@@ -1146,7 +1167,7 @@ static void DrawHistory() {
 
 			// Disassemble the instruction
 			line.clear();
-			ATDisasmResult result = ATDisassembleInsn(line, target,
+			ATDisassembleInsn(line, target,
 				disasmMode, he,
 				true, false, true, true, true, false, false, true, true, false);
 
