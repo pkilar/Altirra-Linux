@@ -271,7 +271,18 @@ void ATUISetConstrainMouseFullScreen(bool v) {
 		SDL_SetWindowGrab(w, v ? SDL_TRUE : SDL_FALSE);
 }
 void ATUISetCurrentAltOutputName(const char *) {}
-void ATUISetDisplayFilterMode(ATDisplayFilterMode m) { s_displayFilterMode = m; }
+void ATUISetDisplayFilterMode(ATDisplayFilterMode m) {
+	s_displayFilterMode = m;
+	extern ATDisplaySDL2 *ATGetLinuxDisplay();
+	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	if (disp) {
+		IVDVideoDisplay::FilterMode fm =
+			(m == kATDisplayFilterMode_Point)
+				? IVDVideoDisplay::kFilterPoint
+				: IVDVideoDisplay::kFilterBilinear;
+		disp->SetFilterMode(fm);
+	}
+}
 void ATUISetDisplayIndicators(bool v) { s_displayIndicators = v; }
 void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
 void ATUISetDisplayPanOffset(const vdfloat2& v) { s_displayPanOffset = v; }

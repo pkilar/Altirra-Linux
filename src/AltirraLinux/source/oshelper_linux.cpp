@@ -33,6 +33,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 #include <SDL.h>
@@ -68,7 +69,16 @@ bool ATLoadImageResource(uint32 id, VDPixmapBuffer& buf) {
 
 // File attributes
 void ATFileSetReadOnlyAttribute(const wchar_t *path, bool readOnly) {
-	// chmod could be used here, but not critical for emulation
+	VDStringA u8path = VDTextWToU8(VDStringW(path));
+	struct stat st;
+	if (stat(u8path.c_str(), &st) != 0)
+		return;
+
+	mode_t newMode = readOnly
+		? (st.st_mode & ~(S_IWUSR | S_IWGRP | S_IWOTH))
+		: (st.st_mode | S_IWUSR);
+
+	chmod(u8path.c_str(), newMode);
 }
 
 // Clipboard — using SDL2

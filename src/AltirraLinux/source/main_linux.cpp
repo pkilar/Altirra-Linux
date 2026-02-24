@@ -186,6 +186,8 @@ static VDStringW ATGetLinuxSettingsPath() {
 // Firmware path scanning
 ///////////////////////////////////////////////////////////////////////////
 
+static VDStringW s_extraRomPath;
+
 static void ATScanLinuxFirmwarePaths(const VDStringW& configDir) {
 	// Build list of firmware search directories:
 	// 1. ~/.config/altirra/firmware/
@@ -193,11 +195,14 @@ static void ATScanLinuxFirmwarePaths(const VDStringW& configDir) {
 	// 3. /usr/share/altirra/firmware/
 	// 4. /usr/local/share/altirra/firmware/
 
-	VDStringW paths[4];
-	paths[0] = VDMakePath(configDir.c_str(), L"firmware");
-	paths[1] = VDMakePath(VDGetProgramPath().c_str(), L"firmware");
-	paths[2] = VDStringW(L"/usr/share/altirra/firmware");
-	paths[3] = VDStringW(L"/usr/local/share/altirra/firmware");
+	vdvector<VDStringW> paths;
+	paths.push_back(VDMakePath(configDir.c_str(), L"firmware"));
+	paths.push_back(VDMakePath(VDGetProgramPath().c_str(), L"firmware"));
+	paths.push_back(VDStringW(L"/usr/share/altirra/firmware"));
+	paths.push_back(VDStringW(L"/usr/local/share/altirra/firmware"));
+
+	if (!s_extraRomPath.empty())
+		paths.push_back(s_extraRomPath);
 
 	// Ensure user firmware directory exists
 	EnsureDirectoryExists(paths[0]);
@@ -206,13 +211,12 @@ static void ATScanLinuxFirmwarePaths(const VDStringW& configDir) {
 	// can resolve relative paths. Use the user config firmware dir.
 	{
 		VDRegistryAppKey key("Firmware", true);
-		VDStringA u8path = VDTextWToU8(paths[0]);
 		key.setString("Firmware base path", paths[0].c_str());
 	}
 
 	// Log discovered firmware directories
-	for (int i = 0; i < 4; ++i) {
-		VDStringA u8 = VDTextWToU8(paths[i]);
+	for (const auto& p : paths) {
+		VDStringA u8 = VDTextWToU8(p);
 		struct stat st;
 		if (stat(u8.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
 			fprintf(stderr, "Firmware search path: %s\n", u8.c_str());
@@ -227,6 +231,9 @@ void ATGetFirmwareSearchPaths(vdvector<VDStringW>& outPaths) {
 	outPaths.push_back(VDMakePath(VDGetProgramPath().c_str(), L"firmware"));
 	outPaths.push_back(VDStringW(L"/usr/share/altirra/firmware"));
 	outPaths.push_back(VDStringW(L"/usr/local/share/altirra/firmware"));
+
+	if (!s_extraRomPath.empty())
+		outPaths.push_back(s_extraRomPath);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -843,10 +850,8 @@ int main(int argc, char *argv[]) {
 	ATScanLinuxFirmwarePaths(configDir);
 
 	// Add user-specified ROM path
-	if (!opts.romPath.empty()) {
-		VDStringA u8 = VDTextWToU8(opts.romPath);
-		fprintf(stderr, "Additional ROM path: %s\n", u8.c_str());
-	}
+	if (!opts.romPath.empty())
+		s_extraRomPath = opts.romPath;
 
 	// Load profiles and last-used settings
 	ATLoadDefaultProfiles();
