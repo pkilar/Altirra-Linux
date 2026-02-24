@@ -2206,12 +2206,23 @@ static void DrawStatusBar() {
 				else
 					color = nullptr;
 
-				if (sioActive)
-					ImGui::TextColored(*color, "D%d: %s [%u]", i + 1, u8.c_str(), ind.mStatusCounter[i]);
-				else if (color)
-					ImGui::TextColored(*color, "D%d: %s%s", i + 1, u8.c_str(), di.IsDirty() ? "*" : "");
+				// Compute track/sector from disk geometry (always shown)
+				uint32 sector = ind.mStatusCounter[i];
+				uint32 track = 0;
+				uint32 secInTrack = 0;
+				IATDiskImage *img = di.GetDiskImage();
+				if (img && sector > 0) {
+					ATDiskGeometryInfo geo = img->GetGeometry();
+					uint32 spt = geo.mSectorsPerTrack ? geo.mSectorsPerTrack : 18;
+					track = (sector - 1) / spt;
+					secInTrack = (sector - 1) % spt + 1;
+				}
+
+				const char *dirty = di.IsDirty() ? "*" : "";
+				if (color)
+					ImGui::TextColored(*color, "D%d: %s%s [T%02u S%02u]", i + 1, u8.c_str(), dirty, track, secInTrack);
 				else
-					ImGui::Text("D%d: %s", i + 1, u8.c_str());
+					ImGui::Text("D%d: %s [T%02u S%02u]", i + 1, u8.c_str(), track, secInTrack);
 			} else if (motorOn || sioActive) {
 				const ImVec4& color = isActive ? kDiskBright[i & 7] : kDiskDim[i & 7];
 				ImGui::TextColored(color, "D%d:", i + 1);
