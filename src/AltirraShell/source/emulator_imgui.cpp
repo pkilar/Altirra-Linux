@@ -69,6 +69,7 @@ class ATIRQController;
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include <set>
 #include <vector>
 
 // Forward declarations for functions defined in cartdetect.cpp (compiled in Linux build)
@@ -405,7 +406,9 @@ static vdrefptr<IATDiskImage> s_diskStandaloneImage;  // holds image for standal
 static std::string s_diskExplorerTitle;  // custom title for standalone mode
 static ATDiskFSKey s_diskCurDir = ATDiskFSKey::None;
 static std::vector<ATDiskFSEntryInfo> s_diskEntries;
-static int s_diskSelectedIdx = -1;
+static int s_diskSelectedIdx = -1;  // last clicked item (for single-item ops like rename)
+static std::set<int> s_diskSelection;  // multi-select set
+static int s_diskShiftAnchor = -1;  // anchor for shift-click range selection
 static std::vector<ATDiskFSKey> s_diskDirStack;
 static bool s_diskReadOnly = false;
 static bool s_diskTextMode = false;  // Atari EOL (0x9B) ↔ Unix LF (0x0A) conversion
@@ -1342,6 +1345,8 @@ static void DrawMenuBar() {
 							s_diskDirStack.clear();
 							s_diskCurDir = ATDiskFSKey::None;
 							s_diskSelectedIdx = -1;
+							s_diskSelection.clear();
+							s_diskShiftAnchor = -1;
 							s_diskReadOnly = readOnly;
 							s_diskFSInfoStr.clear();
 							try {
@@ -1483,6 +1488,8 @@ static void DrawMenuBar() {
 					s_diskDirStack.clear();
 					s_diskCurDir = ATDiskFSKey::None;
 					s_diskSelectedIdx = -1;
+					s_diskSelection.clear();
+					s_diskShiftAnchor = -1;
 					s_showDiskExplorer = true;
 				} catch (const std::exception& e) {
 					s_diskFS.reset();
@@ -2880,6 +2887,8 @@ static void DrawAudioOptions() {
 static void DiskExplorerRefresh() {
 	s_diskEntries.clear();
 	s_diskSelectedIdx = -1;
+	s_diskSelection.clear();
+	s_diskShiftAnchor = -1;
 	if (!s_diskFS)
 		return;
 
@@ -2911,6 +2920,8 @@ static void DiskExplorerClose() {
 	s_diskEntries.clear();
 	s_diskDirStack.clear();
 	s_diskSelectedIdx = -1;
+	s_diskSelection.clear();
+	s_diskShiftAnchor = -1;
 	s_diskCurDir = ATDiskFSKey::None;
 	s_showDiskExplorer = false;
 }
@@ -2950,6 +2961,8 @@ void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool
 		s_diskDirStack.clear();
 		s_diskCurDir = ATDiskFSKey::None;
 		s_diskSelectedIdx = -1;
+		s_diskSelection.clear();
+		s_diskShiftAnchor = -1;
 		s_showDiskExplorer = true;
 	} catch (const std::exception& e) {
 		s_diskFS.reset();
@@ -3013,8 +3026,16 @@ static void DrawDiskExplorer() {
 	}
 
 	ImGui::SameLine();
-	bool hasSel = s_diskSelectedIdx >= 0 && s_diskSelectedIdx < (int)s_diskEntries.size();
-	bool selIsFile = hasSel && !s_diskEntries[s_diskSelectedIdx].mbIsDirectory;
+	bool hasSel = !s_diskSelection.empty();
+	bool selIsFile = hasSel && s_diskSelectedIdx >= 0 && s_diskSelectedIdx < (int)s_diskEntries.size()
+		&& !s_diskEntries[s_diskSelectedIdx].mbIsDirectory;
+
+	// Count selected files (non-directories) for bulk ops
+	int selFileCount = 0;
+	for (int idx : s_diskSelection) {
+		if (idx >= 0 && idx < (int)s_diskEntries.size() && !s_diskEntries[idx].mbIsDirectory)
+			++selFileCount;
+	}
 
 	if (ImGui::Button("Extract") && selIsFile) {
 		const ATDiskFSEntryInfo& entry = s_diskEntries[s_diskSelectedIdx];
@@ -3037,6 +3058,51 @@ static void DrawDiskExplorer() {
 			} catch (const std::exception& e) {
 				char msg[256];
 				snprintf(msg, sizeof(msg), "Extract failed: %s", e.what());
+				ShowToast(msg);
+			}
+		}
+	}
+
+	// Bulk extract: extract all selected files to a directory
+	if (selFileCount > 1) {
+		ImGui::SameLine();
+		char bulkLabel[32];
+		snprintf(bulkLabel, sizeof(bulkLabel), "Extract %d", selFileCount);
+		if (ImGui::Button(bulkLabel)) {
+			VDStringW dirPath = ATLinuxOpenFileDialog("Select Directory for Extraction", "All Files|*");
+			if (!dirPath.empty()) {
+				// Use the selected path as a directory (strip filename if one was selected)
+				VDStringW dir = dirPath;
+				int extracted = 0, failed = 0;
+				for (int idx : s_diskSelection) {
+					if (idx < 0 || idx >= (int)s_diskEntries.size() || s_diskEntries[idx].mbIsDirectory)
+						continue;
+					const ATDiskFSEntryInfo& e = s_diskEntries[idx];
+					try {
+						vdfastvector<uint8> data;
+						s_diskFS->ReadFile(e.mKey, data);
+						if (s_diskTextMode) {
+							for (auto& b : data) {
+								if (b == 0x9B) b = 0x0A;
+							}
+						}
+						VDStringW filePath = dir;
+						filePath += L'/';
+						filePath += VDTextU8ToW(VDStringA(e.mFileName.c_str()));
+						VDFile f(filePath.c_str(), nsVDFile::kWrite | nsVDFile::kCreateAlways);
+						if (!data.empty())
+							f.write(data.data(), (long)data.size());
+						f.close();
+						++extracted;
+					} catch (...) {
+						++failed;
+					}
+				}
+				char msg[128];
+				if (failed)
+					snprintf(msg, sizeof(msg), "Extracted %d file(s), %d failed", extracted, failed);
+				else
+					snprintf(msg, sizeof(msg), "Extracted %d file(s)", extracted);
 				ShowToast(msg);
 			}
 		}
@@ -3148,23 +3214,40 @@ static void DrawDiskExplorer() {
 
 	// Delete confirmation popup
 	if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-		if (hasSel) {
-			ImGui::Text("Delete \"%s\"?", s_diskEntries[s_diskSelectedIdx].mFileName.c_str());
+		if (s_diskSelection.size() == 1) {
+			int idx = *s_diskSelection.begin();
+			if (idx >= 0 && idx < (int)s_diskEntries.size())
+				ImGui::Text("Delete \"%s\"?", s_diskEntries[idx].mFileName.c_str());
+		} else if (s_diskSelection.size() > 1) {
+			ImGui::Text("Delete %d selected item(s)?", (int)s_diskSelection.size());
 		}
 
 		if (ImGui::Button("Delete", ImVec2(80, 0))) {
-			if (hasSel) {
+			int deleted = 0, failed = 0;
+			// Delete in reverse order to preserve indices during iteration
+			for (auto it = s_diskSelection.rbegin(); it != s_diskSelection.rend(); ++it) {
+				int idx = *it;
+				if (idx < 0 || idx >= (int)s_diskEntries.size())
+					continue;
 				try {
-					s_diskFS->DeleteFile(s_diskEntries[s_diskSelectedIdx].mKey);
-					s_diskFS->Flush();
-					DiskExplorerRefresh();
-					ShowToast("File deleted");
-				} catch (const std::exception& e) {
-					char msg[256];
-					snprintf(msg, sizeof(msg), "Delete failed: %s", e.what());
-					ShowToast(msg);
+					s_diskFS->DeleteFile(s_diskEntries[idx].mKey);
+					++deleted;
+				} catch (...) {
+					++failed;
 				}
 			}
+			if (deleted > 0) {
+				try { s_diskFS->Flush(); } catch (...) {}
+				DiskExplorerRefresh();
+			}
+			char msg[128];
+			if (failed)
+				snprintf(msg, sizeof(msg), "Deleted %d, %d failed", deleted, failed);
+			else if (deleted == 1)
+				snprintf(msg, sizeof(msg), "File deleted");
+			else
+				snprintf(msg, sizeof(msg), "Deleted %d item(s)", deleted);
+			ShowToast(msg);
 			ImGui::CloseCurrentPopup();
 		}
 		ImGui::SameLine();
@@ -3239,6 +3322,15 @@ static void DrawDiskExplorer() {
 
 	ImGui::Separator();
 
+	// Ctrl+A: select all
+	if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)
+		&& ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A))
+	{
+		s_diskSelection.clear();
+		for (int i = 0; i < (int)s_diskEntries.size(); ++i)
+			s_diskSelection.insert(i);
+	}
+
 	// File listing table
 	if (ImGui::BeginTable("##diskfiles", 4,
 		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
@@ -3263,10 +3355,32 @@ static void DrawDiskExplorer() {
 			else
 				snprintf(nameStr, sizeof(nameStr), "%s", entry.mFileName.c_str());
 
-			bool selected = (s_diskSelectedIdx == i);
+			bool selected = s_diskSelection.count(i) > 0;
 			if (ImGui::Selectable(nameStr, selected,
 				ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick))
 			{
+				ImGuiIO& io = ImGui::GetIO();
+
+				if (io.KeyShift && s_diskShiftAnchor >= 0) {
+					// Shift+click: range select from anchor
+					s_diskSelection.clear();
+					int lo = std::min(s_diskShiftAnchor, i);
+					int hi = std::max(s_diskShiftAnchor, i);
+					for (int j = lo; j <= hi; ++j)
+						s_diskSelection.insert(j);
+				} else if (io.KeyCtrl) {
+					// Ctrl+click: toggle individual item
+					if (selected)
+						s_diskSelection.erase(i);
+					else
+						s_diskSelection.insert(i);
+					s_diskShiftAnchor = i;
+				} else {
+					// Plain click: single select
+					s_diskSelection.clear();
+					s_diskSelection.insert(i);
+					s_diskShiftAnchor = i;
+				}
 				s_diskSelectedIdx = i;
 
 				if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) && entry.mbIsDirectory) {
