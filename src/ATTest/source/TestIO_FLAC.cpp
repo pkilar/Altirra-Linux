@@ -30,6 +30,11 @@ AT_DEFINE_TEST(IO_FLAC) {
 		L"../../testdata/flac/chirps24-fixed.flac"
 	};
 
+	if (!VDDoesPathExist(kTestFiles[0])) {
+		printf("IO_FLAC: test data not found at %ls, skipping\n", kTestFiles[0]);
+		return 0;
+	}
+
 	sint16 buf[1024];
 
 	for(const wchar_t *fn : kTestFiles) {

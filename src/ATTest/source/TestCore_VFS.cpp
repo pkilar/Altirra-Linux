@@ -32,6 +32,7 @@ DEFINE_TEST(Core_VFSMakePath) {
 		TEST_ASSERT(false); \
 	 }
 
+#ifdef VD_PLATFORM_WINDOWS
 	TEST_PATH_CASE(L"c:", L"x", L"c:x");
 	TEST_PATH_CASE(L"c:\\", L"x", L"c:\\x");
 	TEST_PATH_CASE(L"c:\\y", L"x", L"c:\\y\\x");
@@ -41,14 +42,29 @@ DEFINE_TEST(Core_VFSMakePath) {
 	TEST_PATH_CASE(L"zip://c:/test.zip!dir", L"b\\c", L"zip://c:/test.zip!dir/b/c");
 	TEST_PATH_CASE(L"atfs://c:/test.zip!dir", L"b\\c", L"atfs://c:/test.zip!dir/b/c");
 	TEST_PATH_CASE(L"c:\\", L"zip://x/test.zip!foo.bin", L"zip://c:/x/test.zip!foo.bin");
+#else
+	TEST_PATH_CASE(L"/home", L"x", L"/home/x");
+	TEST_PATH_CASE(L"/home/", L"x", L"/home/x");
+	TEST_PATH_CASE(L"/home/user", L"x", L"/home/user/x");
+	TEST_PATH_CASE(L"gz:///tmp/test", L"b/c", L"gz:///tmp/test/b/c");
+	TEST_PATH_CASE(L"zip:///tmp/test.zip!dir", L"b/c", L"zip:///tmp/test.zip!dir/b/c");
+	TEST_PATH_CASE(L"atfs:///tmp/test.zip!dir", L"b/c", L"atfs:///tmp/test.zip!dir/b/c");
+	TEST_PATH_CASE(L"/tmp/", L"zip://x/test.zip!foo.bin", L"zip:///tmp/x/test.zip!foo.bin");
+#endif
 
-#undef X
+#undef TEST_PATH_CASE
 
 	return 0;
 }
 
 DEFINE_TEST(Core_VFSEncodePath) {
+	// On Linux (wchar_t=4), supplementary code points are single wchar_t values,
+	// not surrogate pairs. Use direct U+ escapes instead.
+#if WCHAR_MAX > 0xFFFF
+	VDStringSpanW rawPath(L"\u0080\u0081\u0BAF\u20AC\U00010000\U00010402");
+#else
 	VDStringSpanW rawPath(L"\u0080\u0081\u0BAF\u20AC\xD800\xDC00\xD801\xDC02");
+#endif
 
 	VDStringW url;
 	ATEncodeVFSPath(url, rawPath, true);

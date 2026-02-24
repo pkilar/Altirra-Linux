@@ -52,6 +52,9 @@ AT_DEFINE_TEST(System_Filesys) {
 	VDASSERT(fn(VDStringW(L##x))==L##y1)
 
 	TEST(VDFileSplitRoot, "", "", "");
+	TEST(VDFileSplitRoot, ".", "", ".");
+	TEST(VDFileSplitRoot, "..", "", "..");
+#ifdef VD_PLATFORM_WINDOWS
 	TEST(VDFileSplitRoot, "c:", "c:", "");
 	TEST(VDFileSplitRoot, "c:x", "c:", "x");
 	TEST(VDFileSplitRoot, "c:x\\", "c:", "x\\");
@@ -59,8 +62,6 @@ AT_DEFINE_TEST(System_Filesys) {
 	TEST(VDFileSplitRoot, "c:\\", "c:\\", "");
 	TEST(VDFileSplitRoot, "c:\\x", "c:\\", "x");
 	TEST(VDFileSplitRoot, "c:\\x\\", "c:\\", "x\\");
-	TEST(VDFileSplitRoot, ".", "", ".");
-	TEST(VDFileSplitRoot, "..", "", "..");
 	TEST(VDFileSplitRoot, "\\", "", "\\");
 	TEST(VDFileSplitRoot, "\\x", "", "\\x");
 	TEST(VDFileSplitRoot, "\\x\\", "", "\\x\\");
@@ -70,6 +71,13 @@ AT_DEFINE_TEST(System_Filesys) {
 	TEST(VDFileSplitRoot, "\\\\server\\share\\x", "\\\\server\\share\\", "x");
 	TEST(VDFileSplitRoot, "\\\\server\\share\\x\\", "\\\\server\\share\\", "x\\");
 	TEST(VDFileSplitRoot, "\\\\server\\share\\x\\y", "\\\\server\\share\\", "x\\y");
+#else
+	TEST(VDFileSplitRoot, "/", "/", "");
+	TEST(VDFileSplitRoot, "/x", "/", "x");
+	TEST(VDFileSplitRoot, "/x/y", "/", "x/y");
+	TEST(VDFileSplitRoot, "x", "", "x");
+	TEST(VDFileSplitRoot, "x/y", "", "x/y");
+#endif
 #undef TEST
 
 	// WILDCARD TESTS
@@ -106,6 +114,9 @@ AT_DEFINE_TEST(System_Filesys) {
 	// Path canonicalization tests
 	TEST_ASSERT(VDFileGetCanonicalPath(L"") == L".");
 	TEST_ASSERT(VDFileGetCanonicalPath(L".") == L".");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"..") == L"..");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"../x/..") == L"..");
+#ifdef VD_PLATFORM_WINDOWS
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:") == L"c:");
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:\\") == L"c:\\");
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:\\\\") == L"c:\\");
@@ -128,13 +139,23 @@ AT_DEFINE_TEST(System_Filesys) {
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:path\\path2/;1") == L"c:path\\path2;1");
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:/path1/./path2/../path3") == L"c:\\path1\\path3");
 	TEST_ASSERT(VDFileGetCanonicalPath(L"c:/path1/./path2/../../../../path3") == L"c:\\path3");
-	TEST_ASSERT(VDFileGetCanonicalPath(L"..") == L"..");
 	TEST_ASSERT(VDFileGetCanonicalPath(L"../..") == L"..\\..");
-	TEST_ASSERT(VDFileGetCanonicalPath(L"../x/..") == L"..");
 	TEST_ASSERT(VDFileGetCanonicalPath(L".\\x") == L"x");
 	TEST_ASSERT(VDFileGetCanonicalPath(L".\\x\\y") == L"x\\y");
+#else
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/") == L"/");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/path") == L"/path");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/path/") == L"/path");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/path/path2") == L"/path/path2");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/path1/./path2/../path3") == L"/path1/path3");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"/path1/./path2/../../../../path3") == L"/path3");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"../..") == L"../..");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"./x") == L"x");
+	TEST_ASSERT(VDFileGetCanonicalPath(L"./x/y") == L"x/y");
+#endif
 
 	// Path relativization tests
+#ifdef VD_PLATFORM_WINDOWS
 	TEST_ASSERT(VDFileIsRelativePath(L"c:\\") == false);
 	TEST_ASSERT(VDFileIsRelativePath(L"c:\\foo") == false);
 	TEST_ASSERT(VDFileIsRelativePath(L"c:\\foo\\") == false);
@@ -161,7 +182,26 @@ AT_DEFINE_TEST(System_Filesys) {
 	TEST_ASSERT(VDFileGetRelativePath(L"C:/PROGRAM FILES/MY STUFF", L"d:/program files/my stuff/foo.exe", true) == L"");
 	TEST_ASSERT(VDFileGetRelativePath(L"C:/PROGRAM FILES/MY STUFF", L"program files/my stuff/foo.exe", true) == L"");
 	TEST_ASSERT(VDFileGetRelativePath(L"PROGRAM FILES/MY STUFF", L"c:/program files/my stuff/foo.exe", true) == L"");
+#else
+	TEST_ASSERT(VDFileIsRelativePath(L"/") == false);
+	TEST_ASSERT(VDFileIsRelativePath(L"/foo") == false);
+	TEST_ASSERT(VDFileIsRelativePath(L"/foo/") == false);
+	TEST_ASSERT(VDFileIsRelativePath(L"/foo/bar") == false);
+	TEST_ASSERT(VDFileIsRelativePath(L"/foo/bar/") == false);
+	TEST_ASSERT(VDFileIsRelativePath(L".") == true);
+	TEST_ASSERT(VDFileIsRelativePath(L"..") == true);
+	TEST_ASSERT(VDFileIsRelativePath(L"x") == true);
+	TEST_ASSERT(VDFileIsRelativePath(L"x/") == true);
+
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/user", true) == L".");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/user/foo", true) == L"foo");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/user/sub/foo", true) == L"sub/foo");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/other/foo", true) == L"../other/foo");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/other/foo", false) == L"");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"/home/user/../other/foo", true) == L"../other/foo");
+	TEST_ASSERT(VDFileGetRelativePath(L"/home/user", L"home/user/foo", true) == L"");
+	TEST_ASSERT(VDFileGetRelativePath(L"home/user", L"/home/user/foo", true) == L"");
+#endif
 
 	return 0;
 }
-
