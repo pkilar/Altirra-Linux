@@ -122,6 +122,16 @@ void ATInputMap::AddMappings(std::initializer_list<Mapping> mappings) {
 	mMappings.insert(mMappings.end(), mappings.begin(), mappings.end());
 }
 
+void ATInputMap::RemoveMapping(uint32 index) {
+	if (index < mMappings.size())
+		mMappings.erase(mMappings.begin() + index);
+}
+
+void ATInputMap::SetMappingInputCode(uint32 index, uint32 inputCode) {
+	if (index < mMappings.size())
+		mMappings[index].mInputCode = inputCode;
+}
+
 bool ATInputMap::Load(VDRegistryKey& key, const char *name) {
 	int len = key.getBinaryLength(name);
 

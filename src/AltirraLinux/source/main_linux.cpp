@@ -736,6 +736,59 @@ static void ProcessEvents(SDL_Window *window) {
 		if (g_pImGui)
 			g_pImGui->ProcessEvent(event);
 
+		// Input capture mode: intercept keyboard/controller events for binding editor
+		if (ATImGuiIsCapturingInput()) {
+			if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+				SDL_Scancode sc = event.key.keysym.scancode;
+
+				// Shift+Escape = cancel capture
+				if (sc == SDL_SCANCODE_ESCAPE && (event.key.keysym.mod & KMOD_SHIFT)) {
+					ATImGuiOnCapturedInput(kATInputCode_None);
+					continue;
+				}
+
+				// Skip bare shift press — wait for key-up to distinguish L/R
+				if (sc == SDL_SCANCODE_LSHIFT || sc == SDL_SCANCODE_RSHIFT)
+					continue;
+
+				uint32 code = ATInputSDL2::TranslateSDLScancode(sc);
+				if (code != kATInputCode_None) {
+					ATImGuiOnCapturedInput(code);
+					continue;
+				}
+			} else if (event.type == SDL_KEYUP) {
+				// Resolve L/R shift on key-up (user pressed and released shift alone)
+				if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT) {
+					ATImGuiOnCapturedInput(kATInputCode_KeyLShift);
+					continue;
+				} else if (event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
+					ATImGuiOnCapturedInput(kATInputCode_KeyRShift);
+					continue;
+				}
+			} else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
+				uint32 code = kATInputCode_JoyButton0 + event.cbutton.button;
+				ATImGuiOnCapturedInput(code);
+				continue;
+			} else if (event.type == SDL_CONTROLLERAXISMOTION) {
+				sint32 rawValue = event.caxis.value;
+				if (rawValue > 24000 || rawValue < -24000) {
+					uint32 axisCode;
+					switch (event.caxis.axis) {
+						case SDL_CONTROLLER_AXIS_LEFTX:       axisCode = kATInputCode_JoyHoriz1; break;
+						case SDL_CONTROLLER_AXIS_LEFTY:        axisCode = kATInputCode_JoyVert1; break;
+						case SDL_CONTROLLER_AXIS_RIGHTX:       axisCode = kATInputCode_JoyHoriz3; break;
+						case SDL_CONTROLLER_AXIS_RIGHTY:       axisCode = kATInputCode_JoyVert3; break;
+						case SDL_CONTROLLER_AXIS_TRIGGERLEFT:  axisCode = kATInputCode_JoyVert2; break;
+						case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:  axisCode = kATInputCode_JoyVert4; break;
+						default: goto not_captured;
+					}
+					ATImGuiOnCapturedInput(axisCode);
+					continue;
+				}
+			}
+			not_captured:;
+		}
+
 		// Track mouse movement for auto-hide cursor
 		if (event.type == SDL_MOUSEMOTION) {
 			g_lastMouseMoveTime = SDL_GetTicks();

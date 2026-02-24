@@ -64,6 +64,8 @@ public:
 	const Mapping& GetMapping(uint32 i) const;
 	void AddMapping(uint32 inputCode, uint32 controllerId, uint32 code);
 	void AddMappings(std::initializer_list<Mapping> mappings);
+	void RemoveMapping(uint32 index);
+	void SetMappingInputCode(uint32 index, uint32 inputCode);
 
 	bool Load(VDRegistryKey& key, const char *name);
 	void Save(VDRegistryKey& key, const char *name);

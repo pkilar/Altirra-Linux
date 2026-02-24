@@ -109,6 +109,12 @@ static bool s_showBootOptions = false;
 static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
+
+// Input capture state for binding editor
+static bool s_inputCaptureActive = false;
+static uint32 s_capturedInputCode = 0;
+static bool s_inputCaptureGotResult = false;
+static int s_captureTargetMappingIdx = -1;  // -1 = adding new, >=0 = rebinding existing
 static bool s_quitRequested = false;
 static bool s_quitConfirmed = false;
 static bool s_showStatusBar = true;
@@ -4294,18 +4300,21 @@ static void DrawInputSetup() {
 			}
 
 			uint32 mappingCount = selMap->GetMappingCount();
+			bool mapModified = false;
+			bool openCapturePopup = false;
 
 			if (mappingCount == 0) {
 				ImGui::TextDisabled("No bindings in this map.");
-			} else if (ImGui::BeginTable("##bindings", 4,
+			} else if (ImGui::BeginTable("##bindings", 5,
 					ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
 					| ImGuiTableFlags_Sortable | ImGuiTableFlags_SizingStretchProp,
 					ImVec2(0, 200))) {
 				ImGui::TableSetupScrollFreeze(0, 1);
-				ImGui::TableSetupColumn("Input", ImGuiTableColumnFlags_DefaultSort, 0.30f);
-				ImGui::TableSetupColumn("Controller", 0, 0.25f);
-				ImGui::TableSetupColumn("Target", 0, 0.25f);
-				ImGui::TableSetupColumn("Mode", 0, 0.20f);
+				ImGui::TableSetupColumn("Input", ImGuiTableColumnFlags_DefaultSort, 0.28f);
+				ImGui::TableSetupColumn("Controller", 0, 0.22f);
+				ImGui::TableSetupColumn("Target", 0, 0.20f);
+				ImGui::TableSetupColumn("Mode", 0, 0.15f);
+				ImGui::TableSetupColumn("Actions", ImGuiTableColumnFlags_NoSort, 0.15f);
 				ImGui::TableHeadersRow();
 
 				// Build sortable mapping list
@@ -4375,6 +4384,7 @@ static void DrawInputSetup() {
 				}
 
 				for (const auto& entry : sortedMappings) {
+					ImGui::PushID((int)entry.idx);
 					ImGui::TableNextRow();
 					ImGui::TableNextColumn();
 					ImGui::TextUnformatted(entry.inputName);
@@ -4387,12 +4397,142 @@ static void DrawInputSetup() {
 					ImGui::TextUnformatted(entry.triggerName);
 					ImGui::TableNextColumn();
 					ImGui::TextUnformatted(entry.modeName);
+					ImGui::TableNextColumn();
+					if (ImGui::SmallButton("Rebind")) {
+						s_captureTargetMappingIdx = (int)entry.idx;
+						s_inputCaptureGotResult = false;
+						s_inputCaptureActive = true;
+						openCapturePopup = true;
+					}
+					ImGui::SameLine();
+					if (ImGui::SmallButton("Del")) {
+						selMap->RemoveMapping(entry.idx);
+						mapModified = true;
+					}
+					ImGui::PopID();
 				}
 
 				ImGui::EndTable();
 			}
 
 			ImGui::Text("%u binding(s)", mappingCount);
+
+			// --- Add new binding ---
+			ImGui::Spacing();
+			{
+				static int s_newControllerIdx = 0;
+				static int s_newTriggerIdx = 0;
+
+				static const struct { uint32 code; const char *name; } kCommonTriggers[] = {
+					{ kATInputTrigger_Up,		"Up" },
+					{ kATInputTrigger_Down,		"Down" },
+					{ kATInputTrigger_Left,		"Left" },
+					{ kATInputTrigger_Right,	"Right" },
+					{ kATInputTrigger_Button0,	"Button" },
+					{ kATInputTrigger_Start,	"Start" },
+					{ kATInputTrigger_Select,	"Select" },
+					{ kATInputTrigger_Option,	"Option" },
+					{ kATInputTrigger_Axis0,	"Axis" },
+				};
+				static const int kNumCommonTriggers = (int)(sizeof(kCommonTriggers) / sizeof(kCommonTriggers[0]));
+
+				if (s_newTriggerIdx >= kNumCommonTriggers)
+					s_newTriggerIdx = 0;
+
+				// Controller selector
+				if (ctrlCount > 0) {
+					ImGui::SetNextItemWidth(200);
+					if (ImGui::BeginCombo("##newctrl", [&]() -> const char* {
+						if (s_newControllerIdx >= 0 && (uint32)s_newControllerIdx < ctrlCount) {
+							const ATInputMap::Controller& ctrl = selMap->GetController(s_newControllerIdx);
+							static char cbuf[64];
+							snprintf(cbuf, sizeof(cbuf), "%s P%u", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+							return cbuf;
+						}
+						return "Select controller";
+					}())) {
+						for (uint32 c = 0; c < ctrlCount; ++c) {
+							const ATInputMap::Controller& ctrl = selMap->GetController(c);
+							char label[64];
+							snprintf(label, sizeof(label), "%s P%u", ATGetControllerTypeName(ctrl.mType), ctrl.mIndex + 1);
+							if (ImGui::Selectable(label, (int)c == s_newControllerIdx))
+								s_newControllerIdx = (int)c;
+						}
+						ImGui::EndCombo();
+					}
+
+					ImGui::SameLine();
+					ImGui::SetNextItemWidth(120);
+					if (ImGui::BeginCombo("##newtrig", kCommonTriggers[s_newTriggerIdx].name)) {
+						for (int t = 0; t < kNumCommonTriggers; ++t) {
+							if (ImGui::Selectable(kCommonTriggers[t].name, t == s_newTriggerIdx))
+								s_newTriggerIdx = t;
+						}
+						ImGui::EndCombo();
+					}
+
+					ImGui::SameLine();
+					if (ImGui::Button("Add & Capture")) {
+						s_captureTargetMappingIdx = -1;
+						s_inputCaptureGotResult = false;
+						s_inputCaptureActive = true;
+						openCapturePopup = true;
+					}
+				} else {
+					ImGui::TextDisabled("Add a controller to the map first to add bindings.");
+				}
+
+				// --- Capture Input modal popup ---
+				if (openCapturePopup)
+					ImGui::OpenPopup("Capture Input");
+
+				ImVec2 center = ImGui::GetMainViewport()->GetCenter();
+				ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+				if (ImGui::BeginPopupModal("Capture Input", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+					ImGui::Text("Press a key, gamepad button, or move a stick...");
+					ImGui::TextDisabled("Shift+Escape to cancel");
+					ImGui::Spacing();
+
+					if (s_inputCaptureGotResult) {
+						if (s_capturedInputCode == kATInputCode_None) {
+							// Cancelled
+						} else if (s_captureTargetMappingIdx >= 0) {
+							// Rebinding existing mapping
+							selMap->SetMappingInputCode((uint32)s_captureTargetMappingIdx, s_capturedInputCode);
+							mapModified = true;
+						} else {
+							// Adding new mapping
+							uint32 controllerId = (s_newControllerIdx >= 0 && (uint32)s_newControllerIdx < ctrlCount)
+								? (uint32)s_newControllerIdx : 0;
+							selMap->AddMapping(s_capturedInputCode, controllerId,
+								kCommonTriggers[s_newTriggerIdx].code);
+							mapModified = true;
+						}
+
+						s_inputCaptureActive = false;
+						s_inputCaptureGotResult = false;
+						s_capturedInputCode = 0;
+						ImGui::CloseCurrentPopup();
+					}
+
+					if (ImGui::Button("Cancel")) {
+						s_inputCaptureActive = false;
+						s_inputCaptureGotResult = false;
+						s_capturedInputCode = 0;
+						ImGui::CloseCurrentPopup();
+					}
+					ImGui::EndPopup();
+				}
+			}
+
+			// Re-register map with input manager after any mutation
+			if (mapModified) {
+				bool wasEnabled = inputMgr->IsInputMapEnabled(selMap);
+				if (wasEnabled) {
+					inputMgr->ActivateInputMap(selMap, false);
+					inputMgr->ActivateInputMap(selMap, true);
+				}
+			}
 		}
 	}
 
@@ -5076,6 +5216,15 @@ bool ATImGuiIsQuitConfirmed() {
 
 void ATImGuiShowToast(const char *message) {
 	ShowToast(message);
+}
+
+bool ATImGuiIsCapturingInput() {
+	return s_inputCaptureActive;
+}
+
+void ATImGuiOnCapturedInput(uint32 inputCode) {
+	s_capturedInputCode = inputCode;
+	s_inputCaptureGotResult = true;
 }
 
 void ATImGuiPasteText() {
