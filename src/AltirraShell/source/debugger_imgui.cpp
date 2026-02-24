@@ -39,6 +39,10 @@ static char s_cmdInputBuf[512] = {};
 class ATImGuiDebuggerClient : public IATDebuggerClient {
 public:
 	void OnDebuggerSystemStateUpdate(const ATDebuggerSystemState& state) override {
+		// Detect transition from running to stopped (breakpoint hit)
+		if (mbStateValid && mState.mbRunning && !state.mbRunning)
+			mbJustBroke = true;
+
 		mState = state;
 		mbStateValid = true;
 	}
@@ -51,9 +55,18 @@ public:
 	ATDebuggerSystemState mState {};
 	bool mbStateValid = false;
 	bool mbBreakpointsChanged = false;
+	bool mbJustBroke = false;
 };
 
 static ATImGuiDebuggerClient *s_pClient = nullptr;
+
+bool ATImGuiDebuggerDidBreak() {
+	if (s_pClient && s_pClient->mbJustBroke) {
+		s_pClient->mbJustBroke = false;
+		return true;
+	}
+	return false;
+}
 
 // Window visibility state
 static bool s_showRegisters = true;

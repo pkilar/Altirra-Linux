@@ -851,6 +851,13 @@ static void RenderAndSwap(SDL_Window *window) {
 	// Render emulation frame (upload texture + draw quad)
 	g_pDisplay->RenderFrame();
 
+	// Auto-show overlay when debugger hits a breakpoint
+	if (g_pImGui && !g_pImGui->IsVisible() && ATImGuiDebuggerDidBreak()) {
+		g_pImGui->SetVisible(true);
+		SDL_ShowCursor(SDL_ENABLE);
+		g_cursorHidden = false;
+	}
+
 	// Render ImGui overlay on top
 	if (g_pImGui && g_pImGui->IsVisible()) {
 		g_pImGui->NewFrame();

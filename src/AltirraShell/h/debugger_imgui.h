@@ -17,4 +17,8 @@ bool& ATImGuiDebuggerShowWatch();
 bool& ATImGuiDebuggerShowCallStack();
 bool& ATImGuiDebuggerShowHistory();
 
+// Returns true (once) when the debugger transitions from running to stopped.
+// Resets the flag on read so it fires only once per break event.
+bool ATImGuiDebuggerDidBreak();
+
 #endif
