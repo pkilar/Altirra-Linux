@@ -917,9 +917,12 @@ int main(int argc, char *argv[]) {
 	if (!opts.romPath.empty())
 		s_extraRomPath = opts.romPath;
 
-	// Load profiles and last-used settings
-	ATLoadDefaultProfiles();
-	ATSettingsLoadLastProfile(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
+	// Init simulator (must happen before settings load, which calls
+	// SetHardwareMode and other methods that access the device manager)
+	g_sim.Init();
+	g_sim.SetRandomSeed(rand() ^ (rand() << 15));
+
+	fprintf(stderr, "Simulator initialized\n");
 
 	// Init SDL2
 	SDL_Window *window = nullptr;
@@ -970,12 +973,6 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "ImGui initialized (F12 to toggle overlay)\n");
 	}
 
-	// Init simulator
-	g_sim.Init();
-	g_sim.SetRandomSeed(rand() ^ (rand() << 15));
-
-	fprintf(stderr, "Simulator initialized\n");
-
 	// Init debugger (must be after sim init)
 	ATInitDebugger();
 	ATImGuiDebuggerInit();
@@ -1005,6 +1002,13 @@ int main(int argc, char *argv[]) {
 		jm = nullptr;
 		fprintf(stderr, "Joystick manager init failed (continuing without joystick support)\n");
 	}
+
+	// Load profiles and last-used settings (must be after simulator, joystick
+	// manager, and audio init — settings load accesses GetJoystickManager(),
+	// GetAudioOutput(), SetHardwareMode(), etc.)
+	ATLoadDefaultProfiles();
+	ATSettingsLoadLastProfile(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
+	fprintf(stderr, "Settings loaded\n");
 
 	// Load ROMs (will use HLE kernel if no external ROMs found)
 	try {
