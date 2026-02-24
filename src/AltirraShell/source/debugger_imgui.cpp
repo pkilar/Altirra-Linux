@@ -271,11 +271,16 @@ static void DrawRegisters() {
 	const auto& state = s_pClient->mState;
 	const auto& regs = state.mExecState.m6502;
 
+	// Track previous register values for change highlighting
+	static uint16 s_prevPC = 0;
+	static uint8 s_prevA = 0, s_prevX = 0, s_prevY = 0, s_prevS = 0, s_prevP = 0;
+	static bool s_prevValid = false;
+
 	// Helper: editable hex register field (double-click to edit)
 	static int s_regEditId = -1;
 	static char s_regEditBuf[8] = "";
 
-	auto EditableReg = [&](const char *name, int id, uint32 val, int hexDigits) {
+	auto EditableReg = [&](const char *name, int id, uint32 val, int hexDigits, uint32 prevVal) {
 		if (s_regEditId == id) {
 			ImGui::Text("%s:", name);
 			ImGui::SameLine();
@@ -306,10 +311,15 @@ static void DrawRegisters() {
 				s_regEditId = -1;
 			}
 		} else {
+			bool changed = s_prevValid && (val != prevVal);
+			if (changed)
+				ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.5f, 0.2f, 1.0f));
 			if (hexDigits == 4)
 				ImGui::Text("%s: %04X", name, val);
 			else if (hexDigits == 2)
 				ImGui::Text("%s: %02X (%3d)", name, val, val);
+			if (changed)
+				ImGui::PopStyleColor();
 			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0)) {
 				s_regEditId = id;
 				snprintf(s_regEditBuf, sizeof(s_regEditBuf),
@@ -318,17 +328,17 @@ static void DrawRegisters() {
 		}
 	};
 
-	// 6502 registers (double-click to edit)
-	EditableReg("PC", 0, state.mPC, 4);
+	// 6502 registers (double-click to edit, orange = changed)
+	EditableReg("PC", 0, state.mPC, 4, s_prevPC);
 	ImGui::SameLine(140);
 	ImGui::Text("Cycle: %u", state.mCycle);
 
 	ImGui::Separator();
 
-	EditableReg(" A", 1, regs.mA, 2);
-	EditableReg(" X", 2, regs.mX, 2);
-	EditableReg(" Y", 3, regs.mY, 2);
-	EditableReg(" S", 4, regs.mS, 2);
+	EditableReg(" A", 1, regs.mA, 2, s_prevA);
+	EditableReg(" X", 2, regs.mX, 2, s_prevX);
+	EditableReg(" Y", 3, regs.mY, 2, s_prevY);
+	EditableReg(" S", 4, regs.mS, 2, s_prevS);
 	// Stack peek: show top 8 bytes above SP
 	if (target) {
 		ImGui::SameLine(140);
@@ -346,19 +356,41 @@ static void DrawRegisters() {
 
 	// Processor status flags (double-click to edit)
 	uint8 p = regs.mP;
-	EditableReg(" P", 5, p, 2);
+	EditableReg(" P", 5, p, 2, s_prevP);
 	ImGui::SameLine();
 
 	const char flags[] = "NV-BDIZC";
 
-	// Color active flags
+	// Color active flags (orange if changed since last stop)
 	for (int i = 0; i < 8; i++) {
 		if (i > 0) ImGui::SameLine(0, 0);
-		if (p & (0x80 >> i))
+		bool active = (p & (0x80 >> i)) != 0;
+		bool flagChanged = s_prevValid && ((p ^ s_prevP) & (0x80 >> i));
+		if (flagChanged && active)
+			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.2f, 1.0f), "%c", flags[i]);
+		else if (active)
 			ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.3f, 1.0f), "%c", flags[i]);
+		else if (flagChanged)
+			ImGui::TextColored(ImVec4(0.7f, 0.4f, 0.2f, 1.0f), ".");
 		else
 			ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), ".");
 	}
+
+	// Snapshot registers when user steps/runs (stopped→running transition)
+	// so that when execution stops again, we can highlight what changed.
+	static bool s_wasRunning = false;
+	bool running = dbg && dbg->IsRunning();
+	if (running && !s_wasRunning) {
+		// About to run — save current registers as "previous"
+		s_prevPC = state.mPC;
+		s_prevA = regs.mA;
+		s_prevX = regs.mX;
+		s_prevY = regs.mY;
+		s_prevS = regs.mS;
+		s_prevP = regs.mP;
+		s_prevValid = true;
+	}
+	s_wasRunning = running;
 
 	// Hardware register readouts via debug reads
 	if (target) {
