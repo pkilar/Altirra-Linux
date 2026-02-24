@@ -65,6 +65,8 @@ static bool s_showBreakpoints = true;
 // Memory window state
 static uint32 s_memoryAddr = 0;
 static char s_memoryAddrBuf[16] = "0000";
+static int s_memEditByteIdx = -1;  // -1 = no byte being edited
+static char s_memEditBuf[4] = "";
 
 // Disassembly state
 static uint32 s_disasmAddr = 0;
@@ -411,7 +413,7 @@ static void DrawMemory() {
 
 	ImGui::Separator();
 
-	// 16x16 hex dump
+	// 16x16 hex dump with inline editing
 	if (ImGui::BeginChild("##memlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
 		uint8 buf[256];
 		target->DebugReadMemory(s_memoryAddr, buf, 256);
@@ -421,13 +423,51 @@ static void DrawMemory() {
 
 			// Address
 			ImGui::Text("%04X:", rowAddr);
-			ImGui::SameLine();
 
-			// Hex bytes
+			// Hex bytes — clickable for editing
 			for (int col = 0; col < 16; col++) {
 				if (col == 8) ImGui::SameLine(0, 8);
 				else ImGui::SameLine(0, 4);
-				ImGui::Text("%02X", buf[row * 16 + col]);
+
+				int byteIdx = row * 16 + col;
+
+				if (s_memEditByteIdx == byteIdx) {
+					// Inline edit field
+					ImGui::SetNextItemWidth(22);
+					ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(1, 0));
+					bool commit = ImGui::InputText("##memedit", s_memEditBuf,
+						sizeof(s_memEditBuf),
+						ImGuiInputTextFlags_CharsHexadecimal
+						| ImGuiInputTextFlags_EnterReturnsTrue
+						| ImGuiInputTextFlags_AutoSelectAll);
+					ImGui::PopStyleVar();
+
+					// Auto-commit when 2 chars typed
+					if (strlen(s_memEditBuf) >= 2)
+						commit = true;
+
+					if (commit) {
+						unsigned int val;
+						if (sscanf(s_memEditBuf, "%x", &val) == 1) {
+							uint16 addr = (s_memoryAddr + byteIdx) & 0xFFFF;
+							target->WriteByte(addr, (uint8)val);
+						}
+						s_memEditByteIdx = -1;
+					} else if (!ImGui::IsItemActive() && ImGui::IsItemDeactivated()) {
+						// Lost focus without Enter — cancel
+						s_memEditByteIdx = -1;
+					}
+				} else {
+					// Clickable hex byte
+					char label[8];
+					snprintf(label, sizeof(label), "%02X##b%d", buf[byteIdx], byteIdx);
+					if (ImGui::Selectable(label, false,
+						ImGuiSelectableFlags_None, ImVec2(22, 0))) {
+						s_memEditByteIdx = byteIdx;
+						snprintf(s_memEditBuf, sizeof(s_memEditBuf), "%02X",
+							buf[byteIdx]);
+					}
+				}
 			}
 
 			ImGui::SameLine(0, 12);
