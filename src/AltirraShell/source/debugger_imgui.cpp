@@ -535,30 +535,56 @@ static void DrawDisassembly() {
 	addr = s_disasmAddr;
 
 	if (ImGui::BeginChild("##disasmlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		// Scroll helper: advance N instructions forward
+		auto AdvanceAddr = [&](uint16 startA, int count) -> uint16 {
+			uint16 a = startA;
+			for (int i = 0; i < count; i++) {
+				ATCPUHistoryEntry h;
+				ATDisassembleCaptureInsnContext(target, a, 0, h);
+				ATDisasmResult r = ATDisassembleInsn(line, target,
+					state.mExecMode, h, true, false, true, s_disasmShowBytes, s_disasmShowLabels,
+					false, false, true, true, false);
+				a = r.mNextPC;
+			}
+			return a;
+		};
+
 		// Scroll wheel: move by ~3 instructions per notch
 		if (ImGui::IsWindowHovered()) {
 			float wheel = ImGui::GetIO().MouseWheel;
 			if (wheel != 0.0f) {
 				int lines = (int)(-wheel) * 3;
-				if (lines > 0) {
-					// Scroll down: advance address forward
-					uint16 a = s_disasmAddr;
-					for (int i = 0; i < lines; i++) {
-						ATCPUHistoryEntry h;
-						ATDisassembleCaptureInsnContext(target, a, 0, h);
-						ATDisasmResult r = ATDisassembleInsn(line, target,
-							state.mExecMode, h, true, false, true, s_disasmShowBytes, s_disasmShowLabels,
-							false, false, true, true, false);
-						a = r.mNextPC;
-					}
-					s_disasmAddr = a;
-				} else {
-					// Scroll up: approximate by going back N bytes
+				if (lines > 0)
+					s_disasmAddr = AdvanceAddr(s_disasmAddr, lines);
+				else
 					s_disasmAddr = (s_disasmAddr + lines) & 0xFFFF;
-				}
 				s_disasmFollowPC = false;
 				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X",
 					s_disasmAddr);
+			}
+		}
+
+		// Keyboard navigation
+		if (ImGui::IsWindowFocused()) {
+			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+				s_disasmAddr = AdvanceAddr(s_disasmAddr, 1);
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", s_disasmAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+				s_disasmAddr = (s_disasmAddr - 1) & 0xFFFF;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", s_disasmAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) {
+				s_disasmAddr = AdvanceAddr(s_disasmAddr, 20);
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", s_disasmAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) {
+				s_disasmAddr = (s_disasmAddr - 40) & 0xFFFF;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", s_disasmAddr);
 			}
 		}
 
@@ -841,6 +867,34 @@ static void DrawMemory() {
 			if (wheel != 0.0f) {
 				int delta = (int)(-wheel) * 16;
 				s_memoryAddr = (s_memoryAddr + delta) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+		}
+
+		// Keyboard navigation (when memory child window is focused)
+		if (ImGui::IsWindowFocused()) {
+			if (ImGui::IsKeyPressed(ImGuiKey_PageDown)) {
+				s_memoryAddr = (s_memoryAddr + 256) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_PageUp)) {
+				s_memoryAddr = (s_memoryAddr - 256) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_DownArrow)) {
+				s_memoryAddr = (s_memoryAddr + 16) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_UpArrow)) {
+				s_memoryAddr = (s_memoryAddr - 16) & 0xFFFF;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_Home)) {
+				s_memoryAddr = 0;
+				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
+			}
+			if (ImGui::IsKeyPressed(ImGuiKey_End)) {
+				s_memoryAddr = 0xFF00;
 				snprintf(s_memoryAddrBuf, sizeof(s_memoryAddrBuf), "%04X", s_memoryAddr);
 			}
 		}
