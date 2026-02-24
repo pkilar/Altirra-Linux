@@ -61,6 +61,10 @@ static bool s_showDisassembly = true;
 static bool s_showMemory = true;
 static bool s_showConsole = true;
 static bool s_showBreakpoints = true;
+static bool s_showWatch = false;
+
+// Watch window state
+static char s_watchAddrBuf[16] = "";
 
 // Memory window state
 static uint32 s_memoryAddr = 0;
@@ -180,6 +184,7 @@ static void DrawToolbar() {
 			ImGui::MenuItem("Memory", nullptr, &s_showMemory);
 			ImGui::MenuItem("Console", nullptr, &s_showConsole);
 			ImGui::MenuItem("Breakpoints", nullptr, &s_showBreakpoints);
+			ImGui::MenuItem("Watch", nullptr, &s_showWatch);
 			ImGui::EndMenu();
 		}
 
@@ -722,6 +727,83 @@ static void DrawBreakpoints() {
 	ImGui::End();
 }
 
+// ============= Watch Window =============
+
+static void DrawWatch() {
+	if (!s_showWatch)
+		return;
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	IATDebugTarget *target = dbg->GetTarget();
+
+	ImGui::SetNextWindowSize(ImVec2(320, 200), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Watch", &s_showWatch)) {
+		ImGui::End();
+		return;
+	}
+
+	// Add watch input
+	ImGui::SetNextItemWidth(80);
+	bool addWatch = ImGui::InputText("##waddr", s_watchAddrBuf, sizeof(s_watchAddrBuf),
+		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue);
+	ImGui::SameLine();
+
+	static int s_watchMode = 0;  // 0=byte, 1=word
+	ImGui::SetNextItemWidth(60);
+	const char *modes[] = { "Byte", "Word" };
+	ImGui::Combo("##wmode", &s_watchMode, modes, 2);
+	ImGui::SameLine();
+
+	if ((ImGui::Button("Add##w") || addWatch) && s_watchAddrBuf[0]) {
+		unsigned int addr;
+		if (sscanf(s_watchAddrBuf, "%x", &addr) == 1) {
+			int len = (s_watchMode == 1) ? 2 : 1;
+			dbg->AddWatch(addr & 0xFFFF, len);
+			s_watchAddrBuf[0] = 0;
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Clear All##w")) {
+		dbg->ClearAllWatches();
+	}
+
+	ImGui::Separator();
+
+	// Display watches
+	for (int idx = 0; idx < 64; idx++) {
+		ATDebuggerWatchInfo info;
+		if (!dbg->GetWatchInfo(idx, info))
+			continue;
+
+		ImGui::PushID(idx);
+
+		uint16 addr = (uint16)info.mAddress;
+		if (info.mMode == ATDebuggerWatchMode::ByteAtAddress) {
+			uint8 val = target ? target->DebugReadByte(addr) : 0;
+			ImGui::Text("[%d] $%04X: %02X (%3d)", idx, addr, val, val);
+		} else if (info.mMode == ATDebuggerWatchMode::WordAtAddress) {
+			uint8 lo = target ? target->DebugReadByte(addr) : 0;
+			uint8 hi = target ? target->DebugReadByte((addr + 1) & 0xFFFF) : 0;
+			uint16 val = lo | ((uint16)hi << 8);
+			ImGui::Text("[%d] $%04X: %04X (%5d)", idx, addr, val, val);
+		} else {
+			ImGui::Text("[%d] (expr)", idx);
+		}
+
+		ImGui::SameLine();
+		if (ImGui::SmallButton("X")) {
+			dbg->ClearWatch(idx);
+		}
+
+		ImGui::PopID();
+	}
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -738,6 +820,7 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawMemory();
 	DrawConsole();
 	DrawBreakpoints();
+	DrawWatch();
 }
 
 void ATImGuiDebuggerDraw() {
