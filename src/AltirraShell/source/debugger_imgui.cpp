@@ -424,6 +424,20 @@ static void DrawRegisters() {
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("POKEY: IRQST=$D20E AUDCTL=$D208 SKSTAT=$D20F");
 
+			// POKEY audio channels
+			if (ImGui::TreeNode("Audio Channels")) {
+				for (int ch = 0; ch < 4; ch++) {
+					uint8 audf = target->DebugReadByte(0xD200 + ch * 2);
+					uint8 audc = target->DebugReadByte(0xD201 + ch * 2);
+					uint8 vol = audc & 0x0F;
+					uint8 dist = (audc >> 4) & 0x0E;
+					bool volOnly = (audc & 0x10) != 0;
+					ImGui::Text("CH%d: F=%02X C=%02X (vol=%d dist=%X%s)",
+						ch + 1, audf, audc, vol, dist >> 1, volOnly ? " vol-only" : "");
+				}
+				ImGui::TreePop();
+			}
+
 			uint8 porta = target->DebugReadByte(0xD300);
 			uint8 portb = target->DebugReadByte(0xD301);
 			uint8 pactl = target->DebugReadByte(0xD302);
@@ -437,6 +451,22 @@ static void DrawRegisters() {
 			ImGui::Text("PRIOR:%02X  VDLY:%02X  GCTL:%02X", prior, vdelay, gractl);
 			if (ImGui::IsItemHovered())
 				ImGui::SetTooltip("GTIA: PRIOR=$D01B VDELAY=$D01C GRACTL=$D01D");
+
+			// GTIA color registers
+			if (ImGui::TreeNode("Color Registers")) {
+				const char *colorNames[] = {
+					"COLPM0", "COLPM1", "COLPM2", "COLPM3",
+					"COLPF0", "COLPF1", "COLPF2", "COLPF3", "COLBK"
+				};
+				for (int i = 0; i < 9; i++) {
+					uint8 col = target->DebugReadByte(0xD012 + i);
+					// Atari color: high nybble = hue, low nybble = luminance
+					uint8 hue = (col >> 4) & 0x0F;
+					uint8 lum = col & 0x0F;
+					ImGui::Text("%s: %02X (hue=%X lum=%X)", colorNames[i], col, hue, lum);
+				}
+				ImGui::TreePop();
+			}
 		}
 	}
 
