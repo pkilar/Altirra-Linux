@@ -15,5 +15,6 @@ bool& ATImGuiDebuggerShowConsole();
 bool& ATImGuiDebuggerShowBreakpoints();
 bool& ATImGuiDebuggerShowWatch();
 bool& ATImGuiDebuggerShowCallStack();
+bool& ATImGuiDebuggerShowHistory();
 
 #endif

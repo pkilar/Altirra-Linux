@@ -63,6 +63,12 @@ static bool s_showConsole = true;
 static bool s_showBreakpoints = true;
 static bool s_showWatch = false;
 static bool s_showCallStack = false;
+static bool s_showHistory = false;
+
+// Console search state
+static char s_consoleSearchBuf[128] = "";
+static bool s_consoleSearchActive = false;
+static bool s_consoleAutoScroll = true;
 
 // Watch window state
 static char s_watchAddrBuf[16] = "";
@@ -187,7 +193,32 @@ static void DrawToolbar() {
 			ImGui::MenuItem("Breakpoints", nullptr, &s_showBreakpoints);
 			ImGui::MenuItem("Watch", nullptr, &s_showWatch);
 			ImGui::MenuItem("Call Stack", nullptr, &s_showCallStack);
+			ImGui::MenuItem("History", nullptr, &s_showHistory);
 			ImGui::EndMenu();
+		}
+
+		// CPU target selector
+		{
+			vdfastvector<IATDebugTarget *> targets;
+			dbg->GetTargetList(targets);
+			if (targets.size() > 1) {
+				ImGui::SameLine(0, 16);
+				uint32 curIdx = dbg->GetTargetIndex();
+				IATDebugTarget *curTarget = dbg->GetTarget();
+				const char *curName = curTarget ? curTarget->GetName() : "?";
+
+				ImGui::SetNextItemWidth(100);
+				if (ImGui::BeginCombo("##cputarget", curName)) {
+					for (uint32 i = 0; i < (uint32)targets.size(); i++) {
+						bool selected = (i == curIdx);
+						if (ImGui::Selectable(targets[i]->GetName(), selected))
+							dbg->SetTarget(i);
+						if (selected)
+							ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
+				}
+			}
 		}
 
 		// Status indicator on the right
@@ -713,7 +744,7 @@ static void DrawConsole() {
 		return;
 	}
 
-	// Copy / Clear buttons
+	// Copy / Clear / Search buttons
 	if (ImGui::SmallButton("Copy All")) {
 		std::lock_guard<std::mutex> lock(s_consoleMutex);
 		ImGui::SetClipboardText(s_consoleBuffer.c_str());
@@ -723,15 +754,58 @@ static void DrawConsole() {
 		std::lock_guard<std::mutex> lock(s_consoleMutex);
 		s_consoleBuffer.clear();
 	}
+	ImGui::SameLine();
+	ImGui::Checkbox("Auto-scroll", &s_consoleAutoScroll);
+	ImGui::SameLine();
+	if (ImGui::SmallButton("Search"))
+		s_consoleSearchActive = !s_consoleSearchActive;
+
+	// Search bar
+	if (s_consoleSearchActive) {
+		ImGui::SetNextItemWidth(200);
+		ImGui::InputText("##conssearch", s_consoleSearchBuf, sizeof(s_consoleSearchBuf));
+		ImGui::SameLine();
+		ImGui::TextDisabled("(filters output)");
+	}
 
 	// Output area
 	float inputHeight = ImGui::GetFrameHeightWithSpacing();
 	if (ImGui::BeginChild("##consoleout", ImVec2(0, -inputHeight), ImGuiChildFlags_Border)) {
 		std::lock_guard<std::mutex> lock(s_consoleMutex);
-		ImGui::TextUnformatted(s_consoleBuffer.c_str(), s_consoleBuffer.c_str() + s_consoleBuffer.size());
+
+		if (s_consoleSearchActive && s_consoleSearchBuf[0]) {
+			// Filtered display: show only lines containing the search string
+			const char *p = s_consoleBuffer.c_str();
+			const char *end = p + s_consoleBuffer.size();
+			size_t needleLen = strlen(s_consoleSearchBuf);
+
+			while (p < end) {
+				const char *nl = (const char *)memchr(p, '\n', end - p);
+				if (!nl) nl = end;
+
+				// Case-insensitive substring search
+				bool match = false;
+				size_t lineLen = nl - p;
+				if (lineLen >= needleLen) {
+					for (size_t i = 0; i <= lineLen - needleLen; i++) {
+						if (strncasecmp(p + i, s_consoleSearchBuf, needleLen) == 0) {
+							match = true;
+							break;
+						}
+					}
+				}
+
+				if (match)
+					ImGui::TextUnformatted(p, nl);
+
+				p = (nl < end) ? nl + 1 : end;
+			}
+		} else {
+			ImGui::TextUnformatted(s_consoleBuffer.c_str(), s_consoleBuffer.c_str() + s_consoleBuffer.size());
+		}
 
 		// Auto-scroll to bottom
-		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f)
+		if (s_consoleAutoScroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f)
 			ImGui::SetScrollHereY(1.0f);
 	}
 	ImGui::EndChild();
@@ -991,6 +1065,131 @@ static void DrawCallStack() {
 	ImGui::End();
 }
 
+// ============= History Window =============
+
+static void DrawHistory() {
+	if (!s_showHistory)
+		return;
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	IATDebugTarget *target = dbg->GetTarget();
+	if (!target)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("History", &s_showHistory)) {
+		ImGui::End();
+		return;
+	}
+
+	// Get the history interface
+	IATDebugTargetHistory *hist = nullptr;
+	if (target)
+		hist = static_cast<IATDebugTargetHistory *>(
+			target->AsInterface(IATDebugTargetHistory::kTypeID));
+
+	if (!hist) {
+		ImGui::TextDisabled("History not available for this target");
+		ImGui::End();
+		return;
+	}
+
+	if (!hist->GetHistoryEnabled()) {
+		ImGui::TextDisabled("History recording is disabled");
+		ImGui::SameLine();
+		if (ImGui::SmallButton("Enable")) {
+			hist->SetHistoryEnabled(true);
+		}
+		ImGui::End();
+		return;
+	}
+
+	if (ImGui::SmallButton("Disable Recording")) {
+		hist->SetHistoryEnabled(false);
+	}
+
+	ImGui::Separator();
+
+	auto range = hist->GetHistoryRange();
+	uint32 rangeStart = range.first;
+	uint32 rangeEnd = range.second;
+	uint32 count = rangeEnd - rangeStart;
+
+	if (count == 0) {
+		ImGui::TextDisabled("No history recorded yet");
+		ImGui::End();
+		return;
+	}
+
+	ImGui::Text("History: %u entries", count);
+
+	if (ImGui::BeginChild("##histlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+		ATDebugDisasmMode disasmMode = target->GetDisasmMode();
+
+		// Show the most recent entries (up to 128)
+		uint32 showCount = count < 128 ? count : 128;
+		uint32 startIdx = rangeEnd - showCount;
+
+		const ATCPUHistoryEntry *hparray[1];
+		VDStringA line;
+
+		for (uint32 i = 0; i < showCount; i++) {
+			uint32 idx = startIdx + i;
+			if (hist->ExtractHistory(hparray, idx, 1) == 0)
+				continue;
+
+			const ATCPUHistoryEntry& he = *hparray[0];
+
+			// Disassemble the instruction
+			line.clear();
+			ATDisasmResult result = ATDisassembleInsn(line, target,
+				disasmMode, he,
+				true, false, true, true, true, false, false, true, true, false);
+
+			// Look up symbol
+			ATSymbol sym {};
+			if (dbs)
+				dbs->LookupSymbol(he.mPC, kATSymbol_Execute, sym);
+
+			bool isNewest = (i == showCount - 1);
+			ImVec4 color = isNewest
+				? ImVec4(1.0f, 1.0f, 0.3f, 1.0f)
+				: ImVec4(0.7f, 0.7f, 0.7f, 1.0f);
+
+			ImGui::PushStyleColor(ImGuiCol_Text, color);
+
+			char label[320];
+			if (sym.mpName && sym.mOffset == he.mPC)
+				snprintf(label, sizeof(label), "%6u %s  (%s)##h%u",
+					he.mCycle, line.c_str(), sym.mpName, i);
+			else
+				snprintf(label, sizeof(label), "%6u %s##h%u",
+					he.mCycle, line.c_str(), i);
+
+			if (ImGui::Selectable(label, false)) {
+				// Click to navigate disassembly to this address
+				s_disasmAddr = he.mPC;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", he.mPC);
+				s_showDisassembly = true;
+			}
+
+			ImGui::PopStyleColor();
+		}
+
+		// Auto-scroll to bottom to show most recent
+		if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f)
+			ImGui::SetScrollHereY(1.0f);
+	}
+	ImGui::EndChild();
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -1000,6 +1199,7 @@ bool& ATImGuiDebuggerShowConsole() { return s_showConsole; }
 bool& ATImGuiDebuggerShowBreakpoints() { return s_showBreakpoints; }
 bool& ATImGuiDebuggerShowWatch() { return s_showWatch; }
 bool& ATImGuiDebuggerShowCallStack() { return s_showCallStack; }
+bool& ATImGuiDebuggerShowHistory() { return s_showHistory; }
 
 // ============= Main Draw =============
 
@@ -1011,6 +1211,7 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawBreakpoints();
 	DrawWatch();
 	DrawCallStack();
+	DrawHistory();
 }
 
 void ATImGuiDebuggerDraw() {
