@@ -968,10 +968,10 @@ static void DrawWatch() {
 		return;
 	}
 
-	// Add watch input
-	ImGui::SetNextItemWidth(80);
+	// Add watch input (accepts hex address, symbol name, or expression)
+	ImGui::SetNextItemWidth(120);
 	bool addWatch = ImGui::InputText("##waddr", s_watchAddrBuf, sizeof(s_watchAddrBuf),
-		ImGuiInputTextFlags_CharsHexadecimal | ImGuiInputTextFlags_EnterReturnsTrue);
+		ImGuiInputTextFlags_EnterReturnsTrue);
 	ImGui::SameLine();
 
 	static int s_watchMode = 0;  // 0=byte, 1=word
@@ -981,16 +981,43 @@ static void DrawWatch() {
 	ImGui::SameLine();
 
 	if ((ImGui::Button("Add##w") || addWatch) && s_watchAddrBuf[0]) {
+		int len = (s_watchMode == 1) ? 2 : 1;
 		unsigned int addr;
 		if (sscanf(s_watchAddrBuf, "%x", &addr) == 1) {
-			int len = (s_watchMode == 1) ? 2 : 1;
 			dbg->AddWatch(addr & 0xFFFF, len);
 			s_watchAddrBuf[0] = 0;
+		} else {
+			// Try symbol lookup
+			sint32 symAddr = dbg->ResolveSymbol(s_watchAddrBuf, true, true, false);
+			if (symAddr >= 0) {
+				dbg->AddWatch((uint16)symAddr, len);
+				s_watchAddrBuf[0] = 0;
+			}
 		}
 	}
 	ImGui::SameLine();
 	if (ImGui::Button("Clear All##w")) {
 		dbg->ClearAllWatches();
+	}
+
+	// Quick-eval expression
+	static char s_evalBuf[128] = "";
+	static std::string s_evalResult;
+	ImGui::SetNextItemWidth(200);
+	if (ImGui::InputText("Eval##weval", s_evalBuf, sizeof(s_evalBuf),
+		ImGuiInputTextFlags_EnterReturnsTrue) && s_evalBuf[0]) {
+		try {
+			sint32 val = dbg->EvaluateThrow(s_evalBuf);
+			char res[64];
+			snprintf(res, sizeof(res), "= $%04X (%d)", (uint16)(val & 0xFFFF), val);
+			s_evalResult = res;
+		} catch (...) {
+			s_evalResult = "(error)";
+		}
+	}
+	if (!s_evalResult.empty()) {
+		ImGui::SameLine();
+		ImGui::Text("%s", s_evalResult.c_str());
 	}
 
 	ImGui::Separator();
@@ -1012,8 +1039,23 @@ static void DrawWatch() {
 			uint8 hi = target ? target->DebugReadByte((addr + 1) & 0xFFFF) : 0;
 			uint16 val = lo | ((uint16)hi << 8);
 			ImGui::Text("[%d] $%04X: %04X (%5d)", idx, addr, val, val);
+		} else if (info.mpExpr) {
+			auto result = dbg->Evaluate(info.mpExpr);
+			if (result.first) {
+				sint32 val = result.second;
+				if (info.mMode == ATDebuggerWatchMode::ExprHex8)
+					ImGui::Text("[%d] expr: %02X (%d)", idx, val & 0xFF, val);
+				else if (info.mMode == ATDebuggerWatchMode::ExprHex16)
+					ImGui::Text("[%d] expr: %04X (%d)", idx, val & 0xFFFF, val);
+				else if (info.mMode == ATDebuggerWatchMode::ExprHex32)
+					ImGui::Text("[%d] expr: %08X (%d)", idx, val, val);
+				else
+					ImGui::Text("[%d] expr: %d ($%04X)", idx, val, val & 0xFFFF);
+			} else {
+				ImGui::TextDisabled("[%d] expr: (error)", idx);
+			}
 		} else {
-			ImGui::Text("[%d] (expr)", idx);
+			ImGui::TextDisabled("[%d] (unknown)", idx);
 		}
 
 		ImGui::SameLine();
