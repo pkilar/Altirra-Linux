@@ -17,11 +17,13 @@ public:
 	void ReceiveFrame(const ATEthernetPacket& packet, ATEthernetFrameDecodedType decType, const void *decInfo) override;
 
 private:
+#ifdef _WIN32
 	enum {
 		MYWM_SOCKET = WM_USER
 	};
 
 	LRESULT WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
+#endif
 	void OnReadPacket();
 
 	vdrefptr<IATDatagramSocket> mpTunnelSocket;

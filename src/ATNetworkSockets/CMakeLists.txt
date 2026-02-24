@@ -4,10 +4,8 @@ set(ATNETSOCKETS_SOURCES
 	source/stdafx.cpp
 )
 
-# vxlantunnel uses Win32 window messaging (WM_USER, HWND, LRESULT)
-if(WIN32)
-	list(APPEND ATNETSOCKETS_SOURCES source/vxlantunnel.cpp)
-endif()
+# vxlantunnel uses platform-agnostic IATDatagramSocket interface
+list(APPEND ATNETSOCKETS_SOURCES source/vxlantunnel.cpp)
 
 if(WIN32)
 	list(APPEND ATNETSOCKETS_SOURCES
@@ -18,9 +16,6 @@ if(WIN32)
 		source/worker.cpp
 	)
 else()
-	# The Win32 socket files use Winsock2 API heavily.
-	# Linux BSD socket implementation will be added in a later phase.
-	# For now, include stubs so the library links.
 	list(APPEND ATNETSOCKETS_SOURCES
 		source/nativesockets_linux.cpp
 	)

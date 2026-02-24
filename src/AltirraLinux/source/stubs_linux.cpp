@@ -633,34 +633,15 @@ uint8 ATTranslateWin32ErrorToSIOError(uint32 err) {
 // 11. Factory / creation functions
 ///////////////////////////////////////////////////////////////////////////
 
-// Custom network engine (Windows named pipe / TCP based)
-vdrefptr<IATDeviceCustomNetworkEngine> ATCreateDeviceCustomNetworkEngine(
-	uint16, IATTimerService&, vdfunction<void()>)
-{
-	return nullptr;
-}
+// Custom network engine — provided by customdevice_win32.cpp (platform-agnostic)
+// Network socket VXLAN tunnel — provided by vxlantunnel.cpp (platform-agnostic)
+// Network socket worker — provided by worker_linux.cpp
 
 // Modem driver — provided by modemtcp_linux.cpp
 
 // Native ETW/WPR tracer (Windows trace infrastructure)
 vdrefptr<IVDRefCount> ATCreateNativeTracer(ATTraceContext&, const ATNativeTraceSettings&) {
 	return nullptr;
-}
-
-// Network socket VXLAN tunnel (Winsock)
-void ATCreateNetSockVxlanTunnel(
-	uint32, uint16, uint16, IATEthernetSegment *, uint32,
-	IATAsyncDispatcher *, IATNetSockVxlanTunnel **)
-{
-	// No-op: leaves *pp unchanged (caller should check for null)
-}
-
-// Network socket worker (Winsock)
-void ATCreateNetSockWorker(
-	IATEmuNetUdpStack *, IATEmuNetTcpStack *, bool, uint32, uint16,
-	IATNetSockWorker **)
-{
-	// No-op: leaves *pp unchanged (caller should check for null)
 }
 
 // Timer service — provided by ATCore/source/timerserviceimpl_linux.cpp

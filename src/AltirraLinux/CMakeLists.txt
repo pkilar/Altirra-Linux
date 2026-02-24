@@ -23,7 +23,7 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 
 	# Win32-specific implementations
 	"asyncdownloader_win32.cpp"
-	"customdevice_win32.cpp"
+	# customdevice_win32.cpp — uses platform-agnostic ATNetConnect, works on Linux
 	"devxcmdmountvhd_win32.cpp"
 	"pclink_win32.cpp"
 	"pipeserial_win32.cpp"
@@ -230,6 +230,7 @@ set(LINUX_SOURCES
 	source/stubs_linux.cpp
 	source/modemtcp_linux.cpp
 	source/uikeyboard_linux.cpp
+	source/worker_linux.cpp
 )
 
 # Build executable
