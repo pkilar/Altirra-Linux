@@ -10,6 +10,7 @@
 #define AT_FILEDIALOG_LINUX_H
 
 #include <vd2/system/VDString.h>
+#include <vector>
 
 // Opens a native file dialog using zenity (GTK) or kdialog (KDE) with
 // fallback to an ImGui text input popup.
@@ -19,6 +20,10 @@
 //
 // Returns the selected file path, or empty string if cancelled.
 VDStringW ATLinuxOpenFileDialog(const char *title, const char *filters);
+
+// Opens a native multi-file selection dialog. Returns a vector of selected
+// file paths, or an empty vector if cancelled.
+std::vector<VDStringW> ATLinuxOpenMultiFileDialog(const char *title, const char *filters);
 
 // Opens a native "save file" dialog. Same backend selection as open.
 VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters);

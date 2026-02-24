@@ -1395,8 +1395,8 @@ static void DrawMenuBar() {
 				char label[32];
 				ATDiskInterface& di = g_sim.GetDiskInterface(i);
 
-				// Always show D1-D4; only show D5-D15 if a disk is loaded
-				if (i >= 4 && !di.IsDiskLoaded())
+				// Always show D1-D8; only show D9-D15 if a disk is loaded
+				if (i >= 8 && !di.IsDiskLoaded())
 					continue;
 
 				if (ImGui::BeginMenu(di.IsDiskLoaded()
@@ -3039,6 +3039,46 @@ static void DiskExplorerRefresh() {
 		});
 }
 
+// Convert a host file path to an Atari-compatible 8.3 filename.
+static VDStringA SanitizeAtari83Name(const wchar_t *hostPath) {
+	const wchar_t *fname = VDFileSplitPath(hostPath);
+	VDStringA u8name = VDTextWToU8(VDStringW(fname));
+
+	const char *nameStr = u8name.c_str();
+	const char *dotPtr = strrchr(nameStr, '.');
+	VDStringA basePart, extPart;
+	if (dotPtr) {
+		basePart = VDStringA(nameStr, dotPtr);
+		extPart = VDStringA(dotPtr + 1);
+	} else {
+		basePart = u8name;
+	}
+
+	auto sanitize = [](VDStringA& s) {
+		VDStringA out;
+		for (char c : s) {
+			c = (char)toupper((unsigned char)c);
+			if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
+				out += c;
+		}
+		s = out;
+	};
+	sanitize(basePart);
+	sanitize(extPart);
+
+	if (basePart.size() > 8)
+		basePart.resize(8);
+	if (extPart.size() > 3)
+		extPart.resize(3);
+
+	if (basePart.empty())
+		basePart = "FILE";
+
+	if (!extPart.empty())
+		return basePart + "." + extPart;
+	return basePart;
+}
+
 static void DiskExplorerClose() {
 	if (s_diskFS) {
 		try { s_diskFS->Flush(); } catch (...) {}
@@ -3053,6 +3093,49 @@ static void DiskExplorerClose() {
 	s_diskShiftAnchor = -1;
 	s_diskCurDir = ATDiskFSKey::None;
 	s_showDiskExplorer = false;
+}
+
+bool ATImGuiIsDiskExplorerActive() {
+	return s_showDiskExplorer && s_diskFS && !s_diskReadOnly;
+}
+
+void ATImGuiDiskExplorerImportFile(const wchar_t *hostPath) {
+	if (!s_diskFS || s_diskReadOnly)
+		return;
+
+	try {
+		VDFile f(hostPath, nsVDFile::kRead | nsVDFile::kOpenExisting);
+		sint64 len = f.size();
+		if (len > 0x1000000) {
+			ShowToast("File too large (>16MB)");
+			return;
+		}
+		vdfastvector<uint8> data((size_t)len);
+		if (len > 0)
+			f.read(data.data(), (long)len);
+		f.close();
+
+		VDStringA atariName = SanitizeAtari83Name(hostPath);
+
+		if (s_diskTextMode) {
+			for (auto& b : data) {
+				if (b == 0x0A)
+					b = 0x9B;
+			}
+		}
+
+		s_diskFS->WriteFile(s_diskCurDir, atariName.c_str(), data.data(), (uint32)data.size());
+		s_diskFS->Flush();
+		DiskExplorerRefresh();
+
+		char msg[256];
+		snprintf(msg, sizeof(msg), "Imported: %s", atariName.c_str());
+		ShowToast(msg);
+	} catch (const std::exception& e) {
+		char msg[256];
+		snprintf(msg, sizeof(msg), "Import failed: %s", e.what());
+		ShowToast(msg);
+	}
 }
 
 void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool readOnly) {
@@ -3252,50 +3335,7 @@ static void DrawDiskExplorer() {
 						f.read(data.data(), (long)len);
 					f.close();
 
-					// Convert filename to Atari 8.3 format
-					const wchar_t *fname = VDFileSplitPath(importPath.c_str());
-					VDStringA u8name = VDTextWToU8(VDStringW(fname));
-
-					// Split into name and extension at the last dot
-					VDStringA atariName;
-					{
-						const char *nameStr = u8name.c_str();
-						const char *dotPtr = strrchr(nameStr, '.');
-						VDStringA basePart, extPart;
-						if (dotPtr) {
-							basePart = VDStringA(nameStr, dotPtr);
-							extPart = VDStringA(dotPtr + 1);
-						} else {
-							basePart = u8name;
-						}
-
-						// Strip invalid characters and uppercase
-						auto sanitize = [](VDStringA& s) {
-							VDStringA out;
-							for (char c : s) {
-								c = (char)toupper((unsigned char)c);
-								if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
-									out += c;
-							}
-							s = out;
-						};
-						sanitize(basePart);
-						sanitize(extPart);
-
-						// Truncate to 8.3 limits
-						if (basePart.size() > 8)
-							basePart.resize(8);
-						if (extPart.size() > 3)
-							extPart.resize(3);
-
-						if (basePart.empty())
-							basePart = "FILE";
-
-						if (!extPart.empty())
-							atariName = basePart + "." + extPart;
-						else
-							atariName = basePart;
-					}
+					VDStringA atariName = SanitizeAtari83Name(importPath.c_str());
 
 					if (s_diskTextMode) {
 						for (auto& b : data) {
@@ -3314,6 +3354,52 @@ static void DrawDiskExplorer() {
 				snprintf(msg, sizeof(msg), "Import failed: %s", e.what());
 				ShowToast(msg);
 			}
+		}
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Import Files...") && !s_diskReadOnly) {
+		auto importPaths = ATLinuxOpenMultiFileDialog("Import Files", "All Files|*");
+		if (!importPaths.empty()) {
+			int imported = 0, failed = 0;
+			for (const auto& ip : importPaths) {
+				try {
+					VDFile f(ip.c_str(), nsVDFile::kRead | nsVDFile::kOpenExisting);
+					sint64 len = f.size();
+					if (len > 0x1000000) {
+						++failed;
+						continue;
+					}
+					vdfastvector<uint8> data((size_t)len);
+					if (len > 0)
+						f.read(data.data(), (long)len);
+					f.close();
+
+					VDStringA atariName = SanitizeAtari83Name(ip.c_str());
+
+					if (s_diskTextMode) {
+						for (auto& b : data) {
+							if (b == 0x0A)
+								b = 0x9B;
+						}
+					}
+
+					s_diskFS->WriteFile(s_diskCurDir, atariName.c_str(), data.data(), (uint32)data.size());
+					++imported;
+				} catch (...) {
+					++failed;
+				}
+			}
+			if (imported > 0) {
+				s_diskFS->Flush();
+				DiskExplorerRefresh();
+			}
+			char msg[128];
+			if (failed)
+				snprintf(msg, sizeof(msg), "Imported %d file(s), %d failed", imported, failed);
+			else
+				snprintf(msg, sizeof(msg), "Imported %d file(s)", imported);
+			ShowToast(msg);
 		}
 	}
 
