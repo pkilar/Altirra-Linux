@@ -102,6 +102,8 @@ static uint32 s_disasmContextEA = 0xFFFFFFFF;  // effective address of context i
 // Disassembly state
 static uint32 s_disasmAddr = 0;
 static bool s_disasmFollowPC = true;
+static bool s_disasmShowBytes = true;
+static bool s_disasmShowLabels = true;
 static char s_disasmAddrBuf[16] = "0000";
 
 void ATImGuiDebuggerInit() {
@@ -426,6 +428,12 @@ static void DrawDisassembly() {
 	// Controls
 	ImGui::Checkbox("Follow PC", &s_disasmFollowPC);
 	ImGui::SameLine();
+	if (ImGui::SmallButton("PC")) {
+		s_disasmAddr = pc;
+		s_disasmFollowPC = false;
+		snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", pc);
+	}
+	ImGui::SameLine();
 
 	// Address or symbol input
 	ImGui::SetNextItemWidth(120);
@@ -454,6 +462,11 @@ static void DrawDisassembly() {
 	if (s_disasmFollowPC)
 		s_disasmAddr = pc;
 
+	// View options
+	ImGui::Checkbox("Bytes", &s_disasmShowBytes);
+	ImGui::SameLine();
+	ImGui::Checkbox("Labels", &s_disasmShowLabels);
+
 	ImGui::Separator();
 
 	// Find a good starting address a few instructions before the target
@@ -469,7 +482,7 @@ static void DrawDisassembly() {
 		ATCPUHistoryEntry hent;
 		ATDisassembleCaptureInsnContext(target, addr, 0, hent);
 		ATDisasmResult result = ATDisassembleInsn(line, target, state.mExecMode, hent,
-			true, false, true, true, true, false, false, true, true, false);
+			true, false, true, s_disasmShowBytes, s_disasmShowLabels, false, false, true, true, false);
 		addr = result.mNextPC;
 		preLines++;
 	}
@@ -490,7 +503,7 @@ static void DrawDisassembly() {
 						ATCPUHistoryEntry h;
 						ATDisassembleCaptureInsnContext(target, a, 0, h);
 						ATDisasmResult r = ATDisassembleInsn(line, target,
-							state.mExecMode, h, true, false, true, true, true,
+							state.mExecMode, h, true, false, true, s_disasmShowBytes, s_disasmShowLabels,
 							false, false, true, true, false);
 						a = r.mNextPC;
 					}
@@ -514,7 +527,7 @@ static void DrawDisassembly() {
 
 			line.clear();
 			ATDisasmResult result = ATDisassembleInsn(line, target, state.mExecMode, hent,
-				true, false, true, true, true, false, false, true, true, false);
+				true, false, true, s_disasmShowBytes, s_disasmShowLabels, false, false, true, true, false);
 
 			lineEA[i] = hent.mEA;
 
