@@ -457,13 +457,34 @@ static void DrawDisassembly() {
 		}
 		// Context menu
 		if (ImGui::BeginPopup("##disasmctx")) {
-			ImGui::Text("$%04X", s_disasmContextAddr);
+			// Show address and symbol name
+			ATSymbol ctxSym {};
+			IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+			if (dbs)
+				dbs->LookupSymbol(s_disasmContextAddr, kATSymbol_Execute, ctxSym);
+			if (ctxSym.mpName)
+				ImGui::Text("$%04X (%s)", s_disasmContextAddr, ctxSym.mpName);
+			else
+				ImGui::Text("$%04X", s_disasmContextAddr);
 			ImGui::Separator();
 
 			bool hasBP = dbg->IsBreakpointAtPC(s_disasmContextAddr);
 			if (ImGui::MenuItem(hasBP ? "Remove Breakpoint" : "Set Breakpoint")) {
 				dbg->ToggleBreakpoint(s_disasmContextAddr);
 			}
+
+			if (ImGui::MenuItem("Run to Cursor", nullptr, false, !dbg->IsRunning())) {
+				// Set a one-shot breakpoint and run
+				char cmd[64];
+				snprintf(cmd, sizeof(cmd), "g %04X", s_disasmContextAddr);
+				dbg->QueueCommand(cmd, false);
+			}
+
+			if (ImGui::MenuItem("Set PC")) {
+				dbg->SetPC(s_disasmContextAddr);
+			}
+
+			ImGui::Separator();
 
 			if (ImGui::MenuItem("Go to Address")) {
 				s_disasmAddr = s_disasmContextAddr;
@@ -765,11 +786,28 @@ static void DrawBreakpoints() {
 			else if (info.mbBreakOnWrite) type = "WR";
 			else if (info.mbBreakOnInsn) type = "IN";
 
-			ImGui::Text("[%d] %s $%04X", info.mNumber, type, info.mAddress);
+			// Look up symbol name for the address
+			ATSymbol sym {};
+			IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+			if (dbs)
+				dbs->LookupSymbol(info.mAddress, info.mbBreakOnPC ? kATSymbol_Execute : kATSymbol_Any, sym);
+
+			if (sym.mpName)
+				ImGui::Text("[%d] %s $%04X (%s)", info.mNumber, type, info.mAddress, sym.mpName);
+			else
+				ImGui::Text("[%d] %s $%04X", info.mNumber, type, info.mAddress);
 
 			if (info.mLength > 1) {
 				ImGui::SameLine();
 				ImGui::Text("len=%u", info.mLength);
+			}
+
+			// Click breakpoint address to go to it in disassembly
+			if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(0) && info.mbBreakOnPC) {
+				s_disasmAddr = info.mAddress;
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", info.mAddress);
+				s_showDisassembly = true;
 			}
 
 			ImGui::SameLine();
