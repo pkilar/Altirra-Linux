@@ -1085,7 +1085,9 @@ int main(int argc, char *argv[]) {
 
 	// Register all device definitions (must be before settings load)
 	extern void ATRegisterDevices(ATDeviceManager& dm);
+	extern void ATRegisterDeviceXCmds(ATDeviceManager& dm);
 	ATRegisterDevices(*g_sim.GetDeviceManager());
+	ATRegisterDeviceXCmds(*g_sim.GetDeviceManager());
 
 	fprintf(stderr, "Simulator initialized\n");
 
