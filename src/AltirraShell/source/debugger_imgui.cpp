@@ -361,17 +361,37 @@ static void DrawRegisters() {
 	// Hardware register readouts via debug reads
 	if (target) {
 		ImGui::Separator();
-		ImGui::TextColored(ImVec4(0.6f, 0.7f, 0.8f, 1.0f), "Hardware:");
-		uint8 vcount = target->DebugReadByte(0xD40B);  // ANTIC VCOUNT
-		uint8 nmist  = target->DebugReadByte(0xD40F);  // ANTIC NMIST
-		uint8 dmactl = target->DebugReadByte(0xD400);  // ANTIC DMACTL
-		ImGui::Text("VCOUNT:%3d  NMIST:%02X  DMA:%02X", vcount, nmist, dmactl);
-		uint8 irqst  = target->DebugReadByte(0xD20E);  // POKEY IRQST
-		uint8 audctl = target->DebugReadByte(0xD208);  // POKEY AUDCTL
-		ImGui::Text("IRQST: %02X  AUDCTL:%02X", irqst, audctl);
-		uint8 porta = target->DebugReadByte(0xD300);   // PIA PORTA
-		uint8 portb = target->DebugReadByte(0xD301);   // PIA PORTB
-		ImGui::Text("PORTA: %02X  PORTB:%02X", porta, portb);
+		static bool s_hwExpanded = true;
+		if (ImGui::CollapsingHeader("Hardware", s_hwExpanded ? ImGuiTreeNodeFlags_DefaultOpen : 0)) {
+			s_hwExpanded = true;
+			uint8 vcount = target->DebugReadByte(0xD40B);
+			uint8 nmist  = target->DebugReadByte(0xD40F);
+			uint8 dmactl = target->DebugReadByte(0xD400);
+			ImGui::Text("VCOUNT:%3d  NMIST:%02X  DMA:%02X", vcount, nmist, dmactl);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("ANTIC: VCOUNT=$D40B NMIST=$D40F DMACTL=$D400");
+
+			uint8 irqst  = target->DebugReadByte(0xD20E);
+			uint8 audctl = target->DebugReadByte(0xD208);
+			uint8 skstat = target->DebugReadByte(0xD20F);
+			ImGui::Text("IRQST: %02X  AUDCTL:%02X  SK:%02X", irqst, audctl, skstat);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("POKEY: IRQST=$D20E AUDCTL=$D208 SKSTAT=$D20F");
+
+			uint8 porta = target->DebugReadByte(0xD300);
+			uint8 portb = target->DebugReadByte(0xD301);
+			uint8 pactl = target->DebugReadByte(0xD302);
+			ImGui::Text("PORTA: %02X  PORTB:%02X  PAC:%02X", porta, portb, pactl);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("PIA: PORTA=$D300 PORTB=$D301 PACTL=$D302");
+
+			uint8 prior = target->DebugReadByte(0xD01B);
+			uint8 vdelay = target->DebugReadByte(0xD01C);
+			uint8 gractl = target->DebugReadByte(0xD01D);
+			ImGui::Text("PRIOR:%02X  VDLY:%02X  GCTL:%02X", prior, vdelay, gractl);
+			if (ImGui::IsItemHovered())
+				ImGui::SetTooltip("GTIA: PRIOR=$D01B VDELAY=$D01C GRACTL=$D01D");
+		}
 	}
 
 	ImGui::End();
@@ -1317,13 +1337,16 @@ static void DrawHistory() {
 	}
 
 	ImGui::Text("History: %u entries", count);
+	ImGui::SameLine();
+	static bool s_histShowRegs = false;
+	ImGui::Checkbox("Registers", &s_histShowRegs);
 
 	if (ImGui::BeginChild("##histlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
 		IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
 		ATDebugDisasmMode disasmMode = target->GetDisasmMode();
 
-		// Show the most recent entries (up to 128)
-		uint32 showCount = count < 128 ? count : 128;
+		// Show the most recent entries (up to 256)
+		uint32 showCount = count < 256 ? count : 256;
 		uint32 startIdx = rangeEnd - showCount;
 
 		const ATCPUHistoryEntry *hparray[1];
@@ -1354,13 +1377,22 @@ static void DrawHistory() {
 
 			ImGui::PushStyleColor(ImGuiCol_Text, color);
 
-			char label[320];
-			if (sym.mpName && sym.mOffset == he.mPC)
-				snprintf(label, sizeof(label), "%6u %s  (%s)##h%u",
-					he.mCycle, line.c_str(), sym.mpName, i);
-			else
-				snprintf(label, sizeof(label), "%6u %s##h%u",
-					he.mCycle, line.c_str(), i);
+			char label[384];
+			if (s_histShowRegs) {
+				if (sym.mpName && sym.mOffset == he.mPC)
+					snprintf(label, sizeof(label), "%6u A:%02X X:%02X Y:%02X %s  (%s)##h%u",
+						he.mCycle, he.mA, he.mX, he.mY, line.c_str(), sym.mpName, i);
+				else
+					snprintf(label, sizeof(label), "%6u A:%02X X:%02X Y:%02X %s##h%u",
+						he.mCycle, he.mA, he.mX, he.mY, line.c_str(), i);
+			} else {
+				if (sym.mpName && sym.mOffset == he.mPC)
+					snprintf(label, sizeof(label), "%6u %s  (%s)##h%u",
+						he.mCycle, line.c_str(), sym.mpName, i);
+				else
+					snprintf(label, sizeof(label), "%6u %s##h%u",
+						he.mCycle, line.c_str(), i);
+			}
 
 			if (ImGui::Selectable(label, false)) {
 				// Click to navigate disassembly to this address
