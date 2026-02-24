@@ -215,6 +215,67 @@ VDStringW ATLinuxOpenFileDialog(const char *title, const char *filters) {
 	return VDStringW();
 }
 
+std::vector<VDStringW> ATLinuxOpenMultiFileDialog(const char *title, const char *filters) {
+	DialogBackend backend = DetectBackend();
+
+	if (backend == DialogBackend::kZenity) {
+		std::vector<std::string> argv;
+		argv.push_back("zenity");
+		argv.push_back("--file-selection");
+		argv.push_back("--multiple");
+		argv.push_back("--separator=|");
+		argv.push_back(std::string("--title=") + (title ? title : "Open Files"));
+
+		auto zenityFilters = BuildZenityFilters(filters);
+		for (const auto& f : zenityFilters)
+			argv.push_back(f);
+
+		std::string result = RunCommand(argv);
+		if (!result.empty()) {
+			std::vector<VDStringW> paths;
+			size_t start = 0;
+			while (start < result.size()) {
+				size_t sep = result.find('|', start);
+				if (sep == std::string::npos)
+					sep = result.size();
+				if (sep > start)
+					paths.push_back(VDTextU8ToW(VDStringA(result.c_str() + start, (int)(sep - start))));
+				start = sep + 1;
+			}
+			return paths;
+		}
+	} else if (backend == DialogBackend::kKdialog) {
+		std::vector<std::string> argv;
+		argv.push_back("kdialog");
+		argv.push_back("--getopenfilename");
+		argv.push_back("--multiple");
+		argv.push_back("~");
+
+		std::string filter = BuildKdialogFilter(filters);
+		if (!filter.empty())
+			argv.push_back(filter);
+
+		std::string result = RunCommand(argv);
+		if (!result.empty()) {
+			std::vector<VDStringW> paths;
+			size_t start = 0;
+			while (start < result.size()) {
+				size_t sep = result.find('\n', start);
+				if (sep == std::string::npos)
+					sep = result.size();
+				if (sep > start)
+					paths.push_back(VDTextU8ToW(VDStringA(result.c_str() + start, (int)(sep - start))));
+				start = sep + 1;
+			}
+			return paths;
+		}
+	}
+
+	// Fallback: single-file dialog wrapped in vector
+	ATLinuxFileDialogOpenFallback(title);
+	return {};
+}
+
 VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters) {
 	DialogBackend backend = DetectBackend();
 

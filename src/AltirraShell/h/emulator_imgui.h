@@ -31,6 +31,10 @@ void ATImGuiBootImage();
 class IATDiskImage;
 void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool readOnly);
 
+// Disk explorer drag-and-drop support
+bool ATImGuiIsDiskExplorerActive();
+void ATImGuiDiskExplorerImportFile(const wchar_t *hostPath);
+
 // Input capture for binding editor
 #include <vd2/system/vdtypes.h>
 bool ATImGuiIsCapturingInput();

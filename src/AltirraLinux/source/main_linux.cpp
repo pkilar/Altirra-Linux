@@ -934,18 +934,22 @@ static void ProcessEvents(SDL_Window *window) {
 				char *dropped = event.drop.file;
 				if (dropped) {
 					VDStringW path = VDTextU8ToW(VDStringA(dropped));
-					try {
-						g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
-						char msg[256];
-						const char *fname = strrchr(dropped, '/');
-						snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : dropped);
-						ATImGuiShowToast(msg);
-					} catch (const std::exception& e) {
-						char msg[512];
-						snprintf(msg, sizeof(msg), "Drop failed: %s", e.what());
-						ATImGuiShowToast(msg);
-					} catch (...) {
-						ATImGuiShowToast("Failed to load dropped file");
+					if (ATImGuiIsDiskExplorerActive()) {
+						ATImGuiDiskExplorerImportFile(path.c_str());
+					} else {
+						try {
+							g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+							char msg[256];
+							const char *fname = strrchr(dropped, '/');
+							snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : dropped);
+							ATImGuiShowToast(msg);
+						} catch (const std::exception& e) {
+							char msg[512];
+							snprintf(msg, sizeof(msg), "Drop failed: %s", e.what());
+							ATImGuiShowToast(msg);
+						} catch (...) {
+							ATImGuiShowToast("Failed to load dropped file");
+						}
 					}
 					SDL_free(dropped);
 				}
