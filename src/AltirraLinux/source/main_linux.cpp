@@ -53,6 +53,7 @@
 #include "uicommondialogs.h"
 #include "uikeyboard.h"
 #include "uiqueue.h"
+#include "versioninfo.h"
 #include "inputmap.h"
 
 #include <display_sdl2.h>
@@ -324,7 +325,7 @@ static void PrintUsage(const char *progname) {
 }
 
 static void PrintVersion() {
-	fprintf(stderr, "Altirra (Linux port) 4.40\n");
+	fprintf(stderr, "Altirra (Linux port) " AT_VERSION "\n");
 }
 
 static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
@@ -450,8 +451,13 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 		return false;
 	}
 
-	// Enable vsync
-	SDL_GL_SetSwapInterval(1);
+	// Enable vsync (adaptive if supported and configured)
+	if (ATUIGetFrameRateVSyncAdaptive()) {
+		if (SDL_GL_SetSwapInterval(-1) < 0)
+			SDL_GL_SetSwapInterval(1);
+	} else {
+		SDL_GL_SetSwapInterval(1);
+	}
 
 	// On Wayland, the window may not be visible until the first buffer is
 	// committed. Do a clear + swap so the compositor shows the window

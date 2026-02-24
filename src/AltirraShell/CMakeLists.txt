@@ -22,6 +22,7 @@ target_include_directories(altirrashell
 		${CMAKE_CURRENT_SOURCE_DIR}/h
 	PRIVATE
 		${CMAKE_CURRENT_SOURCE_DIR}/h
+		${CMAKE_SOURCE_DIR}/src/Altirra/autobuild_default
 )
 
 target_link_libraries(altirrashell

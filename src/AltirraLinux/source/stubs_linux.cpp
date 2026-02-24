@@ -314,7 +314,18 @@ void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 	}
 }
 void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; ATUIUpdateSpeedTiming(); }
-void ATUISetFrameRateVSyncAdaptive(bool v) { s_frameRateVSyncAdaptive = v; }
+static void ApplyVSyncSetting() {
+	if (s_turbo) {
+		SDL_GL_SetSwapInterval(0);
+	} else if (s_frameRateVSyncAdaptive) {
+		// -1 = adaptive vsync: tear if late, sync otherwise
+		if (SDL_GL_SetSwapInterval(-1) < 0)
+			SDL_GL_SetSwapInterval(1);  // fallback to regular vsync
+	} else {
+		SDL_GL_SetSwapInterval(1);
+	}
+}
+void ATUISetFrameRateVSyncAdaptive(bool v) { s_frameRateVSyncAdaptive = v; ApplyVSyncSetting(); }
 void ATUISetMenuAutoHideEnabled(bool v) { s_menuAutoHide = v; }
 void ATUISetMouseAutoCapture(bool v) { s_mouseAutoCapture = v; }
 void ATUISetPauseWhenInactive(bool v) { s_pauseWhenInactive = v; }
@@ -331,7 +342,7 @@ void ATUISetTurbo(bool v) {
 	s_turbo = v;
 	extern ATSimulator g_sim;
 	g_sim.SetTurboModeEnabled(v);
-	SDL_GL_SetSwapInterval(v ? 0 : 1);
+	ApplyVSyncSetting();
 	ATUIUpdateSpeedTiming();
 }
 void ATUISetViewFilterSharpness(int v) { s_viewFilterSharpness = v; }
