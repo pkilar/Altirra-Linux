@@ -608,7 +608,11 @@ void VDTextOutputStream::Write(const char *s, int len) {
 }
 
 void VDTextOutputStream::PutLine() {
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 }
 
 void VDTextOutputStream::PutLine(const char *s) {
@@ -617,7 +621,11 @@ void VDTextOutputStream::PutLine(const char *s) {
 
 void VDTextOutputStream::PutLine(const char *s, int len) {
 	PutData(s, len);
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 }
 
 void VDTextOutputStream::Format(const char *format, ...) {
@@ -667,7 +675,11 @@ void VDTextOutputStream::FormatLine(const char *format, ...) {
 	else
 		Format2(format, val);
 
+#ifdef VD_PLATFORM_WINDOWS
 	PutData("\r\n", 2);
+#else
+	PutData("\n", 1);
+#endif
 	va_end(val);
 }
 
