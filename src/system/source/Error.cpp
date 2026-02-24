@@ -177,7 +177,11 @@ void VDException::vsetf(const char *f, va_list val) {
 	if (!buf)
 		return;
 
-	int len = vsnprintf(buf, 256, f, val);
+	va_list val2;
+	va_copy(val2, val);
+	int len = vsnprintf(buf, 256, f, val2);
+	va_end(val2);
+
 	if (len == 0) {
 		// don't keep empty strings
 		clear();
@@ -209,7 +213,11 @@ void VDException::vwsetf(const wchar_t *f, va_list val) {
 	if (!buf)
 		return;
 
-	int len = vswprintf(buf, 256, f, val);
+	va_list val2;
+	va_copy(val2, val);
+	int len = vswprintf(buf, 256, f, val2);
+	va_end(val2);
+
 	if (len == 0) {
 		// don't keep empty strings
 		clear();
