@@ -466,7 +466,36 @@ bool ATUIClipGetText(VDStringW& s) {
 	return true;
 }
 
-void ATUIExecuteCommandStringAndShowErrors(const char *, const ATUICommandOptions *) noexcept {}
+void ATUIExecuteCommandStringAndShowErrors(const char *cmd, const ATUICommandOptions *opts) noexcept {
+	if (!cmd || !*cmd)
+		return;
+
+	extern ATSimulator g_sim;
+
+	try {
+		if (!strcmp(cmd, "System.ColdReset")) {
+			g_sim.ColdReset();
+		} else if (!strcmp(cmd, "System.WarmReset")) {
+			g_sim.WarmReset();
+		} else if (!strcmp(cmd, "System.ColdResetComputerOnly")) {
+			g_sim.ColdResetComputerOnly();
+		} else if (!strcmp(cmd, "System.TogglePause")) {
+			if (g_sim.IsPaused())
+				g_sim.Resume();
+			else
+				g_sim.Pause();
+		} else if (!strcmp(cmd, "Cart.Detach")) {
+			g_sim.UnloadCartridge(0);
+		} else if (!strcmp(cmd, "Cart.DetachSecond")) {
+			g_sim.UnloadCartridge(1);
+		} else {
+			VDDEBUG("ATUIExecuteCommandStringAndShowErrors: unhandled command '%s'\n", cmd);
+		}
+	} catch (const MyError&) {
+		// Error during command execution - silently ignore as per original Windows behavior
+		// (commands catch their own errors and show UI as needed)
+	}
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // 8b. Error dialog queue (thread-safe, consumed by ImGui overlay)
