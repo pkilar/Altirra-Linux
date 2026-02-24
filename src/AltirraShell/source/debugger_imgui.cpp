@@ -325,6 +325,33 @@ static void DrawDisassembly() {
 	addr = s_disasmAddr;
 
 	if (ImGui::BeginChild("##disasmlines", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		// Scroll wheel: move by ~3 instructions per notch
+		if (ImGui::IsWindowHovered()) {
+			float wheel = ImGui::GetIO().MouseWheel;
+			if (wheel != 0.0f) {
+				int lines = (int)(-wheel) * 3;
+				if (lines > 0) {
+					// Scroll down: advance address forward
+					uint16 a = s_disasmAddr;
+					for (int i = 0; i < lines; i++) {
+						ATCPUHistoryEntry h;
+						ATDisassembleCaptureInsnContext(target, a, 0, h);
+						ATDisasmResult r = ATDisassembleInsn(line, target,
+							state.mExecMode, h, true, false, true, true, true,
+							false, false, true, true, false);
+						a = r.mNextPC;
+					}
+					s_disasmAddr = a;
+				} else {
+					// Scroll up: approximate by going back N bytes
+					s_disasmAddr = (s_disasmAddr + lines) & 0xFFFF;
+				}
+				s_disasmFollowPC = false;
+				snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X",
+					s_disasmAddr);
+			}
+		}
+
 		for (int i = 0; i < 30; i++) {
 			ATCPUHistoryEntry hent;
 			ATDisassembleCaptureInsnContext(target, addr, 0, hent);
