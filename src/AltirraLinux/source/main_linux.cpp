@@ -825,6 +825,9 @@ static void RenderAndSwap(SDL_Window *window) {
 	// Update window title periodically
 	UpdateWindowTitle(window);
 
+	// Update pixel aspect ratio from GTIA for correct display scaling
+	g_pDisplay->SetPixelAspectRatio(g_sim.GetGTIA().GetPixelAspectRatio());
+
 	// Render emulation frame (upload texture + draw quad)
 	g_pDisplay->RenderFrame();
 

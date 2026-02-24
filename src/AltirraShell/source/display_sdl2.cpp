@@ -17,6 +17,8 @@
 
 #include <display_sdl2.h>
 #include <vd2/system/text.h>
+#include <algorithm>
+#include <cmath>
 #include <cstring>
 
 ATDisplaySDL2::ATDisplaySDL2() {
@@ -125,48 +127,39 @@ void ATDisplaySDL2::RenderQuad() {
 		destY0 = 0;
 		destX1 = (float)winW;
 		destY1 = (float)winH;
-	} else {
-		float srcAspect = (float)mSourceW / (float)mSourceH;
-		float winAspect = (float)winW / (float)winH;
+	} else if (mStretchMode == kATDisplayStretchMode_SquarePixels
+		|| mStretchMode == kATDisplayStretchMode_Integral) {
+		// These modes ignore PAR — use raw pixel dimensions
+		float srcW = (float)mSourceW;
+		float srcH = (float)mSourceH;
 
-		if (mStretchMode == kATDisplayStretchMode_SquarePixels) {
-			// 1:1 pixel mapping, centered
-			float destW = (float)mSourceW;
-			float destH = (float)mSourceH;
-			destX0 = ((float)winW - destW) * 0.5f;
-			destY0 = ((float)winH - destH) * 0.5f;
-			destX1 = destX0 + destW;
-			destY1 = destY0 + destH;
-		} else if (mStretchMode == kATDisplayStretchMode_Integral || mStretchMode == kATDisplayStretchMode_IntegralPreserveAspectRatio) {
-			// Integer scaling — find largest integer scale that fits
-			int scaleX = winW / mSourceW;
-			int scaleY = winH / mSourceH;
-			int scale = (scaleX < scaleY) ? scaleX : scaleY;
+		if (mStretchMode == kATDisplayStretchMode_Integral) {
+			int scale = std::min(winW / mSourceW, winH / mSourceH);
 			if (scale < 1) scale = 1;
-			float destW = (float)(mSourceW * scale);
-			float destH = (float)(mSourceH * scale);
-			destX0 = ((float)winW - destW) * 0.5f;
-			destY0 = ((float)winH - destH) * 0.5f;
-			destX1 = destX0 + destW;
-			destY1 = destY0 + destH;
-		} else {
-			// Preserve aspect ratio (default)
-			if (srcAspect > winAspect) {
-				float scale = (float)winW / (float)mSourceW;
-				float destH = mSourceH * scale;
-				destX0 = 0;
-				destX1 = (float)winW;
-				destY0 = ((float)winH - destH) * 0.5f;
-				destY1 = destY0 + destH;
-			} else {
-				float scale = (float)winH / (float)mSourceH;
-				float destW = mSourceW * scale;
-				destX0 = ((float)winW - destW) * 0.5f;
-				destX1 = destX0 + destW;
-				destY0 = 0;
-				destY1 = (float)winH;
-			}
+			srcW *= scale;
+			srcH *= scale;
 		}
+
+		destX0 = ((float)winW - srcW) * 0.5f;
+		destY0 = ((float)winH - srcH) * 0.5f;
+		destX1 = destX0 + srcW;
+		destY1 = destY0 + srcH;
+	} else {
+		// Preserve aspect ratio (default) and Integral+Aspect
+		// Apply pixel aspect ratio correction (NTSC ~0.857, PAL ~1.04)
+		float fsw = (float)mSourceW * (float)mPixelAspectRatio;
+		float fsh = (float)mSourceH;
+		float zoom = std::min((float)winW / fsw, (float)winH / fsh);
+
+		if (mStretchMode == kATDisplayStretchMode_IntegralPreserveAspectRatio && zoom > 1.0f)
+			zoom = floorf(zoom * 1.0001f);
+
+		float destW = fsw * zoom;
+		float destH = fsh * zoom;
+		destX0 = ((float)winW - destW) * 0.5f;
+		destY0 = ((float)winH - destH) * 0.5f;
+		destX1 = destX0 + destW;
+		destY1 = destY0 + destH;
 	}
 
 	// Set up orthographic projection

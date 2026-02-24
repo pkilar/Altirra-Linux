@@ -84,6 +84,7 @@ public:
 
 	ATDisplayStretchMode GetStretchMode() const { return mStretchMode; }
 	void SetStretchMode(ATDisplayStretchMode mode) { mStretchMode = mode; }
+	void SetPixelAspectRatio(double par) { mPixelAspectRatio = par; }
 	const char *GetSourceMessage() const { return mSourceMessage.empty() ? nullptr : mSourceMessage.c_str(); }
 	float GetSyncDelta() const override;
 
@@ -124,6 +125,7 @@ private:
 
 	FilterMode mFilterMode = kFilterBilinear;
 	ATDisplayStretchMode mStretchMode = kATDisplayStretchMode_PreserveAspectRatio;
+	double mPixelAspectRatio = 1.0;
 	bool mFullScreen = false;
 	uint32 mBackgroundColor = 0;
 
