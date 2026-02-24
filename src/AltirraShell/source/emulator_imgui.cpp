@@ -493,16 +493,14 @@ static std::string s_errorMessage;
 static enum class PendingDialog {
 	kNone,
 	kOpenImage,
-	kMountDisk1,
-	kMountDisk2,
-	kMountDisk3,
-	kMountDisk4,
+	kMountDisk,
 	kSaveState,
 	kLoadState,
 	kLoadTape,
 	kSaveTape,
 	kBootImage
 } s_pendingDialog = PendingDialog::kNone;
+static int s_pendingMountDiskSlot = 0;
 
 static const char *kDiskFilters =
 	"Disk Images|*.atr;*.xfd;*.dcm;*.pro;*.atx"
@@ -1188,9 +1186,13 @@ static void DrawMenuBar() {
 		ImGui::Separator();
 
 		if (ImGui::BeginMenu("Disk Drives")) {
-			for (int i = 0; i < 4; ++i) {
+			for (int i = 0; i < 15; ++i) {
 				char label[32];
 				ATDiskInterface& di = g_sim.GetDiskInterface(i);
+
+				// Always show D1-D4; only show D5-D15 if a disk is loaded
+				if (i >= 4 && !di.IsDiskLoaded())
+					continue;
 
 				if (ImGui::BeginMenu(di.IsDiskLoaded()
 					? (snprintf(label, sizeof(label), "D%d: %ls", i + 1,
@@ -1203,7 +1205,8 @@ static void DrawMenuBar() {
 						if (!path.empty()) {
 							TryMountDisk(i, path);
 						} else if (ATLinuxFileDialogIsFallbackOpen()) {
-							s_pendingDialog = (PendingDialog)((int)PendingDialog::kMountDisk1 + i);
+							s_pendingDialog = PendingDialog::kMountDisk;
+							s_pendingMountDiskSlot = i;
 						}
 					}
 
@@ -1908,8 +1911,13 @@ static void DrawStatusBar() {
 		ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s %s", hwName, vsName);
 
 		// Disk status (show dirty indicator when disk has unsaved changes)
-		for (int i = 0; i < 4; ++i) {
+		// Always show D1-D4; show D5-D15 only when loaded
+		for (int i = 0; i < 15; ++i) {
 			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+
+			if (i >= 4 && !di.IsDiskLoaded())
+				continue;
+
 			ImGui::SameLine(0, 16);
 
 			if (di.IsDiskLoaded()) {
@@ -2104,11 +2112,8 @@ static void PollFileDialogFallback() {
 			case PendingDialog::kOpenImage:
 				TryLoadImage(result);
 				break;
-			case PendingDialog::kMountDisk1:
-			case PendingDialog::kMountDisk2:
-			case PendingDialog::kMountDisk3:
-			case PendingDialog::kMountDisk4:
-				TryMountDisk((int)s_pendingDialog - (int)PendingDialog::kMountDisk1, result);
+			case PendingDialog::kMountDisk:
+				TryMountDisk(s_pendingMountDiskSlot, result);
 				break;
 			case PendingDialog::kSaveState:
 				if (!result.empty()) {
