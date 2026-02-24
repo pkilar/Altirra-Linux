@@ -5447,6 +5447,7 @@ static double s_startTime = 0;
 
 void ATImGuiDrawToastsOnly() {
 	DrawToasts();
+	DrawStatusBar();
 
 	// Show overlay hint for first 5 seconds
 	if (s_startTime == 0)
