@@ -49,6 +49,7 @@
 #include "cartridge.h"
 #include "inputmanager.h"
 #include "uiaccessors.h"
+#include "uicommondialogs.h"
 #include "uiqueue.h"
 #include "inputmap.h"
 
@@ -66,6 +67,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <csignal>
+#include <cxxabi.h>
+#include <execinfo.h>
 #include <getopt.h>
 #include <sys/stat.h>
 #include <dirent.h>
@@ -102,10 +105,61 @@ void ATSetFullscreen(bool);
 // Window resize callback (defined in stubs_linux.cpp)
 void ATSetWindowSizeCallback(void (*pfn)(int, int));
 
+// Settings path — declared early so crash handler can access it
+static VDStringW g_settingsPath;
+
 static volatile sig_atomic_t g_running = 1;
 
 static void SignalHandler(int) {
 	g_running = 0;
+}
+
+// Crash signal handler — print backtrace and exit
+static void CrashSignalHandler(int sig) {
+	// Prevent re-entry
+	static volatile sig_atomic_t s_crashing = 0;
+	if (s_crashing)
+		_exit(128 + sig);
+	s_crashing = 1;
+
+	const char *signame = "Unknown";
+	switch (sig) {
+		case SIGSEGV: signame = "SIGSEGV (Segmentation fault)"; break;
+		case SIGABRT: signame = "SIGABRT (Aborted)"; break;
+		case SIGFPE:  signame = "SIGFPE (Floating point exception)"; break;
+		case SIGBUS:  signame = "SIGBUS (Bus error)"; break;
+		case SIGILL:  signame = "SIGILL (Illegal instruction)"; break;
+	}
+
+	// Use write() directly — async-signal-safe
+	const char hdr[] = "\n=== Altirra crashed ===\nSignal: ";
+	write(STDERR_FILENO, hdr, sizeof(hdr) - 1);
+	write(STDERR_FILENO, signame, strlen(signame));
+	write(STDERR_FILENO, "\n\nBacktrace:\n", 13);
+
+	// Capture backtrace (backtrace() is not async-signal-safe on all
+	// platforms, but it works on glibc and is our best option)
+	void *frames[64];
+	int nframes = backtrace(frames, 64);
+	backtrace_symbols_fd(frames, nframes, STDERR_FILENO);
+
+	write(STDERR_FILENO, "\nAttempting to save settings...\n", 31);
+
+	// Try to save settings — this may fail if heap is corrupted
+	// but it's worth attempting
+	if (!g_settingsPath.empty()) {
+		try {
+			ATSaveSettings(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
+			ATUISaveRegistry(g_settingsPath.c_str());
+			write(STDERR_FILENO, "Settings saved.\n", 16);
+		} catch (...) {
+			write(STDERR_FILENO, "Settings save failed.\n", 22);
+		}
+	}
+
+	// Re-raise with default handler to get core dump
+	signal(sig, SIG_DFL);
+	raise(sig);
 }
 
 // Mouse pointer auto-hide state
@@ -133,9 +187,6 @@ static void SetWindowSizeImpl(int w, int h) {
 	if (g_pWindow)
 		SDL_SetWindowSize(g_pWindow, w, h);
 }
-
-// Settings path (used at init and shutdown)
-static VDStringW g_settingsPath;
 
 // Registry provider (owned, freed at shutdown)
 static VDRegistryProviderMemory *g_pRegistryMemory = nullptr;
@@ -811,9 +862,22 @@ int main(int argc, char *argv[]) {
 	// Detect CPU features (SSE2, AVX, etc.)
 	CPUCheckForExtensions();
 
-	// Install signal handlers for graceful shutdown
+	// Install signal handlers
 	signal(SIGINT, SignalHandler);
 	signal(SIGTERM, SignalHandler);
+
+	// Install crash signal handlers for diagnostics
+	{
+		struct sigaction sa {};
+		sa.sa_handler = CrashSignalHandler;
+		sigemptyset(&sa.sa_mask);
+		sa.sa_flags = SA_RESETHAND;  // one-shot: re-raise gets default handler
+		sigaction(SIGSEGV, &sa, nullptr);
+		sigaction(SIGABRT, &sa, nullptr);
+		sigaction(SIGFPE, &sa, nullptr);
+		sigaction(SIGBUS, &sa, nullptr);
+		sigaction(SIGILL, &sa, nullptr);
+	}
 
 	// Init registry (in-memory, backed by INI file)
 	g_pRegistryMemory = new VDRegistryProviderMemory;
@@ -993,8 +1057,40 @@ int main(int argc, char *argv[]) {
 		if (dbg)
 			dbg->Tick();
 
-		// Advance emulation
-		ATSimulator::AdvanceResult result = g_sim.Advance(false);
+		// Advance emulation with exception recovery
+		ATSimulator::AdvanceResult result;
+		try {
+			result = g_sim.Advance(false);
+		} catch (const MyError& e) {
+			ATUIShowError(e);
+
+			// Cold reset to recover from broken emulation state
+			g_sim.ColdReset();
+			g_sim.Resume();
+			RenderAndSwap(window);
+			SDL_Delay(16);
+			continue;
+		} catch (const std::exception& e) {
+			ATUIShowError2(nullptr,
+				VDTextU8ToW(VDStringA(e.what())).c_str(),
+				L"Emulation Error");
+
+			g_sim.ColdReset();
+			g_sim.Resume();
+			RenderAndSwap(window);
+			SDL_Delay(16);
+			continue;
+		} catch (...) {
+			ATUIShowError2(nullptr,
+				L"An unknown error occurred during emulation.",
+				L"Emulation Error");
+
+			g_sim.ColdReset();
+			g_sim.Resume();
+			RenderAndSwap(window);
+			SDL_Delay(16);
+			continue;
+		}
 
 		if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
 			RenderAndSwap(window);
