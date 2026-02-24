@@ -50,7 +50,10 @@
 
 #include <SDL.h>
 #include <error_imgui.h>
+#include <emulator_imgui.h>
 #include "display_sdl2.h"
+#include <at/atio/partitiontable.h>
+#include <at/atio/partitiondiskview.h>
 
 #include <algorithm>
 #include <cerrno>
@@ -504,7 +507,27 @@ void ATUIShowError(const VDException& e) {
 	ATUIShowError(nullptr, e);
 }
 
-void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *, const wchar_t *) {}
+void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t *devName) {
+	if (!dev)
+		return;
+
+	try {
+		vdvector<ATPartitionInfo> partitions;
+		ATDecodePartitionTable(*dev, partitions);
+
+		if (partitions.empty()) {
+			ATImGuiShowToast("No partitions found on block device");
+			return;
+		}
+
+		vdrefptr<IATDiskImage> diskView(new ATPartitionDiskView(*dev, partitions[0]));
+		ATImGuiOpenDiskExplorer(diskView, devName, dev->IsReadOnly());
+	} catch (const std::exception& e) {
+		char msg[256];
+		snprintf(msg, sizeof(msg), "Disk explorer failed: %s", e.what());
+		ATImGuiShowToast(msg);
+	}
+}
 
 bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
 	extern ATSimulator g_sim;

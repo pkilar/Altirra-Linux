@@ -27,4 +27,8 @@ void ATImGuiPasteText();
 void ATImGuiOpenImage();
 void ATImGuiBootImage();
 
+// Open disk explorer for a disk image
+class IATDiskImage;
+void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool readOnly);
+
 #endif

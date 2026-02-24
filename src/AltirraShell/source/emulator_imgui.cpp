@@ -19,6 +19,7 @@
 #include <at/atcore/propertyset.h>
 #include <at/atcore/serializable.h>
 #include <at/atio/image.h>
+#include <at/atio/diskimage.h>
 #include <at/atio/cartridgeimage.h>
 #include <at/ataudio/audiooutput.h>
 #include <at/ataudio/pokey.h>
@@ -394,13 +395,16 @@ static int s_newDiskFS = 0;      // 0=None, 1=DOS 2, 2=MyDOS
 
 // Disk explorer state
 static bool s_showDiskExplorer = false;
-static int s_diskExplorerSlot = -1;
-static IATDiskFS *s_diskFS = nullptr;
+static int s_diskExplorerSlot = -1;  // -1 = standalone (not tied to a drive)
+static vdautoptr<IATDiskFS> s_diskFS;
+static vdrefptr<IATDiskImage> s_diskStandaloneImage;  // holds image for standalone explorer
+static std::string s_diskExplorerTitle;  // custom title for standalone mode
 static ATDiskFSKey s_diskCurDir = ATDiskFSKey::None;
 static std::vector<ATDiskFSEntryInfo> s_diskEntries;
 static int s_diskSelectedIdx = -1;
 static std::vector<ATDiskFSKey> s_diskDirStack;
 static bool s_diskReadOnly = false;
+static bool s_diskTextMode = false;  // Atari EOL (0x9B) ↔ Unix LF (0x0A) conversion
 static std::string s_diskFSInfoStr;
 static char s_diskRenameBuffer[64] = {};
 static bool s_diskRenameActive = false;
@@ -1255,8 +1259,7 @@ static void DrawMenuBar() {
 							// Will open FS on first draw
 							if (s_diskFS) {
 								try { s_diskFS->Flush(); } catch (...) {}
-								delete s_diskFS;
-								s_diskFS = nullptr;
+								s_diskFS.reset();
 							}
 							s_diskEntries.clear();
 							s_diskDirStack.clear();
@@ -1268,6 +1271,15 @@ static void DrawMenuBar() {
 								IATDiskImage *img = di.GetDiskImage();
 								if (img) {
 									s_diskFS = ATDiskMountImage(img, readOnly);
+
+									ATDiskFSValidationReport report;
+									s_diskFS->Validate(report);
+									if (report.IsSerious()) {
+										s_diskReadOnly = true;
+										s_diskFS->SetReadOnly(true);
+										ShowToast("Filesystem errors detected - mounted read-only");
+									}
+
 									ATDiskFSInfo fsInfo;
 									s_diskFS->GetInfo(fsInfo);
 									char infoStr[128];
@@ -1352,6 +1364,57 @@ static void DrawMenuBar() {
 			}
 
 			ImGui::EndMenu();
+		}
+
+		if (ImGui::MenuItem("Disk Explorer...")) {
+			VDStringW diskPath = ATLinuxOpenFileDialog("Open Disk Image",
+				"Disk Images|*.atr;*.xfd;*.atx;*.dcm;*.pro|All Files|*");
+			if (!diskPath.empty()) {
+				try {
+					if (s_diskFS) {
+						try { s_diskFS->Flush(); } catch (...) {}
+						s_diskFS.reset();
+					}
+					s_diskStandaloneImage.clear();
+
+					ATLoadDiskImage(diskPath.c_str(), ~s_diskStandaloneImage);
+
+					s_diskFS = ATDiskMountImage(s_diskStandaloneImage, false);
+
+					ATDiskFSValidationReport report;
+					s_diskFS->Validate(report);
+					s_diskReadOnly = false;
+					if (report.IsSerious()) {
+						s_diskReadOnly = true;
+						s_diskFS->SetReadOnly(true);
+						ShowToast("Filesystem errors detected - mounted read-only");
+					}
+
+					ATDiskFSInfo fsInfo;
+					s_diskFS->GetInfo(fsInfo);
+					char infoStr[128];
+					snprintf(infoStr, sizeof(infoStr), "%s  |  %u free blocks (%u bytes/block)",
+						fsInfo.mFSType.c_str(), fsInfo.mFreeBlocks, fsInfo.mBlockSize);
+					s_diskFSInfoStr = infoStr;
+
+					const wchar_t *fname = VDFileSplitPath(diskPath.c_str());
+					VDStringA titleU8 = VDTextWToU8(VDStringW(fname));
+					s_diskExplorerTitle.assign(titleU8.c_str(), titleU8.size());
+
+					s_diskExplorerSlot = -1;
+					s_diskEntries.clear();
+					s_diskDirStack.clear();
+					s_diskCurDir = ATDiskFSKey::None;
+					s_diskSelectedIdx = -1;
+					s_showDiskExplorer = true;
+				} catch (const std::exception& e) {
+					s_diskFS.reset();
+					s_diskStandaloneImage.clear();
+					char msg[256];
+					snprintf(msg, sizeof(msg), "Open disk failed: %s", e.what());
+					ShowToast(msg);
+				}
+			}
 		}
 
 		ImGui::Separator();
@@ -2762,14 +2825,59 @@ static void DiskExplorerRefresh() {
 static void DiskExplorerClose() {
 	if (s_diskFS) {
 		try { s_diskFS->Flush(); } catch (...) {}
-		delete s_diskFS;
-		s_diskFS = nullptr;
+		s_diskFS.reset();
 	}
+	s_diskStandaloneImage.clear();
+	s_diskExplorerTitle.clear();
 	s_diskEntries.clear();
 	s_diskDirStack.clear();
 	s_diskSelectedIdx = -1;
 	s_diskCurDir = ATDiskFSKey::None;
 	s_showDiskExplorer = false;
+}
+
+void ATImGuiOpenDiskExplorer(IATDiskImage *image, const wchar_t *imageName, bool readOnly) {
+	if (!image)
+		return;
+
+	DiskExplorerClose();
+
+	try {
+		s_diskFS = ATDiskMountImage(image, readOnly);
+
+		ATDiskFSValidationReport report;
+		s_diskFS->Validate(report);
+		s_diskReadOnly = readOnly;
+		if (report.IsSerious()) {
+			s_diskReadOnly = true;
+			s_diskFS->SetReadOnly(true);
+			ShowToast("Filesystem errors detected - mounted read-only");
+		}
+
+		ATDiskFSInfo fsInfo;
+		s_diskFS->GetInfo(fsInfo);
+		char infoStr[128];
+		snprintf(infoStr, sizeof(infoStr), "%s  |  %u free blocks (%u bytes/block)",
+			fsInfo.mFSType.c_str(), fsInfo.mFreeBlocks, fsInfo.mBlockSize);
+		s_diskFSInfoStr = infoStr;
+
+		if (imageName) {
+			VDStringA titleU8 = VDTextWToU8(VDStringW(imageName));
+			s_diskExplorerTitle.assign(titleU8.c_str(), titleU8.size());
+		}
+
+		s_diskExplorerSlot = -1;
+		s_diskEntries.clear();
+		s_diskDirStack.clear();
+		s_diskCurDir = ATDiskFSKey::None;
+		s_diskSelectedIdx = -1;
+		s_showDiskExplorer = true;
+	} catch (const std::exception& e) {
+		s_diskFS.reset();
+		char msg[256];
+		snprintf(msg, sizeof(msg), "Open disk failed: %s", e.what());
+		ShowToast(msg);
+	}
 }
 
 static void DrawDiskExplorer() {
@@ -2785,8 +2893,13 @@ static void DrawDiskExplorer() {
 	if (s_diskEntries.empty() && s_diskSelectedIdx == -1)
 		DiskExplorerRefresh();
 
-	char title[64];
-	snprintf(title, sizeof(title), "Disk Explorer - D%d###diskexp", s_diskExplorerSlot + 1);
+	char title[256];
+	if (s_diskExplorerSlot >= 0)
+		snprintf(title, sizeof(title), "Disk Explorer - D%d###diskexp", s_diskExplorerSlot + 1);
+	else if (!s_diskExplorerTitle.empty())
+		snprintf(title, sizeof(title), "Disk Explorer - %s###diskexp", s_diskExplorerTitle.c_str());
+	else
+		snprintf(title, sizeof(title), "Disk Explorer###diskexp");
 
 	ImGui::SetNextWindowSize(ImVec2(550, 400), ImGuiCond_FirstUseEver);
 	bool open = true;
@@ -2831,6 +2944,12 @@ static void DrawDiskExplorer() {
 			try {
 				vdfastvector<uint8> data;
 				s_diskFS->ReadFile(entry.mKey, data);
+				if (s_diskTextMode) {
+					for (auto& b : data) {
+						if (b == 0x9B)
+							b = 0x0A;
+					}
+				}
 				VDFile f(savePath.c_str(), nsVDFile::kWrite | nsVDFile::kCreateAlways);
 				if (!data.empty())
 					f.write(data.data(), (long)data.size());
@@ -2859,17 +2978,59 @@ static void DrawDiskExplorer() {
 						f.read(data.data(), (long)len);
 					f.close();
 
-					// Use filename from path
+					// Convert filename to Atari 8.3 format
 					const wchar_t *fname = VDFileSplitPath(importPath.c_str());
 					VDStringA u8name = VDTextWToU8(VDStringW(fname));
-					// Truncate to 8.3 if needed (Atari DOS)
-					if (u8name.size() > 12)
-						u8name.resize(12);
-					// Convert to uppercase
-					for (char& c : u8name)
-						c = (char)toupper((unsigned char)c);
 
-					s_diskFS->WriteFile(s_diskCurDir, u8name.c_str(), data.data(), (uint32)data.size());
+					// Split into name and extension at the last dot
+					VDStringA atariName;
+					{
+						const char *nameStr = u8name.c_str();
+						const char *dotPtr = strrchr(nameStr, '.');
+						VDStringA basePart, extPart;
+						if (dotPtr) {
+							basePart = VDStringA(nameStr, dotPtr);
+							extPart = VDStringA(dotPtr + 1);
+						} else {
+							basePart = u8name;
+						}
+
+						// Strip invalid characters and uppercase
+						auto sanitize = [](VDStringA& s) {
+							VDStringA out;
+							for (char c : s) {
+								c = (char)toupper((unsigned char)c);
+								if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_')
+									out += c;
+							}
+							s = out;
+						};
+						sanitize(basePart);
+						sanitize(extPart);
+
+						// Truncate to 8.3 limits
+						if (basePart.size() > 8)
+							basePart.resize(8);
+						if (extPart.size() > 3)
+							extPart.resize(3);
+
+						if (basePart.empty())
+							basePart = "FILE";
+
+						if (!extPart.empty())
+							atariName = basePart + "." + extPart;
+						else
+							atariName = basePart;
+					}
+
+					if (s_diskTextMode) {
+						for (auto& b : data) {
+							if (b == 0x0A)
+								b = 0x9B;
+						}
+					}
+
+					s_diskFS->WriteFile(s_diskCurDir, atariName.c_str(), data.data(), (uint32)data.size());
 					s_diskFS->Flush();
 					DiskExplorerRefresh();
 					ShowToast("File imported");
@@ -2900,6 +3061,11 @@ static void DrawDiskExplorer() {
 	if (ImGui::Button("New Dir") && !s_diskReadOnly) {
 		ImGui::OpenPopup("New Directory");
 	}
+
+	ImGui::SameLine();
+	ImGui::Checkbox("Text Mode", &s_diskTextMode);
+	if (ImGui::IsItemHovered())
+		ImGui::SetTooltip("Convert Atari EOL (0x9B) <-> Unix LF (0x0A)\non extract/import");
 
 	// Delete confirmation popup
 	if (ImGui::BeginPopupModal("Confirm Delete", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -3029,6 +3195,52 @@ static void DrawDiskExplorer() {
 					s_diskCurDir = entry.mKey;
 					DiskExplorerRefresh();
 				}
+			}
+
+			// Right-click context menu
+			if (ImGui::BeginPopupContextItem()) {
+				s_diskSelectedIdx = i;
+				if (entry.mbIsDirectory) {
+					if (ImGui::MenuItem("Open")) {
+						s_diskDirStack.push_back(s_diskCurDir);
+						s_diskCurDir = entry.mKey;
+						DiskExplorerRefresh();
+					}
+				}
+				if (!entry.mbIsDirectory && ImGui::MenuItem("Extract")) {
+					VDStringW savePath = ATLinuxSaveFileDialog("Extract File", "All Files|*");
+					if (!savePath.empty()) {
+						try {
+							vdfastvector<uint8> data;
+							s_diskFS->ReadFile(entry.mKey, data);
+							if (s_diskTextMode) {
+								for (auto& b : data) {
+									if (b == 0x9B)
+										b = 0x0A;
+								}
+							}
+							VDFile f(savePath.c_str(), nsVDFile::kWrite | nsVDFile::kCreateAlways);
+							if (!data.empty())
+								f.write(data.data(), (long)data.size());
+							f.close();
+							ShowToast("File extracted");
+						} catch (const std::exception& e) {
+							char msg[256];
+							snprintf(msg, sizeof(msg), "Extract failed: %s", e.what());
+							ShowToast(msg);
+						}
+					}
+				}
+				if (!entry.mbIsDirectory && !s_diskReadOnly && ImGui::MenuItem("Rename")) {
+					strncpy(s_diskRenameBuffer, entry.mFileName.c_str(), sizeof(s_diskRenameBuffer) - 1);
+					s_diskRenameBuffer[sizeof(s_diskRenameBuffer) - 1] = 0;
+					s_diskRenameActive = true;
+					ImGui::OpenPopup("Rename File");
+				}
+				if (!s_diskReadOnly && ImGui::MenuItem("Delete")) {
+					ImGui::OpenPopup("Confirm Delete");
+				}
+				ImGui::EndPopup();
 			}
 
 			ImGui::TableNextColumn();
