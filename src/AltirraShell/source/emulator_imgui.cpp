@@ -1674,6 +1674,7 @@ static void DrawShortcuts() {
 			ImGui::TextUnformatted(action);
 		};
 
+		row("F1 (hold)", "Turbo / Warp");
 		row("Shift+F1", "Cycle Quick Maps");
 		row("F4", "Toggle Mute");
 		row("F5", "Break / Run (debugger)");
@@ -1686,6 +1687,7 @@ static void DrawShortcuts() {
 		row("F11", "Fullscreen / Step Into");
 		row("Shift+F11", "Step Out (debugger)");
 		row("F12", "Toggle Overlay");
+		row("Alt+Return", "Toggle Fullscreen");
 		row("Pause", "Pause / Resume");
 		row("Ctrl+O", "Open Image");
 		row("Ctrl+Shift+O", "Boot Image");

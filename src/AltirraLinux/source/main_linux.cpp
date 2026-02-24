@@ -642,6 +642,17 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
+		// F1 warp: hold to enable, release to disable
+		if (event.key.keysym.scancode == SDL_SCANCODE_F1
+			&& !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT))) {
+			if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+				ATUISetTurbo(true);
+			} else if (event.type == SDL_KEYUP) {
+				ATUISetTurbo(false);
+			}
+			continue;
+		}
+
 		// F1/F4/F6/F7/F8/F9/Pause always active (quick maps/mute/reset/save/load/screenshot/pause)
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F1
@@ -655,8 +666,10 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 			}
 
-			// F11 = fullscreen toggle when overlay is hidden
-			if (event.key.keysym.scancode == SDL_SCANCODE_F11
+			// F11 or Alt+Return = fullscreen toggle when overlay is hidden
+			if ((event.key.keysym.scancode == SDL_SCANCODE_F11
+				|| (event.key.keysym.scancode == SDL_SCANCODE_RETURN
+					&& (event.key.keysym.mod & KMOD_ALT)))
 				&& !(g_pImGui && g_pImGui->IsVisible())) {
 				ATSetFullscreen(!ATUIGetFullscreen());
 				continue;
