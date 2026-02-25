@@ -85,6 +85,7 @@ public:
 	ATDisplayStretchMode GetStretchMode() const { return mStretchMode; }
 	void SetStretchMode(ATDisplayStretchMode mode) { mStretchMode = mode; }
 	void SetPixelAspectRatio(double par) { mPixelAspectRatio = par; }
+	void SetBottomMargin(int pixels) { mBottomMargin = pixels; }
 	const char *GetSourceMessage() const { return mSourceMessage.empty() ? nullptr : mSourceMessage.c_str(); }
 	float GetSyncDelta() const override;
 
@@ -128,6 +129,7 @@ private:
 	double mPixelAspectRatio = 1.0;
 	bool mFullScreen = false;
 	uint32 mBackgroundColor = 0;
+	int mBottomMargin = 0;
 
 	VDStringA mSourceMessage;
 

@@ -1237,6 +1237,10 @@ int main(int argc, char *argv[]) {
 	// GetAudioOutput(), SetHardwareMode(), etc.)
 	ATLoadDefaultProfiles();
 	ATSettingsLoadLastProfile(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
+
+	// Always show real sector numbers in the status bar on Linux
+	g_sim.SetDiskSectorCounterEnabled(true);
+
 	fprintf(stderr, "Settings loaded\n");
 
 	// Initialize keyboard mapping (must be after settings load which sets g_kbdOpts)

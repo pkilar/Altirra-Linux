@@ -90,6 +90,8 @@ ATDisplayFilterMode ATUIGetDisplayFilterMode();
 void ATUISetDisplayFilterMode(ATDisplayFilterMode mode);
 bool ATUIGetShowFPS();
 void ATUISetShowFPS(bool enabled);
+bool ATUIGetShowStatusBar();
+void ATUISetShowStatusBar(bool enabled);
 bool ATUIGetFullscreen();
 bool ATUIGetDisplayFullscreen();
 void ATSetFullscreen(bool);

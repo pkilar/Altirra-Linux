@@ -117,7 +117,7 @@ static bool s_inputCaptureGotResult = false;
 static int s_captureTargetMappingIdx = -1;  // -1 = adding new, >=0 = rebinding existing
 static bool s_quitRequested = false;
 static bool s_quitConfirmed = false;
-static bool s_showStatusBar = true;
+// s_showStatusBar removed — now backed by ATUIGetShowStatusBar()/ATUISetShowStatusBar()
 
 // Device manager state
 static IATDevice *s_devSelectedDevice = nullptr;
@@ -1837,7 +1837,11 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Fullscreen", "F11", &fullscreen))
 			ATSetFullscreen(fullscreen);
 
-		ImGui::MenuItem("Status Bar", nullptr, &s_showStatusBar);
+		{
+			bool statusBar = ATUIGetShowStatusBar();
+			if (ImGui::MenuItem("Status Bar", nullptr, &statusBar))
+				ATUISetShowStatusBar(statusBar);
+		}
 
 		{
 			bool autoHide = ATUIGetPointerAutoHide();
@@ -2080,6 +2084,15 @@ static void DrawSystemConfig() {
 
 	ImGui::Separator();
 
+	// Display options
+	{
+		bool statusBar = ATUIGetShowStatusBar();
+		if (ImGui::Checkbox("Show Status Bar", &statusBar))
+			ATUISetShowStatusBar(statusBar);
+	}
+
+	ImGui::Separator();
+
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
 		g_sim.ColdReset();
 	}
@@ -2090,11 +2103,23 @@ static void DrawSystemConfig() {
 // ============= Status Bar =============
 
 static void DrawStatusBar() {
-	if (!s_showStatusBar)
+	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+
+	if (!ATUIGetShowStatusBar()) {
+		if (disp)
+			disp->SetBottomMargin(0);
 		return;
+	}
 
 	ImGuiIO& io = ImGui::GetIO();
 	float barHeight = ImGui::GetFrameHeight() + 4.0f;
+
+	// Tell display backend to reserve space so emulator output doesn't
+	// render behind the status bar. Convert logical pixels to physical.
+	if (disp) {
+		float scale = io.DisplayFramebufferScale.y;
+		disp->SetBottomMargin((int)(barHeight * scale + 0.5f));
+	}
 
 	ImGui::SetNextWindowPos(ImVec2(0, io.DisplaySize.y - barHeight));
 	ImGui::SetNextWindowSize(ImVec2(io.DisplaySize.x, barHeight));
@@ -2181,12 +2206,23 @@ static void DrawStatusBar() {
 				else
 					color = nullptr;
 
-				if (sioActive)
-					ImGui::TextColored(*color, "D%d: %s [%u]", i + 1, u8.c_str(), ind.mStatusCounter[i]);
-				else if (color)
-					ImGui::TextColored(*color, "D%d: %s%s", i + 1, u8.c_str(), di.IsDirty() ? "*" : "");
+				// Compute track/sector from disk geometry (always shown)
+				uint32 sector = ind.mStatusCounter[i];
+				uint32 track = 0;
+				uint32 secInTrack = 0;
+				IATDiskImage *img = di.GetDiskImage();
+				if (img && sector > 0) {
+					ATDiskGeometryInfo geo = img->GetGeometry();
+					uint32 spt = geo.mSectorsPerTrack ? geo.mSectorsPerTrack : 18;
+					track = (sector - 1) / spt;
+					secInTrack = (sector - 1) % spt + 1;
+				}
+
+				const char *dirty = di.IsDirty() ? "*" : "";
+				if (color)
+					ImGui::TextColored(*color, "D%d: %s%s [T%02u S%02u]", i + 1, u8.c_str(), dirty, track, secInTrack);
 				else
-					ImGui::Text("D%d: %s", i + 1, u8.c_str());
+					ImGui::Text("D%d: %s [T%02u S%02u]", i + 1, u8.c_str(), track, secInTrack);
 			} else if (motorOn || sioActive) {
 				const ImVec4& color = isActive ? kDiskBright[i & 7] : kDiskDim[i & 7];
 				ImGui::TextColored(color, "D%d:", i + 1);
@@ -5447,6 +5483,7 @@ static double s_startTime = 0;
 
 void ATImGuiDrawToastsOnly() {
 	DrawToasts();
+	DrawStatusBar();
 
 	// Show overlay hint for first 5 seconds
 	if (s_startTime == 0)
