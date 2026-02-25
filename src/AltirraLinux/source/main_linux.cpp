@@ -1152,6 +1152,10 @@ int main(int argc, char *argv[]) {
 	ATRegisterDevices(*g_sim.GetDeviceManager());
 	ATRegisterDeviceXCmds(*g_sim.GetDeviceManager());
 
+	// Register UI command handlers (enables custom device VM scripts)
+	extern void ATLinuxInitCommands();
+	ATLinuxInitCommands();
+
 	fprintf(stderr, "Simulator initialized\n");
 
 	// Init SDL2

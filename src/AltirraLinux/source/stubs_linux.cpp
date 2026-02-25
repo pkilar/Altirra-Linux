@@ -47,6 +47,7 @@
 #include <at/atnetworksockets/vxlantunnel.h>
 #include <at/atnetworksockets/worker.h>
 #include <at/atui/uimanager.h>
+#include <at/atui/uicommandmanager.h>
 
 #include <SDL.h>
 #include <error_imgui.h>
@@ -473,31 +474,10 @@ void ATUIExecuteCommandStringAndShowErrors(const char *cmd, const ATUICommandOpt
 	if (!cmd || !*cmd)
 		return;
 
-	extern ATSimulator g_sim;
+	extern ATUICommandManager g_ATUICommandMgr;
 
-	try {
-		if (!strcmp(cmd, "System.ColdReset")) {
-			g_sim.ColdReset();
-		} else if (!strcmp(cmd, "System.WarmReset")) {
-			g_sim.WarmReset();
-		} else if (!strcmp(cmd, "System.ColdResetComputerOnly")) {
-			g_sim.ColdResetComputerOnly();
-		} else if (!strcmp(cmd, "System.TogglePause")) {
-			if (g_sim.IsPaused())
-				g_sim.Resume();
-			else
-				g_sim.Pause();
-		} else if (!strcmp(cmd, "Cart.Detach")) {
-			g_sim.UnloadCartridge(0);
-		} else if (!strcmp(cmd, "Cart.DetachSecond")) {
-			g_sim.UnloadCartridge(1);
-		} else {
-			VDDEBUG("ATUIExecuteCommandStringAndShowErrors: unhandled command '%s'\n", cmd);
-		}
-	} catch (const MyError&) {
-		// Error during command execution - silently ignore as per original Windows behavior
-		// (commands catch their own errors and show UI as needed)
-	}
+	ATUICommandOptions defaultOpts;
+	g_ATUICommandMgr.ExecuteCommandNT(cmd, opts ? *opts : defaultOpts);
 }
 
 ///////////////////////////////////////////////////////////////////////////

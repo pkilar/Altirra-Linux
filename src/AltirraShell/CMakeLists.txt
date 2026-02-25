@@ -11,6 +11,7 @@ set(ALTIRRASHELL_SOURCES
 	source/debugger_imgui.cpp
 	source/emulator_imgui.cpp
 	source/filedialog_linux.cpp
+	source/commands_linux.cpp
 )
 
 add_library(altirrashell STATIC ${ALTIRRASHELL_SOURCES})
@@ -32,6 +33,7 @@ target_link_libraries(altirrashell
 		atdebugger
 		ataudio
 		atio
+		atui
 		SDL2::SDL2
 		OpenGL::GL
 		imgui
