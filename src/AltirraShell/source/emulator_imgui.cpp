@@ -144,7 +144,7 @@ static std::string s_devEditTag;
 
 // ============= Device config descriptor system =============
 
-enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect };
+enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect, IntInput };
 
 struct DevCfgChoice { int value; const char *name; };
 
@@ -208,11 +208,20 @@ static const DevCfgControl kCfgMyIDE[] = {
 	{ DevCfgType::IntDropdown, "cpldver", "CPLD Version", kMyIDECPLDChoices, 2, false, nullptr },
 };
 
+static const DevCfgChoice kConnectRateChoices[] = {
+	{300, "300"}, {1200, "1200"}, {2400, "2400"}, {4800, "4800"},
+	{9600, "9600"}, {19200, "19200"}, {38400, "38400"}, {57600, "57600"},
+	{115200, "115200"}, {230400, "230400"},
+};
+
 static const DevCfgControl kCfgModem[] = {
+	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "telnet", "Telnet Emulation", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "ipv6", "Listen IPv6", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "connect_rate", "Connect Rate", kConnectRateChoices, 10, false, nullptr },
+	{ DevCfgType::Checkbox, "check_rate", "Require Matched DTE Rate", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "dialaddr", "Dial Address", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "dialsvc", "Dial Service", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "termtype", "Terminal Type", nullptr, 0, false, nullptr },
@@ -269,11 +278,13 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("myide-d5xx", "MyIDE Cartridge", kCfgMyIDE),
 	DEVCFG_ENTRY("myide-d2xx", "MyIDE-II", kCfgMyIDE),
 	DEVCFG_ENTRY("myide2", "MyIDE-II", kCfgMyIDE),
+	DEVCFG_ENTRY("modem", "Modem", kCfgModem),
 	DEVCFG_ENTRY("835", "835 Modem", kCfgModem),
 	DEVCFG_ENTRY("835full", "835 Modem (Full)", kCfgModem),
 	DEVCFG_ENTRY("1030", "1030 Modem", kCfgModem),
 	DEVCFG_ENTRY("1030full", "1030 Modem (Full)", kCfgModem),
 	DEVCFG_ENTRY("sx212", "SX212 Modem", kCfgModem),
+	DEVCFG_ENTRY("pocketmodem", "Pocket Modem", kCfgModem),
 	DEVCFG_ENTRY("820", "820 Printer", kCfgPrinter),
 	DEVCFG_ENTRY("1025", "1025 Printer", kCfgPrinter),
 	DEVCFG_ENTRY("1029", "1029 Printer", kCfgPrinter),
@@ -352,6 +363,17 @@ static bool DrawStructuredDeviceConfig(ATPropertySet& props, const DevCfgTagMapp
 				if (ImGui::InputText(ctrl.label, buf, sizeof(buf))) {
 					VDStringW wstr = VDTextU8ToW(VDStringA(buf));
 					props.SetString(ctrl.propKey, wstr.c_str());
+					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::IntInput: {
+				int val = (int)props.GetUint32(ctrl.propKey, 0);
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputInt(ctrl.label, &val)) {
+					if (val < 0) val = 0;
+					props.SetUint32(ctrl.propKey, (uint32)val);
 					changed = true;
 				}
 				break;
