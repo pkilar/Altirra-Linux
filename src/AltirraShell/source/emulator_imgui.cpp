@@ -2216,9 +2216,10 @@ static void DrawStatusBar() {
 			bool motorOn = (ind.mDiskMotorFlags & flag) != 0;
 			bool sioActive = (statusFlags & flag) != 0;
 			bool hasError = (diskErrorVis & flag) != 0;
+			bool ledOn = (ind.mDiskLEDFlags & flag) != 0;
 			bool isActive = sioActive || hasError;
 
-			if (i >= 4 && !di.IsDiskLoaded() && !motorOn && !sioActive)
+			if (i >= 4 && !di.IsDiskLoaded() && !motorOn && !sioActive && !ledOn)
 				continue;
 
 			ImGui::SameLine(0, 16);
@@ -2236,6 +2237,8 @@ static void DrawStatusBar() {
 					color = &kDiskDim[i & 7];
 				else if (di.IsDirty())
 					color = &kDiskDirty;
+				else if (ledOn)
+					color = &kDiskDim[i & 7];
 				else
 					color = nullptr;
 
@@ -2308,10 +2311,21 @@ static void DrawStatusBar() {
 			--ind.mFlashWriteCounter;
 		}
 
-		// Cartridge indicator
+		// Cartridge indicator (flashes white on bank switch activity)
 		if (g_sim.IsCartridgeAttached(0)) {
 			ImGui::SameLine(0, 16);
-			ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+			if (ind.mCartridgeActivityCounter) {
+				ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "CART");
+				--ind.mCartridgeActivityCounter;
+			} else {
+				ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+			}
+		}
+
+		// Modem connection indicator
+		if (ind.mModemConnection[0]) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), "MDM:%s", ind.mModemConnection);
 		}
 
 		// Tape indicator with position

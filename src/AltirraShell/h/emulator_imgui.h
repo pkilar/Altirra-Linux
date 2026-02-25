@@ -58,6 +58,9 @@ struct ATImGuiIndicatorState {
 	uint8 mPCLinkReadCounter = 0;      // PCLink read activity countdown (0-30)
 	uint8 mPCLinkWriteCounter = 0;     // PCLink write activity countdown (0-30)
 	uint8 mFlashWriteCounter = 0;      // Flash write activity countdown (0-20)
+	char mModemConnection[32] = {};    // Modem connection string (e.g., "9600", "RING")
+	uint8 mCartridgeActivityCounter = 0; // Cartridge bank-switch flash countdown (0-20)
+	uint32 mDiskLEDFlags = 0;          // Per-drive LED ready state (bit 0 = D1)
 };
 
 ATImGuiIndicatorState& ATImGuiGetIndicatorState();
