@@ -10,7 +10,9 @@
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/text.h>
+#include <vd2/system/time.h>
 #include <at/atcore/address.h>
+#include <at/atcore/profile.h>
 #include <at/atdebugger/target.h>
 #include <at/atcpu/execstate.h>
 #include <at/atcpu/history.h>
@@ -200,6 +202,21 @@ static char s_profilerBoundaryAddr[64] = "";
 static char s_profilerBoundaryAddr2[64] = "";
 static bool s_profilerGlobalAddresses = false;
 
+// Profiler detail (function detail) state
+static bool s_showProfilerDetail = false;
+static uint32 s_profilerDetailAddr = 0;
+static std::string s_profilerDetailName;
+
+struct ProfileDetailEntry {
+	uint32 addr;
+	uint32 cycles;
+	uint32 insns;
+	uint32 unhaltedCycles;
+	std::string disasm;
+};
+static std::vector<ProfileDetailEntry> s_profilerDetailEntries;
+static void ProfilerDetailBuild(uint32 funcAddr);
+
 // Trace viewer state
 static bool s_showTrace = false;
 static bool s_traceRecording = false;
@@ -217,6 +234,76 @@ static vdrefptr<ATTraceCollection> s_traceCollection;
 static bool s_showDebugDisplay = false;
 static ATDebugDisplay *s_debugDisplay = nullptr;
 static GLuint s_debugDisplayTex = 0;
+
+// Performance overlay state
+static bool s_showPerformance = false;
+
+class ATImGuiProfiler : public IATProfiler {
+public:
+	static constexpr int kWidth = 256;
+	static constexpr int kHeight = 200;
+
+	void OnEvent(ATProfileEvent event) override;
+	void BeginRegion(ATProfileRegion region) override;
+	void EndRegion(ATProfileRegion region) override;
+
+	// Per-column, per-region accumulated pixel heights for the rolling display
+	struct Column {
+		int regionPixels[kATProfileRegionCount] {};
+	};
+
+	Column mColumns[kWidth] {};
+	int mX = 0;  // current write column (wraps at kWidth)
+	int mRegionStackHt = 0;
+	ATProfileRegion mRegionStack[64] {};
+	uint64 mFrameStartTime = 0;
+	uint64 mRegionStartTime = 0;
+	double mTicksToPixels = 0;
+};
+
+static ATImGuiProfiler *s_pProfiler = nullptr;
+
+void ATImGuiProfiler::OnEvent(ATProfileEvent event) {
+	if (event != kATProfileEvent_BeginFrame)
+		return;
+
+	mRegionStackHt = 0;
+	mX = (mX + 1) & (kWidth - 1);
+	mFrameStartTime = VDGetPreciseTick();
+	mRegionStartTime = mFrameStartTime;
+	mTicksToPixels = VDGetPreciseSecondsPerTick() * (double)kHeight * 30.0;
+
+	// Clear the next column
+	Column& col = mColumns[mX];
+	for (int i = 0; i < kATProfileRegionCount; i++)
+		col.regionPixels[i] = 0;
+}
+
+void ATImGuiProfiler::BeginRegion(ATProfileRegion region) {
+	if (mRegionStackHt < 64) {
+		// End timing for the previous region
+		if (mRegionStackHt > 0) {
+			uint64 now = VDGetPreciseTick();
+			int pixels = (int)((double)(now - mRegionStartTime) * mTicksToPixels);
+			if (pixels > 0)
+				mColumns[mX].regionPixels[mRegionStack[mRegionStackHt - 1]] += pixels;
+			mRegionStartTime = now;
+		}
+		mRegionStack[mRegionStackHt++] = region;
+		mRegionStartTime = VDGetPreciseTick();
+	}
+}
+
+void ATImGuiProfiler::EndRegion(ATProfileRegion region) {
+	if (mRegionStackHt > 0) {
+		uint64 now = VDGetPreciseTick();
+		int pixels = (int)((double)(now - mRegionStartTime) * mTicksToPixels);
+		if (pixels > 0)
+			mColumns[mX].regionPixels[mRegionStack[mRegionStackHt - 1]] += pixels;
+		--mRegionStackHt;
+		mRegionStartTime = now;
+	}
+}
 static std::vector<uint32> s_debugDisplayRGBA;
 static int s_debugDisplayMode = 0;
 static int s_debugDisplayPalette = 0;
@@ -249,6 +336,14 @@ void ATImGuiDebuggerShutdown() {
 	}
 	s_traceHasData = false;
 	s_traceCollection.clear();
+
+	// Cleanup performance overlay
+	if (s_pProfiler) {
+		if (g_pATProfiler == s_pProfiler)
+			g_pATProfiler = nullptr;
+		delete s_pProfiler;
+		s_pProfiler = nullptr;
+	}
 
 	// Cleanup debug display
 	if (s_debugDisplay) {
@@ -3079,8 +3174,15 @@ static void DrawProfiler() {
 					snprintf(rowId, sizeof(rowId), "##pr%d", row);
 
 					if (ImGui::Selectable(rowId, isSelected,
-						ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap)) {
-						if (ImGui::GetIO().KeyCtrl) {
+						ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap
+							| ImGuiSelectableFlags_AllowDoubleClick)) {
+						if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+							// Double-click: open function detail window
+							s_profilerDetailAddr = e.addr;
+							s_profilerDetailName = e.sym;
+							ProfilerDetailBuild(e.addr);
+							s_showProfilerDetail = true;
+						} else if (ImGui::GetIO().KeyCtrl) {
 							// Ctrl+click: toggle
 							if (isSelected)
 								s_profilerSelectedRows.erase(row);
@@ -3526,6 +3628,255 @@ static void DrawDebugDisplay() {
 	ImGui::End();
 }
 
+// ============= Performance Overlay =============
+
+static void DrawPerformanceOverlay() {
+	if (!s_showPerformance)
+		return;
+
+	// Register profiler on open
+	if (!s_pProfiler) {
+		s_pProfiler = new ATImGuiProfiler;
+		s_pProfiler->mFrameStartTime = VDGetPreciseTick();
+		s_pProfiler->mTicksToPixels = VDGetPreciseSecondsPerTick() * (double)ATImGuiProfiler::kHeight * 30.0;
+		g_pATProfiler = s_pProfiler;
+	}
+
+	constexpr int kW = ATImGuiProfiler::kWidth;
+	constexpr int kH = ATImGuiProfiler::kHeight;
+
+	ImGui::SetNextWindowSize(ImVec2(280, 340), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Performance", &s_showPerformance)) {
+		ImGui::End();
+		return;
+	}
+
+	// Deregister on close
+	if (!s_showPerformance) {
+		if (s_pProfiler) {
+			if (g_pATProfiler == s_pProfiler)
+				g_pATProfiler = nullptr;
+			delete s_pProfiler;
+			s_pProfiler = nullptr;
+		}
+		ImGui::End();
+		return;
+	}
+
+	// Colors matching the Windows profiler
+	static constexpr ImU32 kRegionColors[kATProfileRegionCount] = {
+		IM_COL32(128, 128, 128, 255),  // Idle - gray
+		IM_COL32(255, 255, 255, 255),  // IdleFrameDelay - white
+		IM_COL32(64, 96, 224, 255),    // Simulation - blue
+		IM_COL32(224, 32, 16, 255),    // NativeEvents - red
+		IM_COL32(0, 0, 0, 0),          // NativeMessage - not shown
+		IM_COL32(0, 0, 0, 0),          // DisplayPost - not shown
+		IM_COL32(32, 224, 16, 255),    // DisplayTick - green
+		IM_COL32(255, 224, 16, 255),   // DisplayPresent - yellow
+	};
+
+	static const char *kRegionNames[kATProfileRegionCount] = {
+		"Idle",
+		"Idle (frame delay)",
+		"Simulation",
+		"Native events",
+		nullptr,
+		nullptr,
+		"Display tick",
+		"Display present",
+	};
+
+	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+	ImVec2 canvasSize = ImVec2((float)kW, (float)kH);
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+
+	// Background
+	dl->AddRectFilled(canvasPos, ImVec2(canvasPos.x + kW, canvasPos.y + kH), IM_COL32(0, 0, 0, 192));
+
+	// Draw stacked columns — iterate from oldest to newest
+	int curX = s_pProfiler->mX;
+	for (int col = 0; col < kW; col++) {
+		int idx = (curX + 1 + col) & (kW - 1);
+		const auto& c = s_pProfiler->mColumns[idx];
+
+		float x0 = canvasPos.x + (float)col;
+		float x1 = x0 + 1.0f;
+		float y = canvasPos.y + (float)kH;  // bottom
+
+		for (int r = 0; r < kATProfileRegionCount; r++) {
+			if (c.regionPixels[r] <= 0)
+				continue;
+			if (kRegionColors[r] == 0)
+				continue;
+
+			float h = (float)c.regionPixels[r];
+			if (h > (float)kH)
+				h = (float)kH;
+			float y0 = y - h;
+			dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y), kRegionColors[r]);
+			y = y0;
+		}
+	}
+
+	// Border
+	dl->AddRect(canvasPos, ImVec2(canvasPos.x + kW, canvasPos.y + kH), IM_COL32(255, 255, 255, 80));
+
+	ImGui::Dummy(canvasSize);
+
+	// Legend
+	ImGui::Spacing();
+	for (int i = 0; i < kATProfileRegionCount; i++) {
+		if (!kRegionNames[i] || kRegionColors[i] == 0)
+			continue;
+
+		ImVec2 p = ImGui::GetCursorScreenPos();
+		dl->AddRectFilled(p, ImVec2(p.x + 12, p.y + 12), kRegionColors[i]);
+		ImGui::Dummy(ImVec2(16, 12));
+		ImGui::SameLine();
+		ImGui::Text("%s", kRegionNames[i]);
+	}
+
+	ImGui::End();
+}
+
+// ============= Profiler Detail Window =============
+
+static void ProfilerDetailBuild(uint32 funcAddr) {
+	s_profilerDetailEntries.clear();
+	if (!s_profilerMerged)
+		return;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	// Determine address range from symbol table or use a default 256-byte range
+	uint32 startAddr = funcAddr;
+	uint32 endAddr = funcAddr + 0x100;
+
+	if (dbs) {
+		ATSymbol sym {};
+		if (dbs->LookupSymbol(funcAddr, kATSymbol_Execute, sym) && sym.mOffset == funcAddr) {
+			startAddr = sym.mOffset;
+
+			// Find the next symbol to determine the end of this function
+			ATSymbol nextSym {};
+			if (dbs->LookupSymbol(startAddr + 1, kATSymbol_Execute, nextSym)
+				&& nextSym.mOffset > startAddr && nextSym.mOffset != startAddr)
+				endAddr = nextSym.mOffset;
+		}
+	}
+
+	// Collect records matching this address range
+	for (const ATProfileRecord& rec : s_profilerMerged->mRecords) {
+		uint32 addr = rec.mAddress;
+		if (addr >= startAddr && addr < endAddr) {
+			ProfileDetailEntry e;
+			e.addr = addr;
+			e.cycles = rec.mCycles;
+			e.insns = rec.mInsns;
+			e.unhaltedCycles = rec.mUnhaltedCycles;
+
+			// Disassemble the instruction at this address
+			{
+				VDStringA buf;
+				ATDisassembleInsn(buf, (uint16)addr, false);
+				e.disasm = std::string(buf.c_str(), buf.size());
+			}
+
+			s_profilerDetailEntries.push_back(std::move(e));
+		}
+	}
+
+	// Sort by address
+	std::sort(s_profilerDetailEntries.begin(), s_profilerDetailEntries.end(),
+		[](const ProfileDetailEntry& a, const ProfileDetailEntry& b) {
+			return a.addr < b.addr;
+		});
+}
+
+static void DrawProfilerDetail() {
+	if (!s_showProfilerDetail)
+		return;
+
+	char title[256];
+	if (!s_profilerDetailName.empty())
+		snprintf(title, sizeof(title), "Function: %s ($%04X)###profdetail", s_profilerDetailName.c_str(), s_profilerDetailAddr);
+	else
+		snprintf(title, sizeof(title), "Function: $%04X###profdetail", s_profilerDetailAddr);
+
+	ImGui::SetNextWindowSize(ImVec2(600, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin(title, &s_showProfilerDetail)) {
+		ImGui::End();
+		return;
+	}
+
+	if (s_profilerDetailEntries.empty()) {
+		ImGui::TextDisabled("No instruction data for this address range.");
+		ImGui::End();
+		return;
+	}
+
+	// Compute totals for percentage display
+	uint32 totalCycles = 0, totalInsns = 0;
+	for (const auto& e : s_profilerDetailEntries) {
+		totalCycles += e.cycles;
+		totalInsns += e.insns;
+	}
+	if (totalCycles == 0) totalCycles = 1;
+	if (totalInsns == 0) totalInsns = 1;
+
+	ImGui::Text("Total: %u cycles, %u insns", totalCycles, totalInsns);
+	ImGui::Separator();
+
+	if (ImGui::BeginTable("##profdetail", 6,
+		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp))
+	{
+		ImGui::TableSetupColumn("Address", 0, 1.0f);
+		ImGui::TableSetupColumn("Cycles", 0, 1.2f);
+		ImGui::TableSetupColumn("Insns", 0, 0.8f);
+		ImGui::TableSetupColumn("CPI", 0, 0.6f);
+		ImGui::TableSetupColumn("DMA%", 0, 0.6f);
+		ImGui::TableSetupColumn("Disassembly", 0, 3.0f);
+		ImGui::TableSetupScrollFreeze(0, 1);
+		ImGui::TableHeadersRow();
+
+		ImGuiListClipper clipper;
+		clipper.Begin((int)s_profilerDetailEntries.size());
+		while (clipper.Step()) {
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
+				const auto& e = s_profilerDetailEntries[row];
+				float cyclePct = (float)e.cycles * 100.0f / (float)totalCycles;
+				float cpi = e.insns ? (float)e.cycles / (float)e.insns : 0;
+				float dmaPct = e.cycles ? 100.0f * (1.0f - (float)e.unhaltedCycles / (float)e.cycles) : 0;
+
+				ImGui::TableNextRow();
+
+				ImGui::TableNextColumn();
+				ImGui::Text("$%04X", e.addr);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("%u (%.1f%%)", e.cycles, cyclePct);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("%u", e.insns);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("%.2f", cpi);
+
+				ImGui::TableNextColumn();
+				ImGui::Text("%.1f%%", dmaPct);
+
+				ImGui::TableNextColumn();
+				ImGui::TextUnformatted(e.disasm.c_str());
+			}
+		}
+
+		ImGui::EndTable();
+	}
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -3541,6 +3892,7 @@ bool& ATImGuiDebuggerShowPrinterOutput() { return s_showPrinterOutput; }
 bool& ATImGuiDebuggerShowProfiler() { return s_showProfiler; }
 bool& ATImGuiDebuggerShowTrace() { return s_showTrace; }
 bool& ATImGuiDebuggerShowDebugDisplay() { return s_showDebugDisplay; }
+bool& ATImGuiDebuggerShowPerformance() { return s_showPerformance; }
 
 // ============= Main Draw =============
 
@@ -3556,8 +3908,10 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawSourceCode();
 	DrawPrinterOutput();
 	DrawProfiler();
+	DrawProfilerDetail();
 	DrawTraceViewer();
 	DrawDebugDisplay();
+	DrawPerformanceOverlay();
 }
 
 void ATImGuiDebuggerDraw() {
