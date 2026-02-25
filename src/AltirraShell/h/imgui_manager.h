@@ -1,6 +1,8 @@
 #ifndef AT_IMGUI_MANAGER_H
 #define AT_IMGUI_MANAGER_H
 
+#include <string>
+
 struct SDL_Window;
 union SDL_Event;
 typedef void *SDL_GLContext;
@@ -10,7 +12,7 @@ public:
 	ATImGuiManager();
 	~ATImGuiManager();
 
-	bool Init(SDL_Window *window, SDL_GLContext glContext);
+	bool Init(SDL_Window *window, SDL_GLContext glContext, const char *configDir);
 	void Shutdown();
 
 	void NewFrame();
@@ -27,6 +29,7 @@ public:
 private:
 	bool mbInitialized = false;
 	bool mbVisible = false;
+	std::string mIniPath;
 };
 
 #endif

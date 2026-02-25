@@ -12,12 +12,21 @@ ATImGuiManager::~ATImGuiManager() {
 	Shutdown();
 }
 
-bool ATImGuiManager::Init(SDL_Window *window, SDL_GLContext glContext) {
+bool ATImGuiManager::Init(SDL_Window *window, SDL_GLContext glContext, const char *configDir) {
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
 
 	ImGuiIO& io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+	// Store imgui.ini next to Altirra.ini in the config directory
+	if (configDir) {
+		mIniPath = configDir;
+		if (!mIniPath.empty() && mIniPath.back() != '/')
+			mIniPath += '/';
+		mIniPath += "imgui.ini";
+		io.IniFilename = mIniPath.c_str();
+	}
 
 	ImGui::StyleColorsDark();
 
