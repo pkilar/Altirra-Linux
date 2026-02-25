@@ -9,6 +9,7 @@
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
+#include <vd2/system/text.h>
 #include <at/atcore/address.h>
 #include <at/atdebugger/target.h>
 #include <at/atcpu/execstate.h>
@@ -26,6 +27,12 @@ class ATIRQController;
 #include "simulator.h"
 #include "profiler.h"
 #include "printeroutput.h"
+#include "trace.h"
+#include "debugdisplay.h"
+#include "memorymanager.h"
+#include "antic.h"
+#include "gtia.h"
+#include <display_sdl2.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -193,6 +200,27 @@ static char s_profilerBoundaryAddr[64] = "";
 static char s_profilerBoundaryAddr2[64] = "";
 static bool s_profilerGlobalAddresses = false;
 
+// Trace viewer state
+static bool s_showTrace = false;
+static bool s_traceRecording = false;
+static bool s_traceHasData = false;
+static bool s_traceOptCpu = true;
+static bool s_traceOptVideo = true;
+static bool s_traceOptBasic = false;
+static double s_traceViewStart = 0.0;
+static double s_traceViewEnd = 1.0;
+static double s_traceTotalDuration = 0.0;
+static int s_traceHoverChannel = -1;
+static vdrefptr<ATTraceCollection> s_traceCollection;
+
+// Debug display state
+static bool s_showDebugDisplay = false;
+static ATDebugDisplay *s_debugDisplay = nullptr;
+static GLuint s_debugDisplayTex = 0;
+static std::vector<uint32> s_debugDisplayRGBA;
+static int s_debugDisplayMode = 0;
+static int s_debugDisplayPalette = 0;
+
 void ATImGuiDebuggerInit() {
 	IATDebugger *dbg = ATGetDebugger();
 	if (!dbg)
@@ -213,6 +241,26 @@ void ATImGuiDebuggerShutdown() {
 	}
 	s_profilerMerged.clear();
 	s_profilerEntries.clear();
+
+	// Cleanup trace viewer
+	if (s_traceRecording) {
+		g_sim.StopTracing();
+		s_traceRecording = false;
+	}
+	s_traceHasData = false;
+	s_traceCollection.clear();
+
+	// Cleanup debug display
+	if (s_debugDisplay) {
+		s_debugDisplay->Shutdown();
+		delete s_debugDisplay;
+		s_debugDisplay = nullptr;
+	}
+	if (s_debugDisplayTex) {
+		glDeleteTextures(1, &s_debugDisplayTex);
+		s_debugDisplayTex = 0;
+	}
+	s_debugDisplayRGBA.clear();
 
 	if (s_pClient) {
 		IATDebugger *dbg = ATGetDebugger();
@@ -3133,6 +3181,351 @@ static void DrawProfiler() {
 	ImGui::End();
 }
 
+// ============= Trace Viewer =============
+
+static void DrawTraceViewer() {
+	if (!s_showTrace)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(800, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Trace Viewer", &s_showTrace)) {
+		ImGui::End();
+		return;
+	}
+
+	// Controls bar
+	if (!s_traceRecording) {
+		if (ImGui::Button("Start Recording")) {
+			ATTraceSettings settings {};
+			settings.mbTraceCpuInsns = s_traceOptCpu;
+			settings.mbTraceVideo = s_traceOptVideo;
+			settings.mbTraceBasic = s_traceOptBasic;
+			g_sim.StartTracing(settings);
+			s_traceRecording = true;
+			s_traceHasData = false;
+		}
+	} else {
+		if (ImGui::Button("Stop Recording")) {
+			// Capture the collection BEFORE StopTracing destroys the context
+			s_traceCollection = g_sim.GetTraceCollection();
+			g_sim.StopTracing();
+			s_traceRecording = false;
+
+			if (s_traceCollection && s_traceCollection->GetGroupCount() > 0) {
+				s_traceHasData = true;
+
+				// Compute total duration across all channels
+				s_traceTotalDuration = 0.0;
+				for (size_t gi = 0; gi < s_traceCollection->GetGroupCount(); ++gi) {
+					ATTraceGroup *grp = s_traceCollection->GetGroup(gi);
+					double d = grp->GetDuration();
+					if (d > s_traceTotalDuration)
+						s_traceTotalDuration = d;
+				}
+
+				s_traceViewStart = 0.0;
+				s_traceViewEnd = s_traceTotalDuration > 0 ? s_traceTotalDuration : 1.0;
+			}
+		}
+	}
+
+	ImGui::SameLine();
+	ImGui::BeginDisabled(s_traceRecording);
+	ImGui::Checkbox("CPU", &s_traceOptCpu);
+	ImGui::SameLine();
+	ImGui::Checkbox("Video", &s_traceOptVideo);
+	ImGui::SameLine();
+	ImGui::Checkbox("BASIC", &s_traceOptBasic);
+	ImGui::EndDisabled();
+
+	if (s_traceHasData) {
+		ImGui::SameLine();
+		if (ImGui::Button("Clear")) {
+			s_traceHasData = false;
+			s_traceTotalDuration = 0.0;
+			s_traceCollection.clear();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Zoom Fit")) {
+			s_traceViewStart = 0.0;
+			s_traceViewEnd = s_traceTotalDuration > 0 ? s_traceTotalDuration : 1.0;
+		}
+	}
+
+	if (s_traceRecording) {
+		ImGui::TextColored(ImVec4(1.0f, 0.3f, 0.3f, 1.0f), "Recording...");
+		ImGui::End();
+		return;
+	}
+
+	if (!s_traceHasData) {
+		ImGui::TextDisabled("No trace data. Click \"Start Recording\" to begin.");
+		ImGui::End();
+		return;
+	}
+
+	ATTraceCollection *tc = s_traceCollection;
+	if (!tc) {
+		ImGui::TextDisabled("Trace collection not available.");
+		ImGui::End();
+		return;
+	}
+
+	// Timeline child area
+	ImGui::BeginChild("##timeline", ImVec2(0, 0), ImGuiChildFlags_None,
+		ImGuiWindowFlags_HorizontalScrollbar);
+
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+	ImVec2 canvasSize = ImGui::GetContentRegionAvail();
+	if (canvasSize.x < 100) canvasSize.x = 100;
+
+	double viewDuration = s_traceViewEnd - s_traceViewStart;
+	if (viewDuration <= 0) viewDuration = 1.0;
+	double pixelsPerSec = canvasSize.x / viewDuration;
+
+	// Handle zoom/pan with mouse
+	ImGuiIO& io = ImGui::GetIO();
+	ImVec2 mousePos = io.MousePos;
+	bool hovered = ImGui::IsWindowHovered();
+
+	if (hovered && io.MouseWheel != 0.0f) {
+		double mouseTime = s_traceViewStart + (mousePos.x - canvasPos.x) / pixelsPerSec;
+		double zoomFactor = io.KeyCtrl ? 1.3 : 1.0;
+
+		if (io.KeyCtrl) {
+			// Ctrl+wheel: zoom
+			if (io.MouseWheel > 0) {
+				double newDuration = viewDuration / zoomFactor;
+				double ratio = (mouseTime - s_traceViewStart) / viewDuration;
+				s_traceViewStart = mouseTime - ratio * newDuration;
+				s_traceViewEnd = s_traceViewStart + newDuration;
+			} else {
+				double newDuration = viewDuration * zoomFactor;
+				double ratio = (mouseTime - s_traceViewStart) / viewDuration;
+				s_traceViewStart = mouseTime - ratio * newDuration;
+				s_traceViewEnd = s_traceViewStart + newDuration;
+			}
+		} else {
+			// Wheel: horizontal scroll
+			double scrollAmt = viewDuration * 0.1 * (-io.MouseWheel);
+			s_traceViewStart += scrollAmt;
+			s_traceViewEnd += scrollAmt;
+		}
+
+		// Clamp
+		if (s_traceViewStart < 0) {
+			s_traceViewEnd -= s_traceViewStart;
+			s_traceViewStart = 0;
+		}
+		if (s_traceViewEnd > s_traceTotalDuration) {
+			s_traceViewStart -= (s_traceViewEnd - s_traceTotalDuration);
+			s_traceViewEnd = s_traceTotalDuration;
+			if (s_traceViewStart < 0) s_traceViewStart = 0;
+		}
+	}
+
+	// Middle-drag pan
+	if (hovered && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+		double dx = io.MouseDelta.x / pixelsPerSec;
+		s_traceViewStart -= dx;
+		s_traceViewEnd -= dx;
+	}
+
+	// Timescale ruler (24px)
+	const float rulerH = 24.0f;
+	dl->AddRectFilled(canvasPos, ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + rulerH),
+		IM_COL32(32, 32, 32, 255));
+
+	// Draw tick marks
+	{
+		double tickSpacing = 1.0;
+		const char *tickFmt = "%.0fs";
+		double pixPerTick = tickSpacing * pixelsPerSec;
+		if (pixPerTick < 60) { tickSpacing = 0.1; tickFmt = "%.1fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+		if (pixPerTick < 60) { tickSpacing = 0.01; tickFmt = "%.2fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+		if (pixPerTick < 60) { tickSpacing = 0.001; tickFmt = "%.3fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+		if (pixPerTick > 300) { tickSpacing *= 5; pixPerTick = tickSpacing * pixelsPerSec; }
+
+		double firstTick = std::ceil(s_traceViewStart / tickSpacing) * tickSpacing;
+		for (double t = firstTick; t <= s_traceViewEnd; t += tickSpacing) {
+			float x = canvasPos.x + (float)((t - s_traceViewStart) * pixelsPerSec);
+			dl->AddLine(ImVec2(x, canvasPos.y + rulerH - 6), ImVec2(x, canvasPos.y + rulerH), IM_COL32(180, 180, 180, 255));
+			char buf[32];
+			snprintf(buf, sizeof(buf), tickFmt, t);
+			dl->AddText(ImVec2(x + 2, canvasPos.y + 2), IM_COL32(200, 200, 200, 255), buf);
+		}
+	}
+
+	// Channel rows
+	const float groupH = 22.0f;
+	const float chanH = 20.0f;
+	float y = canvasPos.y + rulerH;
+
+	s_traceHoverChannel = -1;
+	int channelIdx = 0;
+	char tooltipBuf[256] = {};
+
+	for (size_t gi = 0; gi < tc->GetGroupCount(); ++gi) {
+		ATTraceGroup *grp = tc->GetGroup(gi);
+		VDStringA groupName = VDTextWToU8(VDStringW(grp->GetName()));
+
+		// Group header
+		dl->AddRectFilled(ImVec2(canvasPos.x, y), ImVec2(canvasPos.x + canvasSize.x, y + groupH),
+			IM_COL32(50, 50, 60, 255));
+		dl->AddText(ImVec2(canvasPos.x + 4, y + 3), IM_COL32(220, 220, 255, 255), groupName.c_str());
+		y += groupH;
+
+		for (size_t ci = 0; ci < grp->GetChannelCount(); ++ci) {
+			IATTraceChannel *ch = grp->GetChannel(ci);
+			VDStringA chName = VDTextWToU8(VDStringW(ch->GetName()));
+
+			// Channel background
+			ImU32 bgCol = (channelIdx & 1) ? IM_COL32(34, 36, 36, 255) : IM_COL32(38, 40, 40, 255);
+			dl->AddRectFilled(ImVec2(canvasPos.x, y), ImVec2(canvasPos.x + canvasSize.x, y + chanH), bgCol);
+
+			// Channel name (left side)
+			dl->AddText(ImVec2(canvasPos.x + 2, y + 2), IM_COL32(160, 160, 160, 255), chName.c_str());
+
+			// Draw events
+			double threshold = viewDuration / canvasSize.x;
+			ch->StartIteration(s_traceViewStart, s_traceViewEnd, threshold);
+
+			ATTraceEvent ev;
+			while (ch->GetNextEvent(ev)) {
+				float x0 = canvasPos.x + (float)((ev.mEventStart - s_traceViewStart) * pixelsPerSec);
+				float x1 = canvasPos.x + (float)((ev.mEventStop - s_traceViewStart) * pixelsPerSec);
+
+				if (x1 < canvasPos.x || x0 > canvasPos.x + canvasSize.x)
+					continue;
+				if (x0 < canvasPos.x) x0 = canvasPos.x;
+				if (x1 > canvasPos.x + canvasSize.x) x1 = canvasPos.x + canvasSize.x;
+				if (x1 - x0 < 1.0f) x1 = x0 + 1.0f;
+
+				// Convert trace colors (0xRRGGBB) to ImGui colors
+				uint32 bg = ev.mBgColor;
+				ImU32 col = IM_COL32((bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF, 220);
+				dl->AddRectFilled(ImVec2(x0, y + 1), ImVec2(x1, y + chanH - 1), col);
+
+				// Draw text label if bar is wide enough
+				if (x1 - x0 > 40.0f && ev.mpName) {
+					VDStringA label = VDTextWToU8(VDStringW(ev.mpName));
+					ImVec2 textSize = ImGui::CalcTextSize(label.c_str());
+					if (textSize.x < x1 - x0 - 4) {
+						uint32 fg = ev.mFgColor;
+						ImU32 fgCol = IM_COL32((fg >> 16) & 0xFF, (fg >> 8) & 0xFF, fg & 0xFF, 255);
+						dl->AddText(ImVec2(x0 + 2, y + 2), fgCol, label.c_str());
+					}
+				}
+
+				// Tooltip on hover
+				if (mousePos.y >= y && mousePos.y < y + chanH &&
+					mousePos.x >= x0 && mousePos.x < x1 && hovered) {
+					VDStringA name = ev.mpName ? VDTextWToU8(VDStringW(ev.mpName)) : VDStringA("(unnamed)");
+					snprintf(tooltipBuf, sizeof(tooltipBuf),
+						"%s\nStart: %.6fs\nEnd: %.6fs\nDuration: %.6fs",
+						name.c_str(), ev.mEventStart, ev.mEventStop,
+						ev.mEventStop - ev.mEventStart);
+				}
+			}
+
+			y += chanH;
+			++channelIdx;
+		}
+	}
+
+	// Set dummy to establish scroll range
+	ImGui::Dummy(ImVec2(canvasSize.x, y - canvasPos.y));
+
+	ImGui::EndChild();
+
+	if (tooltipBuf[0] && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+		ImGui::BeginTooltip();
+		ImGui::TextUnformatted(tooltipBuf);
+		ImGui::EndTooltip();
+	}
+
+	ImGui::End();
+}
+
+// ============= Debug Display (ANTIC) =============
+
+static void DrawDebugDisplay() {
+	if (!s_showDebugDisplay)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(400, 310), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Debug Display", &s_showDebugDisplay)) {
+		// Cleanup when closed
+		if (!s_showDebugDisplay && s_debugDisplay) {
+			s_debugDisplay->Shutdown();
+			delete s_debugDisplay;
+			s_debugDisplay = nullptr;
+			if (s_debugDisplayTex) {
+				glDeleteTextures(1, &s_debugDisplayTex);
+				s_debugDisplayTex = 0;
+			}
+			s_debugDisplayRGBA.clear();
+		}
+		ImGui::End();
+		return;
+	}
+
+	// Lazy init
+	if (!s_debugDisplay) {
+		s_debugDisplay = new ATDebugDisplay;
+		s_debugDisplay->Init(g_sim.GetMemoryManager(), &g_sim.GetAntic(), &g_sim.GetGTIA(), nullptr);
+		s_debugDisplayRGBA.resize(376 * 240);
+
+		glGenTextures(1, &s_debugDisplayTex);
+		glBindTexture(GL_TEXTURE_2D, s_debugDisplayTex);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, 376, 240, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	// Controls
+	const char *modeNames[] = { "ANTIC History", "ANTIC History Start" };
+	ImGui::Combo("Mode", &s_debugDisplayMode, modeNames, 2);
+
+	const char *paletteNames[] = { "Registers", "Analysis" };
+	ImGui::SameLine();
+	ImGui::Combo("Palette", &s_debugDisplayPalette, paletteNames, 2);
+
+	// Update display
+	s_debugDisplay->SetMode((ATDebugDisplay::Mode)s_debugDisplayMode);
+	s_debugDisplay->SetPaletteMode((ATDebugDisplay::PaletteMode)s_debugDisplayPalette);
+	s_debugDisplay->Update();
+
+	// Convert Pal8 to RGBA
+	const VDPixmapBuffer& buf = s_debugDisplay->GetFrameBuffer();
+	if (buf.data && buf.palette) {
+		for (int row = 0; row < 240; ++row) {
+			const uint8 *src = (const uint8 *)buf.data + buf.pitch * row;
+			uint32 *dst = s_debugDisplayRGBA.data() + 376 * row;
+			for (int x = 0; x < 376; ++x) {
+				uint32 pal = buf.palette[src[x]];
+				// Palette is 0x00RRGGBB, convert to 0xFFRRGGBB (RGBA for GL)
+				dst[x] = (pal & 0x000000FF) << 16    // B -> pos 16
+						| (pal & 0x0000FF00)          // G stays
+						| (pal & 0x00FF0000) >> 16    // R -> pos 0
+						| 0xFF000000u;                // A=255
+			}
+		}
+
+		glBindTexture(GL_TEXTURE_2D, s_debugDisplayTex);
+		glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 376, 240, GL_RGBA, GL_UNSIGNED_BYTE, s_debugDisplayRGBA.data());
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}
+
+	ImGui::Image((ImTextureID)(uintptr_t)s_debugDisplayTex, ImVec2(376, 240));
+
+	ImGui::End();
+}
+
 // ============= Visibility accessors =============
 
 bool& ATImGuiDebuggerShowRegisters() { return s_showRegisters; }
@@ -3146,6 +3539,8 @@ bool& ATImGuiDebuggerShowHistory() { return s_showHistory; }
 bool& ATImGuiDebuggerShowSourceCode() { return s_showSourceCode; }
 bool& ATImGuiDebuggerShowPrinterOutput() { return s_showPrinterOutput; }
 bool& ATImGuiDebuggerShowProfiler() { return s_showProfiler; }
+bool& ATImGuiDebuggerShowTrace() { return s_showTrace; }
+bool& ATImGuiDebuggerShowDebugDisplay() { return s_showDebugDisplay; }
 
 // ============= Main Draw =============
 
@@ -3161,6 +3556,8 @@ void ATImGuiDebuggerDrawWindows() {
 	DrawSourceCode();
 	DrawPrinterOutput();
 	DrawProfiler();
+	DrawTraceViewer();
+	DrawDebugDisplay();
 }
 
 void ATImGuiDebuggerDraw() {

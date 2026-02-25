@@ -58,6 +58,7 @@ class ATIRQController;
 #include "inputmanager.h"
 #include "oshelper.h"
 #include "versioninfo.h"
+#include "cheatengine.h"
 #include "audiowriter.h"
 #include "sapwriter.h"
 #include "vgmwriter.h"
@@ -110,6 +111,19 @@ static bool s_showBootOptions = false;
 static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
+static bool s_showCheater = false;
+
+// Cheat engine state
+static bool s_cheaterInitialized = false;
+static int s_cheaterMode = 0;
+static char s_cheaterValueBuf[16] = "";
+static int s_cheaterBit16 = 0;
+static std::vector<uint32> s_cheaterResults;
+static uint32 s_cheaterResultCount = 0;
+static int s_cheatEditIdx = -1;      // which cheat is being edited (-1 = none)
+static int s_cheatEditField = -1;    // 0 = address, 1 = value
+static char s_cheatEditBuf[16] = "";
+static bool s_cheatEditFocus = false; // request keyboard focus on next frame
 
 // Input capture state for binding editor
 static bool s_inputCaptureActive = false;
@@ -1958,6 +1972,9 @@ static void DrawMenuBar() {
 			ImGui::MenuItem("Source Code", nullptr, &ATImGuiDebuggerShowSourceCode());
 			ImGui::MenuItem("Printer Output", nullptr, &ATImGuiDebuggerShowPrinterOutput());
 			ImGui::MenuItem("Profiler", nullptr, &ATImGuiDebuggerShowProfiler());
+			ImGui::Separator();
+			ImGui::MenuItem("Trace Viewer", nullptr, &ATImGuiDebuggerShowTrace());
+			ImGui::MenuItem("Debug Display", nullptr, &ATImGuiDebuggerShowDebugDisplay());
 			ImGui::EndMenu();
 		}
 
@@ -1978,6 +1995,13 @@ static void DrawMenuBar() {
 				dbg->QueueCommand(".unloadsym", false);
 		}
 
+		ImGui::EndMenu();
+	}
+
+	// --- Tools menu ---
+	if (ImGui::BeginMenu("Tools")) {
+		if (ImGui::MenuItem("Cheat Engine...", nullptr, s_showCheater))
+			s_showCheater = !s_showCheater;
 		ImGui::EndMenu();
 	}
 
@@ -5384,6 +5408,312 @@ static void DrawQuitConfirmation() {
 	}
 }
 
+// ============= Cheat Engine =============
+
+static void UpdateCheaterResults() {
+	ATCheatEngine *ce = g_sim.GetCheatEngine();
+	if (!ce) return;
+
+	enum { kMaxResults = 1000 };
+	s_cheaterResults.resize(kMaxResults);
+	s_cheaterResultCount = ce->GetValidOffsets(s_cheaterResults.data(), kMaxResults);
+	s_cheaterResults.resize(s_cheaterResultCount);
+}
+
+static void DrawCheater() {
+	if (!s_showCheater)
+		return;
+
+	// Enable cheat engine on open
+	if (!g_sim.GetCheatEngine())
+		g_sim.SetCheatEngineEnabled(true);
+
+	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Cheat Engine", &s_showCheater)) {
+		ImGui::End();
+		return;
+	}
+
+	// Handle close
+	if (!s_showCheater) {
+		g_sim.SetCheatEngineEnabled(false);
+		s_cheaterInitialized = false;
+		s_cheaterResultCount = 0;
+		s_cheaterResults.clear();
+		ImGui::End();
+		return;
+	}
+
+	ATCheatEngine *ce = g_sim.GetCheatEngine();
+	if (!ce) {
+		ImGui::TextDisabled("Cheat engine not available.");
+		ImGui::End();
+		return;
+	}
+
+	// Mode names matching ATCheatSnapshotMode order
+	static const char *kModeNames[] = {
+		"New Snapshot",
+		"= Unchanged",
+		"!= Changed",
+		"< Less Than Previous",
+		"<= Less or Equal",
+		"> Greater Than Previous",
+		">= Greater or Equal",
+		"=X Equal to Value"
+	};
+
+	// Controls
+	ImGui::SetNextItemWidth(200);
+	ImGui::Combo("##mode", &s_cheaterMode, kModeNames, kATCheatSnapModeCount);
+
+	ImGui::SameLine();
+	ImGui::RadioButton("8-bit", &s_cheaterBit16, 0);
+	ImGui::SameLine();
+	ImGui::RadioButton("16-bit", &s_cheaterBit16, 1);
+
+	bool needsValue = (s_cheaterMode == kATCheatSnapMode_EqualRef);
+	if (needsValue) {
+		ImGui::SameLine();
+		ImGui::SetNextItemWidth(80);
+		ImGui::InputText("Value", s_cheaterValueBuf, sizeof(s_cheaterValueBuf));
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Search / Filter")) {
+		bool bit16 = s_cheaterBit16 != 0;
+
+		if (s_cheaterMode == 0) {
+			// New snapshot
+			ce->Snapshot(kATCheatSnapMode_Replace, 0, false);
+			s_cheaterInitialized = true;
+		} else {
+			uint32 value = 0;
+			if (needsValue) {
+				const char *v = s_cheaterValueBuf;
+				while (*v == ' ') ++v;
+				if (*v == '$')
+					sscanf(v + 1, "%x", &value);
+				else
+					sscanf(v, "%u", &value);
+			}
+			ce->Snapshot((ATCheatSnapshotMode)s_cheaterMode, value, bit16);
+		}
+		UpdateCheaterResults();
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Clear All")) {
+		ce->Clear();
+		s_cheaterInitialized = false;
+		s_cheaterResultCount = 0;
+		s_cheaterResults.clear();
+	}
+
+	// Two panes: Results (left) | Active Cheats (right)
+	float panelW = (ImGui::GetContentRegionAvail().x - 8) * 0.5f;
+	bool bit16 = s_cheaterBit16 != 0;
+
+	// Results pane
+	ImGui::BeginChild("##results", ImVec2(panelW, 0), ImGuiChildFlags_Border);
+	ImGui::Text("Results: %u", s_cheaterResultCount);
+
+	if (s_cheaterResultCount > 0 && ImGui::BeginTable("##restbl", 2,
+			ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+		ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 80);
+		ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+		ImGui::TableHeadersRow();
+
+		// Limit display to avoid performance issues
+		uint32 displayCount = std::min(s_cheaterResultCount, (uint32)500);
+		for (uint32 i = 0; i < displayCount; ++i) {
+			uint32 offset = s_cheaterResults[i];
+			uint32 val = ce->GetOffsetCurrentValue(offset, bit16);
+
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+
+			char addrBuf[16];
+			snprintf(addrBuf, sizeof(addrBuf), "$%04X", offset);
+
+			bool selected = false;
+			if (ImGui::Selectable(addrBuf, &selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowDoubleClick)) {
+				if (ImGui::IsMouseDoubleClicked(0)) {
+					// Double-click: add as cheat
+					ce->AddCheat(offset, bit16);
+				}
+			}
+
+			ImGui::TableNextColumn();
+			if (bit16)
+				ImGui::Text("$%04X (%u)", val, val);
+			else
+				ImGui::Text("$%02X (%u)", val, val);
+		}
+		if (s_cheaterResultCount > 500)
+			ImGui::Text("... and %u more", s_cheaterResultCount - 500);
+
+		ImGui::EndTable();
+	} else if (s_cheaterInitialized && s_cheaterResultCount == 0) {
+		ImGui::TextDisabled("No results. Try a different filter.");
+	} else if (!s_cheaterInitialized) {
+		ImGui::TextDisabled("Click \"Search / Filter\" with\n\"New Snapshot\" to begin.");
+	}
+
+	ImGui::EndChild();
+
+	ImGui::SameLine();
+
+	// Active cheats pane
+	ImGui::BeginChild("##cheats", ImVec2(0, 0), ImGuiChildFlags_Border);
+	ImGui::Text("Active Cheats: %u", ce->GetCheatCount());
+
+	if (ce->GetCheatCount() > 0 && ImGui::BeginTable("##cheattbl", 4,
+			ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
+		ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_WidthFixed, 70);
+		ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed, 80);
+		ImGui::TableSetupColumn("On", ImGuiTableColumnFlags_WidthFixed, 30);
+		ImGui::TableSetupColumn("##del", ImGuiTableColumnFlags_WidthFixed, 30);
+		ImGui::TableHeadersRow();
+
+		int deleteIdx = -1;
+		for (uint32 i = 0; i < ce->GetCheatCount(); ++i) {
+			const ATCheatEngine::Cheat& cheat = ce->GetCheatByIndex(i);
+
+			ImGui::TableNextRow();
+
+			// Address column — double-click to edit
+			ImGui::TableNextColumn();
+			if (s_cheatEditIdx == (int)i && s_cheatEditField == 0) {
+				char inputId[16];
+				snprintf(inputId, sizeof(inputId), "##ea%u", i);
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (s_cheatEditFocus) {
+					ImGui::SetKeyboardFocusHere();
+					s_cheatEditFocus = false;
+				}
+				if (ImGui::InputText(inputId, s_cheatEditBuf, sizeof(s_cheatEditBuf),
+						ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+					uint32 newAddr = 0;
+					const char *p = s_cheatEditBuf;
+					while (*p == ' ') ++p;
+					if (*p == '$') sscanf(p + 1, "%x", &newAddr);
+					else sscanf(p, "%x", &newAddr);
+					ATCheatEngine::Cheat mod = cheat;
+					mod.mAddress = newAddr;
+					ce->UpdateCheat(i, mod);
+					s_cheatEditIdx = -1;
+				}
+				if (!ImGui::IsItemActive() && !s_cheatEditFocus && s_cheatEditIdx == (int)i && s_cheatEditField == 0)
+					s_cheatEditIdx = -1;
+			} else {
+				char addrLabel[24];
+				snprintf(addrLabel, sizeof(addrLabel), "$%04X##a%u", cheat.mAddress, i);
+				if (ImGui::Selectable(addrLabel, false, ImGuiSelectableFlags_AllowDoubleClick) && ImGui::IsMouseDoubleClicked(0)) {
+					s_cheatEditIdx = (int)i;
+					s_cheatEditField = 0;
+					snprintf(s_cheatEditBuf, sizeof(s_cheatEditBuf), "$%04X", cheat.mAddress);
+					s_cheatEditFocus = true;
+				}
+			}
+
+			// Value column — double-click to edit
+			ImGui::TableNextColumn();
+			if (s_cheatEditIdx == (int)i && s_cheatEditField == 1) {
+				char inputId[16];
+				snprintf(inputId, sizeof(inputId), "##ev%u", i);
+				ImGui::SetNextItemWidth(-FLT_MIN);
+				if (s_cheatEditFocus) {
+					ImGui::SetKeyboardFocusHere();
+					s_cheatEditFocus = false;
+				}
+				if (ImGui::InputText(inputId, s_cheatEditBuf, sizeof(s_cheatEditBuf),
+						ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+					uint32 newVal = 0;
+					const char *p = s_cheatEditBuf;
+					while (*p == ' ') ++p;
+					if (*p == '$') sscanf(p + 1, "%x", &newVal);
+					else sscanf(p, "%u", &newVal);
+					ATCheatEngine::Cheat mod = cheat;
+					mod.mValue = (uint16)newVal;
+					ce->UpdateCheat(i, mod);
+					s_cheatEditIdx = -1;
+				}
+				if (!ImGui::IsItemActive() && !s_cheatEditFocus && s_cheatEditIdx == (int)i && s_cheatEditField == 1)
+					s_cheatEditIdx = -1;
+			} else {
+				char valLabel[24];
+				if (cheat.mb16Bit)
+					snprintf(valLabel, sizeof(valLabel), "$%04X##v%u", cheat.mValue, i);
+				else
+					snprintf(valLabel, sizeof(valLabel), "$%02X##v%u", cheat.mValue, i);
+				if (ImGui::Selectable(valLabel, false, ImGuiSelectableFlags_AllowDoubleClick) && ImGui::IsMouseDoubleClicked(0)) {
+					s_cheatEditIdx = (int)i;
+					s_cheatEditField = 1;
+					if (cheat.mb16Bit)
+						snprintf(s_cheatEditBuf, sizeof(s_cheatEditBuf), "$%04X", cheat.mValue);
+					else
+						snprintf(s_cheatEditBuf, sizeof(s_cheatEditBuf), "$%02X", cheat.mValue);
+					s_cheatEditFocus = true;
+				}
+			}
+
+			ImGui::TableNextColumn();
+			bool enabled = cheat.mbEnabled;
+			char cbId[16];
+			snprintf(cbId, sizeof(cbId), "##en%u", i);
+			if (ImGui::Checkbox(cbId, &enabled)) {
+				ATCheatEngine::Cheat mod = cheat;
+				mod.mbEnabled = enabled;
+				ce->UpdateCheat(i, mod);
+			}
+
+			ImGui::TableNextColumn();
+			char btnId[16];
+			snprintf(btnId, sizeof(btnId), "X##d%u", i);
+			if (ImGui::SmallButton(btnId))
+				deleteIdx = (int)i;
+		}
+		ImGui::EndTable();
+
+		if (deleteIdx >= 0) {
+			if (s_cheatEditIdx == deleteIdx)
+				s_cheatEditIdx = -1;
+			ce->RemoveCheatByIndex(deleteIdx);
+		}
+	}
+
+	// Load/Save buttons
+	if (ImGui::Button("Load...")) {
+		VDStringW path = ATLinuxOpenFileDialog("Load Cheats",
+			"Cheat Files|*.atcheats|All Files|*");
+		if (!path.empty()) {
+			try {
+				ce->Load(path.c_str());
+				UpdateCheaterResults();
+			} catch (const std::exception& e) {
+				(void)e;
+			}
+		}
+	}
+	ImGui::SameLine();
+	if (ImGui::Button("Save...")) {
+		VDStringW path = ATLinuxSaveFileDialog("Save Cheats",
+			"Cheat Files|*.atcheats|All Files|*");
+		if (!path.empty()) {
+			try {
+				ce->Save(path.c_str());
+			} catch (const std::exception& e) {
+				(void)e;
+			}
+		}
+	}
+
+	ImGui::EndChild();
+
+	ImGui::End();
+}
+
 // ============= Public API =============
 
 void ATImGuiEmulatorInit() {
@@ -5407,6 +5737,7 @@ void ATImGuiEmulatorDraw() {
 	DrawStatusBar();
 	DrawAbout();
 	DrawShortcuts();
+	DrawCheater();
 	DrawNewDisk();
 	DrawQuitConfirmation();
 	PollFileDialogFallback();
@@ -5422,6 +5753,13 @@ void ATImGuiEmulatorDraw() {
 
 void ATImGuiEmulatorShutdown() {
 	StopAllRecording();
+	// Disable cheat engine if open
+	if (s_showCheater)
+		g_sim.SetCheatEngineEnabled(false);
+	s_showCheater = false;
+	s_cheaterInitialized = false;
+	s_cheaterResults.clear();
+
 	s_pQuickState.clear();
 	s_cartLoadBuffer.clear();
 	s_cartDetectedModes.clear();
