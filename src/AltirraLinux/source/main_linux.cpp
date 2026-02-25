@@ -173,6 +173,10 @@ static const Uint32 kCursorHideDelayMs = 3000;
 // Tracks whether we paused due to window losing focus (vs. user manual pause)
 static bool g_pausedByInactive = false;
 
+// Tracks whether we already auto-showed the overlay for the current stop event,
+// so the user can dismiss it with F12/Escape without it re-appearing every frame.
+static bool g_debuggerAutoShowed = false;
+
 // Global accessor for the display backend — used by emulator_imgui.cpp
 ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
 
@@ -891,8 +895,10 @@ static void ProcessEvents(SDL_Window *window) {
 		if (g_pImGui && g_pImGui->IsVisible()) {
 			HandleShortcuts(event);
 
-			// If ImGui wants the input, don't pass to emulation
-			if (g_pImGui->WantCaptureMouse() || g_pImGui->WantCaptureKeyboard())
+			// If ImGui wants the input, don't pass to emulation — but always
+			// let system events (quit, window close/focus) through.
+			if (event.type != SDL_QUIT && event.type != SDL_WINDOWEVENT
+				&& (g_pImGui->WantCaptureMouse() || g_pImGui->WantCaptureKeyboard()))
 				continue;
 		}
 
@@ -1336,11 +1342,16 @@ int main(int argc, char *argv[]) {
 
 		if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
 			RenderAndSwap(window);
+			g_debuggerAutoShowed = false;
 		} else if (result == ATSimulator::kAdvanceResult_Stopped) {
-			// Emulation stopped — still render but at reduced rate
-			// Auto-show debugger on stop
-			if (g_pImGui && !g_pImGui->IsVisible())
+			// Emulation stopped — still render but at reduced rate.
+			// Auto-show debugger once on the transition to stopped state,
+			// so the user can dismiss it with F12/Escape without it
+			// reappearing every frame.
+			if (g_pImGui && !g_pImGui->IsVisible() && !g_debuggerAutoShowed) {
 				g_pImGui->SetVisible(true);
+				g_debuggerAutoShowed = true;
+			}
 
 			RenderAndSwap(window);
 			SDL_Delay(16);
@@ -1351,6 +1362,7 @@ int main(int argc, char *argv[]) {
 			// the display has a new frame ready.
 			if (g_pDisplay && g_pDisplay->IsFramePending())
 				RenderAndSwap(window);
+			g_debuggerAutoShowed = false;
 		}
 	}
 

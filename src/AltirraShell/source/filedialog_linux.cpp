@@ -177,6 +177,52 @@ std::string RunCommand(const std::vector<std::string>& argv) {
 	return output;
 }
 
+// Extract the first extension from a filter string (e.g. "*.atcheats" → ".atcheats").
+// Returns empty string if no extension found.
+std::string ExtractDefaultExtension(const char *filters) {
+	if (!filters || !*filters)
+		return {};
+
+	// Skip first label
+	const char *p = filters;
+	while (*p && *p != '|') ++p;
+	if (*p == '|') ++p;
+
+	// Now at pattern part, e.g. "*.atcheats;*.bin"
+	// Find first "*."
+	while (*p && *p != '|') {
+		if (*p == '*' && *(p + 1) == '.') {
+			const char *extStart = p + 1; // points at '.'
+			const char *extEnd = extStart + 1;
+			while (*extEnd && *extEnd != ';' && *extEnd != '|' && *extEnd != ' ')
+				++extEnd;
+			if (extEnd > extStart + 1) // not just ".*"
+				return std::string(extStart, extEnd);
+		}
+		++p;
+	}
+
+	return {};
+}
+
+// Append default extension if the path has none.
+std::string EnsureExtension(const std::string& path, const char *filters) {
+	if (path.empty())
+		return path;
+
+	// Check if filename already has an extension
+	size_t lastSlash = path.rfind('/');
+	size_t lastDot = path.rfind('.');
+	if (lastDot != std::string::npos && (lastSlash == std::string::npos || lastDot > lastSlash))
+		return path; // already has extension
+
+	std::string ext = ExtractDefaultExtension(filters);
+	if (!ext.empty())
+		return path + ext;
+
+	return path;
+}
+
 } // anonymous namespace
 
 VDStringW ATLinuxOpenFileDialog(const char *title, const char *filters) {
@@ -292,8 +338,10 @@ VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters) {
 			argv.push_back(f);
 
 		std::string result = RunCommand(argv);
-		if (!result.empty())
+		if (!result.empty()) {
+			result = EnsureExtension(result, filters);
 			return VDTextU8ToW(VDStringA(result.c_str(), (int)result.size()));
+		}
 	} else if (backend == DialogBackend::kKdialog) {
 		std::vector<std::string> argv;
 		argv.push_back("kdialog");
@@ -305,8 +353,10 @@ VDStringW ATLinuxSaveFileDialog(const char *title, const char *filters) {
 			argv.push_back(filter);
 
 		std::string result = RunCommand(argv);
-		if (!result.empty())
+		if (!result.empty()) {
+			result = EnsureExtension(result, filters);
 			return VDTextU8ToW(VDStringA(result.c_str(), (int)result.size()));
+		}
 	}
 
 	// Fallback: open ImGui popup

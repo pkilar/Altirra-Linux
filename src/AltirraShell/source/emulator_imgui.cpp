@@ -5564,9 +5564,18 @@ static void DrawCheater() {
 
 	ImGui::SameLine();
 
-	// Active cheats pane
-	ImGui::BeginChild("##cheats", ImVec2(0, 0), ImGuiChildFlags_Border);
+	// Active cheats pane — use a group so the table scrolls but
+	// the Load/Save buttons stay pinned at the bottom.
+	ImGui::BeginGroup();
 	ImGui::Text("Active Cheats: %u", ce->GetCheatCount());
+
+	// Reserve space for Load/Save buttons below the table.
+	float buttonRowH = ImGui::GetFrameHeightWithSpacing() + ImGui::GetStyle().ItemSpacing.y;
+	float tableH = ImGui::GetContentRegionAvail().y - buttonRowH;
+	if (tableH < 60)
+		tableH = 60;
+
+	ImGui::BeginChild("##cheats", ImVec2(0, tableH), ImGuiChildFlags_Border);
 
 	if (ce->GetCheatCount() > 0 && ImGui::BeginTable("##cheattbl", 4,
 			ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerV)) {
@@ -5683,7 +5692,9 @@ static void DrawCheater() {
 		}
 	}
 
-	// Load/Save buttons
+	ImGui::EndChild();
+
+	// Load/Save buttons — always visible below the table
 	if (ImGui::Button("Load...")) {
 		VDStringW path = ATLinuxOpenFileDialog("Load Cheats",
 			"Cheat Files|*.atcheats|All Files|*");
@@ -5709,7 +5720,7 @@ static void DrawCheater() {
 		}
 	}
 
-	ImGui::EndChild();
+	ImGui::EndGroup();
 
 	ImGui::End();
 }
