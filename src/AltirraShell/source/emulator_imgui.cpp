@@ -5604,7 +5604,7 @@ static void DrawCheater() {
 					ce->UpdateCheat(i, mod);
 					s_cheatEditIdx = -1;
 				}
-				if (!ImGui::IsItemActive() && !s_cheatEditFocus && s_cheatEditIdx == (int)i && s_cheatEditField == 0)
+				if (ImGui::IsItemDeactivated() && s_cheatEditIdx == (int)i && s_cheatEditField == 0)
 					s_cheatEditIdx = -1;
 			} else {
 				char addrLabel[24];
@@ -5639,7 +5639,7 @@ static void DrawCheater() {
 					ce->UpdateCheat(i, mod);
 					s_cheatEditIdx = -1;
 				}
-				if (!ImGui::IsItemActive() && !s_cheatEditFocus && s_cheatEditIdx == (int)i && s_cheatEditField == 1)
+				if (ImGui::IsItemDeactivated() && s_cheatEditIdx == (int)i && s_cheatEditField == 1)
 					s_cheatEditIdx = -1;
 			} else {
 				char valLabel[24];
