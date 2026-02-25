@@ -25,6 +25,9 @@ add_subdirectory(src/ATDebugger)
 add_subdirectory(src/ATVM)
 add_subdirectory(src/ATTest)
 
+# UI command manager (platform-independent)
+add_subdirectory(src/ATUI)
+
 # Linux frontend (Phase 3-5) + Dear ImGui (Phase 7)
 if(NOT WIN32)
 	include(cmake/FetchImGui.cmake)
