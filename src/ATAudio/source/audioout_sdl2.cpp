@@ -23,6 +23,15 @@
 #include <cstring>
 #include <algorithm>
 
+// Compiler barrier: prevents the compiler from reordering memory operations
+// across this point. On x86/x64 this is sufficient for the SPSC ring buffer
+// pattern since the CPU provides strong store/load ordering.
+#if defined(VD_COMPILER_GCC) || defined(VD_COMPILER_CLANG)
+#define AT_COMPILER_BARRIER() __asm__ __volatile__("" ::: "memory")
+#else
+#define AT_COMPILER_BARRIER() do {} while(0)
+#endif
+
 class VDAudioOutputSDL2 final : public IVDAudioOutput {
 public:
 	VDAudioOutputSDL2();
@@ -72,6 +81,7 @@ private:
 	bool mbSilent = true;
 	bool mbStarted = false;
 	bool mbInitialized = false;
+	VDAtomicInt mUnderflowDetected{0};
 };
 
 VDAudioOutputSDL2::VDAudioOutputSDL2() {
@@ -106,10 +116,10 @@ bool VDAudioOutputSDL2::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATE
 	mMixingRate = fmt->nSamplesPerSec;
 	mBlockAlign = fmt->nBlockAlign;
 
-	// Initialize ring buffer — round up to power of two
+	// Initialize ring buffer — round up to power of two for efficient masking
 	uint32 totalSize = bufsize * bufcount;
 	uint32 ringSize = 1;
-	while (ringSize < totalSize * 2)
+	while (ringSize < totalSize)
 		ringSize <<= 1;
 
 	mRingBuffer.resize(ringSize);
@@ -154,8 +164,14 @@ void VDAudioOutputSDL2::Shutdown() {
 
 void VDAudioOutputSDL2::GoSilent() {
 	mbSilent = true;
-	if (mDeviceID)
+	if (mDeviceID) {
 		SDL_PauseAudioDevice(mDeviceID, 1);
+
+		SDL_LockAudioDevice(mDeviceID);
+		mReadPos = 0;
+		mWritePos = 0;
+		SDL_UnlockAudioDevice(mDeviceID);
+	}
 }
 
 bool VDAudioOutputSDL2::IsSilent() {
@@ -168,7 +184,7 @@ bool VDAudioOutputSDL2::IsFrozen() {
 
 uint32 VDAudioOutputSDL2::GetAvailSpace() {
 	uint32 used = (uint32)(mWritePos - mReadPos) & mRingMask;
-	uint32 avail = mRingMask + 1 - used - 1;  // Leave one byte gap to distinguish full from empty
+	uint32 avail = mRingMask + 1 - used - mBlockAlign;
 	return avail;
 }
 
@@ -178,7 +194,7 @@ uint32 VDAudioOutputSDL2::GetBufferLevel() {
 
 uint32 VDAudioOutputSDL2::EstimateHWBufferLevel(bool *underflowDetected) {
 	if (underflowDetected)
-		*underflowDetected = false;
+		*underflowDetected = (mUnderflowDetected.xchg(0) != 0);
 	return GetBufferLevel();
 }
 
@@ -213,6 +229,12 @@ bool VDAudioOutputSDL2::Stop() {
 		return false;
 
 	SDL_PauseAudioDevice(mDeviceID, 1);
+
+	SDL_LockAudioDevice(mDeviceID);
+	mReadPos = 0;
+	mWritePos = 0;
+	SDL_UnlockAudioDevice(mDeviceID);
+
 	mbStarted = false;
 	return true;
 }
@@ -229,10 +251,13 @@ bool VDAudioOutputSDL2::Write(const void *data, uint32 len) {
 	const uint8 *src = (const uint8 *)data;
 	uint32 avail = GetAvailSpace();
 
-	if (len > avail) {
-		// Drop excess rather than blocking
+	if (len > avail)
 		len = avail;
-	}
+
+	// Ensure we only write complete frames to maintain stereo alignment
+	len -= len % mBlockAlign;
+	if (!len)
+		return true;
 
 	uint32 wp = (uint32)mWritePos;
 	uint32 ringSize = mRingMask + 1;
@@ -243,6 +268,11 @@ bool VDAudioOutputSDL2::Write(const void *data, uint32 len) {
 
 	if (len > firstChunk)
 		memcpy(mRingBuffer.data(), src + firstChunk, len - firstChunk);
+
+	// Ensure ring buffer writes complete before the callback can see the
+	// updated write position. On x86 the CPU won't reorder stores, but
+	// the compiler can reorder the memcpy past the volatile store.
+	AT_COMPILER_BARRIER();
 
 	mWritePos = (wp + len) & mRingMask;
 	mTotalWritten += (sint32)len;
@@ -259,9 +289,14 @@ void VDAudioOutputSDL2::AudioCallback(void *userdata, Uint8 *stream, int len) {
 }
 
 void VDAudioOutputSDL2::FillBuffer(Uint8 *stream, int len) {
-	uint32 available = (uint32)(mWritePos - mReadPos) & mRingMask;
-	uint32 toRead = std::min((uint32)len, available);
 	uint32 rp = (uint32)mReadPos;
+	uint32 wp = (uint32)mWritePos;
+	uint32 available = (wp - rp) & mRingMask;
+
+	// Only consume complete frames to maintain stereo alignment
+	uint32 toRead = std::min((uint32)len, available);
+	toRead -= toRead % mBlockAlign;
+
 	uint32 ringSize = mRingMask + 1;
 
 	if (toRead > 0) {
@@ -271,13 +306,21 @@ void VDAudioOutputSDL2::FillBuffer(Uint8 *stream, int len) {
 		if (toRead > firstChunk)
 			memcpy(stream + firstChunk, mRingBuffer.data(), toRead - firstChunk);
 
+		// Ensure ring buffer reads complete before the writer can see
+		// the updated read position and overwrite what we just read.
+		AT_COMPILER_BARRIER();
+
 		mReadPos = (rp + toRead) & mRingMask;
 		mTotalRead += (sint32)toRead;
 	}
 
-	// Zero-fill any remaining space (underflow)
-	if ((uint32)len > toRead)
+	// Zero-fill any remaining space and flag underflow
+	if ((uint32)len > toRead) {
 		memset(stream + toRead, 0, len - toRead);
+
+		if (available < (uint32)len)
+			mUnderflowDetected = 1;
+	}
 }
 
 IVDAudioOutput *VDCreateAudioOutputSDL2() {
