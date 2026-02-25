@@ -47,6 +47,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang
 		-Wno-range-loop-construct   # Range loop copy in upstream code
 		-Wno-nonnull                # Upstream null argument patterns
 		-Wno-format-overflow        # Format overflow in upstream code
+		-Wno-strict-aliasing        # Type-punned float/int in VD2 atomic.h
 	)
 
 	# Optimization flags for Release/Profile builds
