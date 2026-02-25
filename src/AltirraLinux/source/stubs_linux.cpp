@@ -742,7 +742,14 @@ public:
 			s_indicatorState.mStatusCounter[index] = value;
 	}
 
-	void SetDiskLEDState(uint32, sint32) override {}
+	void SetDiskLEDState(uint32 index, sint32 state) override {
+		if (index < 15) {
+			if (state)
+				s_indicatorState.mDiskLEDFlags |= (1u << index);
+			else
+				s_indicatorState.mDiskLEDFlags &= ~(1u << index);
+		}
+	}
 
 	void SetDiskMotorActivity(uint32 index, bool on) override {
 		if (on)
@@ -789,21 +796,40 @@ public:
 		s_indicatorState.mFlashWriteCounter = 20;
 	}
 
-	void SetCartridgeActivity(sint32, sint32) override {}
+	void SetCartridgeActivity(sint32, sint32) override {
+		s_indicatorState.mCartridgeActivityCounter = 20;
+	}
 	void SetCassetteIndicatorVisible(bool) override {}
 	void SetCassettePosition(float, float, bool, bool) override {}
 	void SetRecordingPosition() override {}
 	void SetRecordingPositionPaused() override {}
 	void SetRecordingPosition(float, sint64, bool) override {}
-	void SetModemConnection(const char *) override {}
-	void SetStatusMessage(const wchar_t *) override {}
+	void SetModemConnection(const char *desc) override {
+		if (desc) {
+			strncpy(s_indicatorState.mModemConnection, desc, sizeof(s_indicatorState.mModemConnection) - 1);
+			s_indicatorState.mModemConnection[sizeof(s_indicatorState.mModemConnection) - 1] = 0;
+		} else {
+			s_indicatorState.mModemConnection[0] = 0;
+		}
+	}
+	void SetStatusMessage(const wchar_t *msg) override {
+		if (msg && msg[0]) {
+			VDStringA u8 = VDTextWToU8(VDStringW(msg));
+			ATImGuiShowToast(u8.c_str());
+		}
+	}
 	uint32 AllocateErrorSourceId() override {
 		if (!++mErrorSourceCounter)
 			++mErrorSourceCounter;
 		return mErrorSourceCounter;
 	}
 	void ClearErrors(uint32) override {}
-	void ReportError(uint32, const wchar_t *) override {}
+	void ReportError(uint32, const wchar_t *msg) override {
+		if (msg && msg[0]) {
+			VDStringA u8 = VDTextWToU8(VDStringW(msg));
+			ATImGuiShowToast(u8.c_str());
+		}
+	}
 
 	// IATUIRenderer — non-indicator methods remain no-ops
 	bool IsVisible() const override { return false; }

@@ -144,7 +144,7 @@ static std::string s_devEditTag;
 
 // ============= Device config descriptor system =============
 
-enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect };
+enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect, IntInput };
 
 struct DevCfgChoice { int value; const char *name; };
 
@@ -208,11 +208,20 @@ static const DevCfgControl kCfgMyIDE[] = {
 	{ DevCfgType::IntDropdown, "cpldver", "CPLD Version", kMyIDECPLDChoices, 2, false, nullptr },
 };
 
+static const DevCfgChoice kConnectRateChoices[] = {
+	{300, "300"}, {1200, "1200"}, {2400, "2400"}, {4800, "4800"},
+	{9600, "9600"}, {19200, "19200"}, {38400, "38400"}, {57600, "57600"},
+	{115200, "115200"}, {230400, "230400"},
+};
+
 static const DevCfgControl kCfgModem[] = {
+	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "telnet", "Telnet Emulation", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "ipv6", "Listen IPv6", nullptr, 0, true, nullptr },
 	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "connect_rate", "Connect Rate", kConnectRateChoices, 10, false, nullptr },
+	{ DevCfgType::Checkbox, "check_rate", "Require Matched DTE Rate", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "dialaddr", "Dial Address", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "dialsvc", "Dial Service", nullptr, 0, false, nullptr },
 	{ DevCfgType::StringEdit, "termtype", "Terminal Type", nullptr, 0, false, nullptr },
@@ -269,11 +278,13 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("myide-d5xx", "MyIDE Cartridge", kCfgMyIDE),
 	DEVCFG_ENTRY("myide-d2xx", "MyIDE-II", kCfgMyIDE),
 	DEVCFG_ENTRY("myide2", "MyIDE-II", kCfgMyIDE),
+	DEVCFG_ENTRY("modem", "Modem", kCfgModem),
 	DEVCFG_ENTRY("835", "835 Modem", kCfgModem),
 	DEVCFG_ENTRY("835full", "835 Modem (Full)", kCfgModem),
 	DEVCFG_ENTRY("1030", "1030 Modem", kCfgModem),
 	DEVCFG_ENTRY("1030full", "1030 Modem (Full)", kCfgModem),
 	DEVCFG_ENTRY("sx212", "SX212 Modem", kCfgModem),
+	DEVCFG_ENTRY("pocketmodem", "Pocket Modem", kCfgModem),
 	DEVCFG_ENTRY("820", "820 Printer", kCfgPrinter),
 	DEVCFG_ENTRY("1025", "1025 Printer", kCfgPrinter),
 	DEVCFG_ENTRY("1029", "1029 Printer", kCfgPrinter),
@@ -352,6 +363,17 @@ static bool DrawStructuredDeviceConfig(ATPropertySet& props, const DevCfgTagMapp
 				if (ImGui::InputText(ctrl.label, buf, sizeof(buf))) {
 					VDStringW wstr = VDTextU8ToW(VDStringA(buf));
 					props.SetString(ctrl.propKey, wstr.c_str());
+					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::IntInput: {
+				int val = (int)props.GetUint32(ctrl.propKey, 0);
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::InputInt(ctrl.label, &val)) {
+					if (val < 0) val = 0;
+					props.SetUint32(ctrl.propKey, (uint32)val);
 					changed = true;
 				}
 				break;
@@ -1234,9 +1256,11 @@ static void DrawMenuBar() {
 
 		if (ImGui::MenuItem("Cold Reset", "Shift+F6")) {
 			g_sim.ColdReset();
+			g_sim.Resume();
 		}
 		if (ImGui::MenuItem("Warm Reset", "F6")) {
 			g_sim.WarmReset();
+			g_sim.Resume();
 		}
 
 		if (ImGui::BeginMenu("Console Switches")) {
@@ -1307,6 +1331,7 @@ static void DrawMenuBar() {
 					g_sim.UnloadAll();
 					g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
 					g_sim.ColdReset();
+					g_sim.Resume();
 					MRUAdd(path.c_str());
 					VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 					char msg[256];
@@ -2128,6 +2153,7 @@ static void DrawSystemConfig() {
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
 		g_sim.LoadROMs();
 		g_sim.ColdReset();
+		g_sim.Resume();
 	}
 
 	ImGui::End();
@@ -2216,9 +2242,10 @@ static void DrawStatusBar() {
 			bool motorOn = (ind.mDiskMotorFlags & flag) != 0;
 			bool sioActive = (statusFlags & flag) != 0;
 			bool hasError = (diskErrorVis & flag) != 0;
+			bool ledOn = (ind.mDiskLEDFlags & flag) != 0;
 			bool isActive = sioActive || hasError;
 
-			if (i >= 4 && !di.IsDiskLoaded() && !motorOn && !sioActive)
+			if (i >= 4 && !di.IsDiskLoaded() && !motorOn && !sioActive && !ledOn)
 				continue;
 
 			ImGui::SameLine(0, 16);
@@ -2236,6 +2263,8 @@ static void DrawStatusBar() {
 					color = &kDiskDim[i & 7];
 				else if (di.IsDirty())
 					color = &kDiskDirty;
+				else if (ledOn)
+					color = &kDiskDim[i & 7];
 				else
 					color = nullptr;
 
@@ -2308,10 +2337,21 @@ static void DrawStatusBar() {
 			--ind.mFlashWriteCounter;
 		}
 
-		// Cartridge indicator
+		// Cartridge indicator (flashes white on bank switch activity)
 		if (g_sim.IsCartridgeAttached(0)) {
 			ImGui::SameLine(0, 16);
-			ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+			if (ind.mCartridgeActivityCounter) {
+				ImGui::TextColored(ImVec4(1.0f, 1.0f, 1.0f, 1.0f), "CART");
+				--ind.mCartridgeActivityCounter;
+			} else {
+				ImGui::TextColored(ImVec4(0.9f, 0.7f, 1.0f, 1.0f), "CART");
+			}
+		}
+
+		// Modem connection indicator
+		if (ind.mModemConnection[0]) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(0.5f, 0.9f, 1.0f, 1.0f), "MDM:%s", ind.mModemConnection);
 		}
 
 		// Tape indicator with position
@@ -2528,6 +2568,7 @@ static void PollFileDialogFallback() {
 						g_sim.UnloadAll();
 						g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr);
 						g_sim.ColdReset();
+						g_sim.Resume();
 						MRUAdd(result.c_str());
 						ShowToast("Booted image");
 					} catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Boot failed: %s", e.what()); ShowToast(m); }
@@ -2807,8 +2848,10 @@ static void DrawFirmwareManager() {
 		// Window just closed — reload ROMs if defaults were changed
 		if (s_fwDefaultsChanged) {
 			s_fwDefaultsChanged = false;
-			if (g_sim.LoadROMs())
+			if (g_sim.LoadROMs()) {
 				g_sim.ColdReset();
+				g_sim.Resume();
+			}
 		}
 		return;
 	}
@@ -5833,6 +5876,7 @@ void ATImGuiBootImage() {
 			g_sim.UnloadAll();
 			g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
 			g_sim.ColdReset();
+			g_sim.Resume();
 			MRUAdd(path.c_str());
 			VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 			char msg[256];
