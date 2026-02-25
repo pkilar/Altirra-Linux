@@ -8,3 +8,6 @@ lib/
 # Local configuration
 localconfig/active/
 *code-workspace
+
+# Memory audit backups
+memory-audit/
