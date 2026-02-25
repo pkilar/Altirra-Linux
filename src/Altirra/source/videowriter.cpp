@@ -1,6 +1,8 @@
 #include <stdafx.h>
 
+#ifdef VD_PLATFORM_WINDOWS
 #define INITGUID
+#endif
 
 #include <numeric>
 
@@ -32,8 +34,10 @@
 #include "videowriter.h"
 #include "aviwriter.h"
 #include "gtia.h"
+
 #include "uirender.h"
 
+#ifdef VD_PLATFORM_WINDOWS
 #include <vd2/system/w32assist.h>
 
 #include <windows.h>
@@ -43,6 +47,7 @@
 #include <mfreadwrite.h>
 #include <mftransform.h>
 #include <uuids.h>
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -1431,6 +1436,8 @@ bool ATAVIEncoder::Finalize(MyError& error) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+#ifdef VD_PLATFORM_WINDOWS
 
 class ATMFSampleAllocatorW32 final : public IMFSinkWriterCallback {
 public:
@@ -2848,6 +2855,8 @@ void ATMediaFoundationEncoderW32::EndAudioFrame() {
 	mpAudioDstEnd = nullptr;
 }
 
+#endif // VD_PLATFORM_WINDOWS
+
 ///////////////////////////////////////////////////////////////////////////////
 
 class ATVideoWriter final : public IATVideoWriter, public IATGTIAVideoTap, public IATAudioTap {
@@ -3016,6 +3025,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 	
 	bool useYUV = false;
 
+#ifdef VD_PLATFORM_WINDOWS
 	switch(venc) {
 		case kATVideoEncoding_WMV7:
 		case kATVideoEncoding_WMV9:
@@ -3027,6 +3037,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		default:
 			break;
 	}
+#endif
 
 	if (useYUV) {
 		// Ensure even/odd frame size for 4:2:0 since odd support is not guaranteed in MF (much less defined, really).
@@ -3064,7 +3075,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		const float dstyf = ((float)frameh - dsthf) * 0.5f;
 		vdrect32f dstrect(dstxf, dstyf, (float)framew - dstxf, (float)frameh - dstyf);
 
-		IVDPixmapResampler::FilterMode filterMode;
+		IVDPixmapResampler::FilterMode filterMode = IVDPixmapResampler::kFilterPoint;
 		switch(resamplingMode) {
 			case ATVideoRecordingResamplingMode::Nearest:
 				filterMode = IVDPixmapResampler::kFilterPoint;
@@ -3103,12 +3114,14 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 			mpMediaEncoder = new ATAVIEncoder(filename, venc, w, h, encodingFrameRate, palette, samplingRate, stereo, encodeAllFrames);
 			break;
 
+#ifdef VD_PLATFORM_WINDOWS
 		case kATVideoEncoding_WMV7:
 		case kATVideoEncoding_WMV9:
 		case kATVideoEncoding_H264_AAC:
 		case kATVideoEncoding_H264_MP3:
 			mpMediaEncoder = new ATMediaFoundationEncoderW32(filename, venc, videoBitRate, audioBitRate, w, h, encodingFrameRate, palette, samplingRate, stereo, useYUV);
 			break;
+#endif
 
 		default:
 			throw MyError("Unimplemented compression mode.");

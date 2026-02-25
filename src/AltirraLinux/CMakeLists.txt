@@ -203,7 +203,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"startuplogger.cpp"
 	"texteditor.cpp"
 	"tracenative.cpp"
-	"videowriter.cpp"
 )
 
 # Build the filtered source list

@@ -59,9 +59,11 @@ class ATIRQController;
 #include "oshelper.h"
 #include "versioninfo.h"
 #include "cheatengine.h"
+#include <vd2/system/fraction.h>
 #include "audiowriter.h"
 #include "sapwriter.h"
 #include "vgmwriter.h"
+#include "videowriter.h"
 #include "inputmap.h"
 #include "joystick.h"
 #include "autosavemanager.h"
@@ -96,6 +98,7 @@ static vdrefptr<IATSerializable> s_pQuickState;
 static vdautoptr<ATAudioWriter> s_pAudioWriter;
 static vdautoptr<IATSAPWriter> s_pSapWriter;
 static vdrefptr<IATVgmWriter> s_pVgmWriter;
+static vdautoptr<IATVideoWriter> s_pVideoWriter;
 
 // Window visibility
 static bool s_showSystemConfig = false;
@@ -590,13 +593,92 @@ static const char *kVgmFilters =
 	"VGM Files|*.vgm"
 	"|All Files|*";
 
+static const char *kAviFilters =
+	"AVI Video|*.avi"
+	"|All Files|*";
+
+// ============= Video recording config dialog state =============
+
+static bool s_showVideoRecordDialog = false;
+static int s_videoCodecIndex = 0;       // 0=ZMBV, 1=Raw, 2=RLE
+static int s_videoScalingIndex = 0;     // 0=None, 1=480p Narrow, 2=480p Wide, 3=720p Narrow, 4=720p Wide
+static int s_videoResamplingIndex = 0;  // 0=Nearest, 1=Sharp Bilinear, 2=Bilinear
+static bool s_videoHalfRate = false;
+static bool s_videoEncodeAll = false;
+
+static void StartVideoRecording(const wchar_t *path) {
+	try {
+		ATGTIAEmulator& gtia = g_sim.GetGTIA();
+
+		ATCreateVideoWriter(~s_pVideoWriter);
+
+		int w, h;
+		bool rgb32;
+		gtia.GetRawFrameFormat(w, h, rgb32);
+
+		uint32 palette[256];
+		if (!rgb32)
+			gtia.GetPalette(palette);
+
+		const bool hz50 = g_sim.IsVideo50Hz();
+		VDFraction frameRate = hz50 ? VDFraction(1773447, 114*312) : VDFraction(3579545, 2*114*262);
+		double samplingRate = hz50 ? 1773447.0 / 28.0 : 3579545.0 / 56.0;
+		double par = gtia.GetPixelAspectRatio();
+
+		static const ATVideoEncoding kCodecs[] = { kATVideoEncoding_ZMBV, kATVideoEncoding_Raw, kATVideoEncoding_RLE };
+		ATVideoEncoding encoding = kCodecs[s_videoCodecIndex];
+
+		static const ATVideoRecordingScalingMode kScaling[] = {
+			ATVideoRecordingScalingMode::None,
+			ATVideoRecordingScalingMode::Scale480Narrow,
+			ATVideoRecordingScalingMode::Scale480Wide,
+			ATVideoRecordingScalingMode::Scale720Narrow,
+			ATVideoRecordingScalingMode::Scale720Wide
+		};
+		ATVideoRecordingScalingMode scalingMode = kScaling[s_videoScalingIndex];
+
+		static const ATVideoRecordingResamplingMode kResampling[] = {
+			ATVideoRecordingResamplingMode::Nearest,
+			ATVideoRecordingResamplingMode::SharpBilinear,
+			ATVideoRecordingResamplingMode::Bilinear
+		};
+		ATVideoRecordingResamplingMode resamplingMode = kResampling[s_videoResamplingIndex];
+
+		double timestampRate = hz50 ? 1773447.0 : 1789772.5;
+
+		s_pVideoWriter->Init(path, encoding, 0, 0,
+			w, h, frameRate, par, resamplingMode, scalingMode,
+			rgb32 ? nullptr : palette,
+			samplingRate, g_sim.IsDualPokeysEnabled(),
+			timestampRate, s_videoHalfRate, s_videoEncodeAll,
+			g_sim.GetUIRenderer());
+
+		g_sim.GetAudioOutput()->SetAudioTap(s_pVideoWriter->AsAudioTap());
+		gtia.AddVideoTap(s_pVideoWriter->AsVideoTap());
+	} catch (const std::exception& e) {
+		s_pVideoWriter.reset();
+		char msg[512];
+		snprintf(msg, sizeof(msg), "Video recording failed: %s", e.what());
+		ShowToast(msg);
+	} catch (...) {
+		s_pVideoWriter.reset();
+		ShowToast("Failed to start video recording");
+	}
+}
+
 // ============= Recording helpers =============
 
 static bool IsRecordingActive() {
-	return s_pAudioWriter || s_pSapWriter || s_pVgmWriter;
+	return s_pAudioWriter || s_pSapWriter || s_pVgmWriter || s_pVideoWriter;
 }
 
 static void StopAllRecording() {
+	if (s_pVideoWriter) {
+		g_sim.GetAudioOutput()->SetAudioTap(nullptr);
+		g_sim.GetGTIA().RemoveVideoTap(s_pVideoWriter->AsVideoTap());
+		try { s_pVideoWriter->Shutdown(); } catch (...) {}
+		s_pVideoWriter.reset();
+	}
 	if (s_pAudioWriter) {
 		g_sim.GetAudioOutput()->SetAudioTap(nullptr);
 		try { s_pAudioWriter->Finalize(); } catch (...) {}
@@ -1707,6 +1789,22 @@ static void DrawMenuBar() {
 			bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL;
 			bool isStereo = g_sim.IsDualPokeysEnabled();
 
+			if (ImGui::MenuItem("Record Video (AVI)...", nullptr, false, !recording)) {
+				s_showVideoRecordDialog = true;
+			}
+
+			if (s_pVideoWriter) {
+				if (s_pVideoWriter->IsPaused()) {
+					if (ImGui::MenuItem("Resume Recording"))
+						s_pVideoWriter->Resume();
+				} else {
+					if (ImGui::MenuItem("Pause Recording"))
+						s_pVideoWriter->Pause();
+				}
+			}
+
+			ImGui::Separator();
+
 			if (ImGui::MenuItem("Record Audio (WAV)...", nullptr, false, !recording)) {
 				VDStringW path = ATLinuxSaveFileDialog("Record Audio", kWavFilters);
 				if (!path.empty()) {
@@ -2394,11 +2492,32 @@ static void DrawStatusBar() {
 		// Recording indicator
 		if (IsRecordingActive()) {
 			ImGui::SameLine(0, 16);
-			const char *recType = s_pAudioWriter
-				? (s_pAudioWriter->IsRecordingRaw() ? "REC:PCM" : "REC:WAV")
+			const char *recType = s_pVideoWriter ? "REC:AVI"
+				: s_pAudioWriter
+					? (s_pAudioWriter->IsRecordingRaw() ? "REC:PCM" : "REC:WAV")
 				: s_pSapWriter ? "REC:SAP"
 				: "REC:VGM";
-			ImGui::TextColored(ImVec4(1.0f, 0.2f, 0.2f, 1.0f), "%s", recType);
+			ImVec4 recColor = (s_pVideoWriter && s_pVideoWriter->IsPaused())
+				? ImVec4(1.0f, 0.6f, 0.2f, 1.0f)
+				: ImVec4(1.0f, 0.2f, 0.2f, 1.0f);
+			ImGui::TextColored(recColor, "%s", recType);
+
+			// Show elapsed time and file size for video recording
+			auto& ind = ATImGuiGetIndicatorState();
+			if (s_pVideoWriter && ind.mRecordingTime >= 0) {
+				int secs = (int)ind.mRecordingTime;
+				int mins = secs / 60;
+				secs %= 60;
+				ImGui::SameLine(0, 4);
+				if (ind.mRecordingSize >= 1048576)
+					ImGui::TextColored(recColor, "%d:%02d %.1fMB", mins, secs, ind.mRecordingSize / 1048576.0);
+				else
+					ImGui::TextColored(recColor, "%d:%02d %lldKB", mins, secs, (long long)(ind.mRecordingSize / 1024));
+				if (ind.mbRecordingPaused) {
+					ImGui::SameLine(0, 4);
+					ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "PAUSED");
+				}
+			}
 		}
 
 		// Mute indicator
@@ -5324,6 +5443,62 @@ static const char *kNewDiskFSNames[] = {
 	"MyDOS",
 };
 
+// ============= Video Recording Config Dialog =============
+
+static void DrawVideoRecordDialog() {
+	if (!s_showVideoRecordDialog)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Record Video (AVI)", &s_showVideoRecordDialog, ImGuiWindowFlags_AlwaysAutoResize)) {
+		ImGui::End();
+		return;
+	}
+
+	ImGui::Text("Codec:");
+	static const char *kCodecNames[] = { "ZMBV (Lossless)", "Raw (Uncompressed)", "RLE (Palette only)" };
+	ImGui::Combo("##codec", &s_videoCodecIndex, kCodecNames, 3);
+
+	ImGui::Spacing();
+	ImGui::Text("Scaling:");
+	static const char *kScalingNames[] = { "None (Native)", "480p Narrow (640x480)", "480p Wide (854x480)", "720p Narrow (960x720)", "720p Wide (1280x720)" };
+	ImGui::Combo("##scaling", &s_videoScalingIndex, kScalingNames, 5);
+
+	if (s_videoScalingIndex > 0) {
+		ImGui::Spacing();
+		ImGui::Text("Resampling:");
+		static const char *kResamplingNames[] = { "Nearest", "Sharp Bilinear", "Bilinear" };
+		ImGui::Combo("##resampling", &s_videoResamplingIndex, kResamplingNames, 3);
+	}
+
+	ImGui::Spacing();
+	ImGui::Checkbox("Half frame rate", &s_videoHalfRate);
+	ImGui::Checkbox("Encode all frames", &s_videoEncodeAll);
+
+	ImGui::Spacing();
+	ImGui::Separator();
+	ImGui::Spacing();
+
+	if (ImGui::Button("Record...", ImVec2(120, 0))) {
+		VDStringW path = ATLinuxSaveFileDialog("Record Video", kAviFilters);
+		if (!path.empty()) {
+			if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+				path += L".avi";
+			StartVideoRecording(path.c_str());
+			s_showVideoRecordDialog = false;
+		}
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Cancel", ImVec2(100, 0))) {
+		s_showVideoRecordDialog = false;
+	}
+
+	ImGui::End();
+}
+
+// ============= New Disk Dialog =============
+
 static void DrawNewDisk() {
 	if (!s_showNewDisk)
 		return;
@@ -5793,6 +5968,7 @@ void ATImGuiEmulatorDraw() {
 	DrawAbout();
 	DrawShortcuts();
 	DrawCheater();
+	DrawVideoRecordDialog();
 	DrawNewDisk();
 	DrawQuitConfirmation();
 	PollFileDialogFallback();

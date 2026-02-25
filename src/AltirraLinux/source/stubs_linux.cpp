@@ -801,9 +801,19 @@ public:
 	}
 	void SetCassetteIndicatorVisible(bool) override {}
 	void SetCassettePosition(float, float, bool, bool) override {}
-	void SetRecordingPosition() override {}
-	void SetRecordingPositionPaused() override {}
-	void SetRecordingPosition(float, sint64, bool) override {}
+	void SetRecordingPosition() override {
+		s_indicatorState.mRecordingTime = -1.0f;
+		s_indicatorState.mRecordingSize = 0;
+		s_indicatorState.mbRecordingPaused = false;
+	}
+	void SetRecordingPositionPaused() override {
+		s_indicatorState.mbRecordingPaused = true;
+	}
+	void SetRecordingPosition(float t, sint64 sz, bool paused) override {
+		s_indicatorState.mRecordingTime = t;
+		s_indicatorState.mRecordingSize = sz;
+		s_indicatorState.mbRecordingPaused = paused;
+	}
 	void SetModemConnection(const char *desc) override {
 		if (desc) {
 			strncpy(s_indicatorState.mModemConnection, desc, sizeof(s_indicatorState.mModemConnection) - 1);
