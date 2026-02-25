@@ -9,6 +9,7 @@
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
+#include <at/atcore/address.h>
 #include <at/atdebugger/target.h>
 #include <at/atcpu/execstate.h>
 #include <at/atcpu/history.h>
@@ -26,11 +27,16 @@ class ATIRQController;
 #include "profiler.h"
 #include "printeroutput.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <fstream>
+#include <functional>
+#include <iomanip>
 #include <map>
 #include <mutex>
+#include <numeric>
+#include <set>
 #include <vector>
 #include <string>
 
@@ -163,11 +169,29 @@ struct ProfileEntry {
 	uint32 calls;
 	uint32 insns;
 	uint32 cycles;
+	uint32 unhaltedCycles;
+	uint32 context;
+	uint32 counters[2];
 };
 
 static std::vector<ProfileEntry> s_profilerEntries;
-static int s_profilerSortCol = 3; // default: cycles
+static int s_profilerSortCol = 4; // default: cycles
 static bool s_profilerSortAsc = false;
+static std::set<int> s_profilerSelectedRows;
+static int s_profilerLastClickedRow = -1;
+
+// Timeline state
+static int s_profilerSelStart = 0;
+static int s_profilerSelEnd = 0;
+static int s_profilerHoverFrame = -1;
+static float s_profilerTimelineZoom = 4.0f;
+static uint32 s_profilerTimelineVRange = 1;
+
+// Boundary rule state
+static ATProfileBoundaryRule s_profilerBoundaryRule = kATProfileBoundaryRule_None;
+static char s_profilerBoundaryAddr[64] = "";
+static char s_profilerBoundaryAddr2[64] = "";
+static bool s_profilerGlobalAddresses = false;
 
 void ATImGuiDebuggerInit() {
 	IATDebugger *dbg = ATGetDebugger();
@@ -2340,8 +2364,20 @@ static void DrawPrinterOutput() {
 
 // ============= Profiler Window =============
 
+static const char *ProfilerContextName(uint32 ctx) {
+	switch (ctx) {
+		case kATProfileContext_Main:      return "Main";
+		case kATProfileContext_Interrupt:  return "Int";
+		case kATProfileContext_IRQ:        return "IRQ";
+		case kATProfileContext_VBI:        return "VBI";
+		case kATProfileContext_DLI:        return "DLI";
+		default:                          return "?";
+	}
+}
+
 static void ProfilerBuildEntries() {
 	s_profilerEntries.clear();
+	s_profilerSelectedRows.clear();
 	if (!s_profilerMerged)
 		return;
 
@@ -2353,6 +2389,10 @@ static void ProfilerBuildEntries() {
 		e.calls = rec.mCalls;
 		e.insns = rec.mInsns;
 		e.cycles = rec.mCycles;
+		e.unhaltedCycles = rec.mUnhaltedCycles;
+		e.context = rec.mContext;
+		e.counters[0] = rec.mCounters[0];
+		e.counters[1] = rec.mCounters[1];
 
 		if (dbs) {
 			ATSymbol sym {};
@@ -2368,24 +2408,82 @@ static void ProfilerSort() {
 	std::sort(s_profilerEntries.begin(), s_profilerEntries.end(),
 		[](const ProfileEntry& a, const ProfileEntry& b) {
 			switch (s_profilerSortCol) {
-				case 0: return s_profilerSortAsc ? a.addr < b.addr : a.addr > b.addr;
-				case 1: return s_profilerSortAsc ? a.sym < b.sym : a.sym > b.sym;
-				case 2: return s_profilerSortAsc ? a.calls < b.calls : a.calls > b.calls;
-				case 3: return s_profilerSortAsc ? a.cycles < b.cycles : a.cycles > b.cycles;
-				case 4: return s_profilerSortAsc ? a.insns < b.insns : a.insns > b.insns;
+				case 0: return s_profilerSortAsc ? a.context < b.context : a.context > b.context;
+				case 1: return s_profilerSortAsc ? a.addr < b.addr : a.addr > b.addr;
+				case 2: return s_profilerSortAsc ? a.sym < b.sym : a.sym > b.sym;
+				case 3: return s_profilerSortAsc ? a.calls < b.calls : a.calls > b.calls;
+				case 4: return s_profilerSortAsc ? a.cycles < b.cycles : a.cycles > b.cycles;
+				case 5: return s_profilerSortAsc ? a.insns < b.insns : a.insns > b.insns;
+				case 6: return s_profilerSortAsc ? a.unhaltedCycles < b.unhaltedCycles : a.unhaltedCycles > b.unhaltedCycles;
+				case 7: { // DMA%
+					float da = a.cycles ? 100.0f * (1.0f - (float)a.unhaltedCycles / (float)a.cycles) : 0;
+					float db = b.cycles ? 100.0f * (1.0f - (float)b.unhaltedCycles / (float)b.cycles) : 0;
+					return s_profilerSortAsc ? da < db : da > db;
+				}
+				case 8: { // CPI
+					float ca = a.insns ? (float)a.cycles / (float)a.insns : 0;
+					float cb = b.insns ? (float)b.cycles / (float)b.insns : 0;
+					return s_profilerSortAsc ? ca < cb : ca > cb;
+				}
+				case 9:  return s_profilerSortAsc ? a.counters[0] < b.counters[0] : a.counters[0] > b.counters[0];
+				case 10: return s_profilerSortAsc ? a.counters[1] < b.counters[1] : a.counters[1] > b.counters[1];
 				default: return false;
 			}
 		});
+}
+
+static void ProfilerRemerge(uint32 start, uint32 end) {
+	if (s_profilerSession.mpFrames.empty())
+		return;
+
+	uint32 n = (uint32)s_profilerSession.mpFrames.size();
+	if (start >= n) start = n - 1;
+	if (end > n) end = n;
+	if (end <= start) end = start + 1;
+
+	ATProfileMergedFrame *merged = nullptr;
+	ATProfileMergeFrames(s_profilerSession, start, end, &merged);
+	s_profilerMerged.clear();
+	s_profilerMerged.set(merged);
+
+	ProfilerBuildEntries();
+	ProfilerSort();
 }
 
 static void ProfilerStart() {
 	g_sim.SetProfilingEnabled(true);
 	ATCPUProfiler *prof = g_sim.GetProfiler();
 	if (prof) {
+		// Apply boundary rules
+		uint32 param = 0, param2 = 0;
+		if (s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddress ||
+			s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddressFunction) {
+			IATDebugger *dbg = ATGetDebugger();
+			if (dbg && s_profilerBoundaryAddr[0]) {
+				sint32 resolved = dbg->ResolveSymbol(s_profilerBoundaryAddr, true, true, false);
+				if (resolved >= 0)
+					param = (uint32)resolved;
+			}
+			if (s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddress && s_profilerBoundaryAddr2[0]) {
+				IATDebugger *dbg2 = ATGetDebugger();
+				if (dbg2) {
+					sint32 resolved2 = dbg2->ResolveSymbol(s_profilerBoundaryAddr2, true, true, false);
+					if (resolved2 >= 0)
+						param2 = (uint32)resolved2;
+					else
+						param2 = (uint32)0 - 1;
+				}
+			} else {
+				param2 = (uint32)0 - 1;
+			}
+		}
+		prof->SetBoundaryRule(s_profilerBoundaryRule, param, param2);
+		prof->SetGlobalAddressesEnabled(s_profilerGlobalAddresses);
 		prof->Start(s_profilerMode, s_profilerC1, s_profilerC2);
 		s_profilerRunning = true;
 		s_profilerHasData = false;
 		s_profilerEntries.clear();
+		s_profilerSelectedRows.clear();
 		s_profilerMerged.clear();
 	}
 }
@@ -2398,10 +2496,30 @@ static void ProfilerStop() {
 
 		uint32 frameCount = (uint32)s_profilerSession.mpFrames.size();
 		if (frameCount > 0) {
+			// Compute truncated mean for timeline vertical range
+			if (frameCount >= 4) {
+				std::vector<uint32> durations(frameCount);
+				for (uint32 i = 0; i < frameCount; i++)
+					durations[i] = s_profilerSession.mpFrames[i]->mTotalCycles;
+				std::sort(durations.begin(), durations.end());
+				size_t n4 = frameCount / 4;
+				size_t n2 = frameCount - n4 * 2;
+				uint64_t sum = std::accumulate(durations.begin() + n4, durations.end() - n4, (uint64_t)0);
+				s_profilerTimelineVRange = (uint32)((sum * 2 + n2 / 2) / n2);
+			} else {
+				uint32 maxCyc = 0;
+				for (uint32 i = 0; i < frameCount; i++)
+					maxCyc = std::max(maxCyc, s_profilerSession.mpFrames[i]->mTotalCycles);
+				s_profilerTimelineVRange = maxCyc > 0 ? maxCyc * 2 : 1;
+			}
+
+			s_profilerSelStart = 0;
+			s_profilerSelEnd = (int)frameCount;
+
 			ATProfileMergedFrame *merged = nullptr;
 			ATProfileMergeFrames(s_profilerSession, 0, frameCount, &merged);
 			s_profilerMerged.clear();
-			s_profilerMerged.set(merged);  // takes ownership without extra AddRef
+			s_profilerMerged.set(merged);
 
 			ProfilerBuildEntries();
 			ProfilerSort();
@@ -2428,11 +2546,294 @@ static const char *kCounterModeNames[] = {
 	"Redundant Op",
 };
 
+// --- Phase 2: Frame Timeline ---
+static void DrawProfilerTimeline() {
+	uint32 frameCount = (uint32)s_profilerSession.mpFrames.size();
+	if (frameCount <= 1)
+		return;
+
+	ImGui::Text("Timeline:");
+	float zoom = s_profilerTimelineZoom;
+	float totalWidth = frameCount * zoom;
+	float barHeight = 80.0f;
+
+	if (ImGui::BeginChild("##timeline", ImVec2(0, barHeight + 4), ImGuiChildFlags_Borders, ImGuiWindowFlags_HorizontalScrollbar)) {
+		ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+		ImVec2 canvasSize = ImVec2(totalWidth, barHeight);
+		ImDrawList *dl = ImGui::GetWindowDrawList();
+
+		// Invisible button to capture input over the whole area
+		ImGui::InvisibleButton("##tlarea", canvasSize);
+		bool hovered = ImGui::IsItemHovered();
+		bool clicked = ImGui::IsItemActive();
+
+		// Zoom with Ctrl+scroll
+		if (hovered && ImGui::GetIO().KeyCtrl) {
+			float wheel = ImGui::GetIO().MouseWheel;
+			if (wheel != 0) {
+				float oldZoom = s_profilerTimelineZoom;
+				s_profilerTimelineZoom = std::clamp(s_profilerTimelineZoom * (wheel > 0 ? 1.25f : 0.8f), 1.0f, 32.0f);
+				// Adjust scroll to keep mouse position stable
+				if (s_profilerTimelineZoom != oldZoom) {
+					float mouseX = ImGui::GetIO().MousePos.x - canvasPos.x + ImGui::GetScrollX();
+					float ratio = s_profilerTimelineZoom / oldZoom;
+					ImGui::SetScrollX(mouseX * ratio - (ImGui::GetIO().MousePos.x - canvasPos.x));
+				}
+			}
+		}
+
+		uint32 vrange = s_profilerTimelineVRange > 0 ? s_profilerTimelineVRange : 1;
+
+		// Mouse interaction
+		if (hovered) {
+			float mx = ImGui::GetIO().MousePos.x - canvasPos.x + ImGui::GetScrollX();
+			int frame = (int)(mx / zoom);
+			if (frame >= 0 && frame < (int)frameCount) {
+				s_profilerHoverFrame = frame;
+
+				// Tooltip
+				uint32 cyc = s_profilerSession.mpFrames[frame]->mTotalCycles;
+				uint32 ins = s_profilerSession.mpFrames[frame]->mTotalInsns;
+				ImGui::SetTooltip("Frame %d: %u cycles, %u insns", frame, cyc, ins);
+			} else {
+				s_profilerHoverFrame = -1;
+			}
+
+			// Click/drag to select range
+			if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && s_profilerHoverFrame >= 0) {
+				s_profilerSelStart = s_profilerHoverFrame;
+				s_profilerSelEnd = s_profilerHoverFrame + 1;
+			}
+			if (ImGui::IsMouseDragging(ImGuiMouseButton_Left) && s_profilerHoverFrame >= 0) {
+				int dragStart = s_profilerSelStart;
+				int dragEnd = s_profilerHoverFrame + 1;
+				if (dragEnd <= dragStart) {
+					s_profilerSelStart = dragEnd - 1;
+					s_profilerSelEnd = dragStart + 1;
+				} else {
+					s_profilerSelEnd = dragEnd;
+				}
+			}
+			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+				ProfilerRemerge(s_profilerSelStart, s_profilerSelEnd);
+			}
+		} else {
+			s_profilerHoverFrame = -1;
+		}
+
+		// Draw bars
+		for (uint32 i = 0; i < frameCount; i++) {
+			float x0 = canvasPos.x + i * zoom;
+			float x1 = x0 + std::max(zoom - 1.0f, 1.0f);
+			uint32 cyc = s_profilerSession.mpFrames[i]->mTotalCycles;
+			float h = std::min((float)cyc / (float)vrange, 1.0f) * barHeight;
+			float y1 = canvasPos.y + barHeight;
+			float y0 = y1 - h;
+
+			ImU32 color;
+			if ((int)i == s_profilerHoverFrame)
+				color = IM_COL32(255, 80, 80, 255);
+			else if ((int)i >= s_profilerSelStart && (int)i < s_profilerSelEnd)
+				color = IM_COL32(100, 150, 255, 255);
+			else
+				color = IM_COL32(128, 128, 128, 200);
+
+			dl->AddRectFilled(ImVec2(x0, y0), ImVec2(x1, y1), color);
+		}
+	}
+	ImGui::EndChild();
+}
+
+// --- Phase 3: Call Graph Tree View ---
+static void DrawProfilerCallGraphTree() {
+	if (!s_profilerMerged || s_profilerSession.mContexts.empty())
+		return;
+
+	const auto& contexts = s_profilerSession.mContexts;
+	const auto& cgRecords = s_profilerMerged->mCallGraphRecords;
+	const auto& inclRecords = s_profilerMerged->mInclusiveRecords;
+	uint32 numContexts = (uint32)contexts.size();
+
+	if (cgRecords.size() < numContexts || inclRecords.size() < numContexts)
+		return;
+
+	uint32 totalCycles = s_profilerMerged->mTotalCycles;
+	uint32 totalInsns = s_profilerMerged->mTotalInsns;
+	float cyclePctScale = totalCycles ? 100.0f / (float)totalCycles : 0;
+	float insnPctScale = totalInsns ? 100.0f / (float)totalInsns : 0;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	// Build first-child / next-sibling lists
+	std::vector<int> firstChild(numContexts, -1);
+	std::vector<int> nextSibling(numContexts, -1);
+
+	// Children are sorted by inclusive cycles descending, so we collect then sort
+	std::vector<std::vector<int>> childLists(numContexts);
+	for (uint32 i = 0; i < numContexts; i++) {
+		uint32 parent = contexts[i].mParent;
+		if (parent < numContexts && parent != i)
+			childLists[parent].push_back((int)i);
+	}
+	for (uint32 i = 0; i < numContexts; i++) {
+		auto& ch = childLists[i];
+		if (ch.empty()) continue;
+		std::sort(ch.begin(), ch.end(), [&](int a, int b) {
+			return inclRecords[a].mInclusiveCycles > inclRecords[b].mInclusiveCycles;
+		});
+		firstChild[i] = ch[0];
+		for (size_t j = 0; j + 1 < ch.size(); j++)
+			nextSibling[ch[j]] = ch[j + 1];
+	}
+
+	// Recursive tree drawing lambda
+	std::function<void(int)> drawNode = [&](int idx) {
+		if (idx < 0 || idx >= (int)numContexts)
+			return;
+
+		const auto& cgr = cgRecords[idx];
+		const auto& cgir = inclRecords[idx];
+
+		// Skip roots with zero data
+		if (cgir.mInclusiveInsns == 0 && cgir.mInclusiveCycles == 0)
+			return;
+
+		// Build label
+		char label[256];
+		const char *rootNames[] = { "Main", "Interrupt", "IRQ", "VBI", "DLI" };
+		if (idx < 5) {
+			snprintf(label, sizeof(label), "%s", rootNames[idx]);
+		} else {
+			uint32 addr = contexts[idx].mAddress;
+			char addrStr[32];
+			if ((addr & kATAddressSpaceMask) == kATAddressSpace_CPU) {
+				if (addr >= 0x10000)
+					snprintf(addrStr, sizeof(addrStr), "%02X:%04X", addr >> 16, addr & 0xffff);
+				else
+					snprintf(addrStr, sizeof(addrStr), "$%04X", addr & 0xffff);
+			} else {
+				snprintf(addrStr, sizeof(addrStr), "%s%04X", ATAddressGetSpacePrefix(addr), addr & kATAddressOffsetMask);
+			}
+
+			ATSymbol sym {};
+			if (dbs && dbs->LookupSymbol(addr, kATSymbol_Execute, sym) && sym.mpName && sym.mOffset == addr)
+				snprintf(label, sizeof(label), "%s (%s)", addrStr, sym.mpName);
+			else
+				snprintf(label, sizeof(label), "%s", addrStr);
+		}
+
+		// Format: label [xN]: inclusive cycles (%), inclusive insns (%)
+		char text[512];
+		snprintf(text, sizeof(text), "%s [x%u]: %u cyc (%.1f%%), %u cpu, %u insns (%.1f%%)",
+			label, cgr.mCalls,
+			cgir.mInclusiveCycles, (float)cgir.mInclusiveCycles * cyclePctScale,
+			cgir.mInclusiveUnhaltedCycles,
+			cgir.mInclusiveInsns, (float)cgir.mInclusiveInsns * insnPctScale);
+
+		bool hasChildren = (firstChild[idx] >= 0);
+		ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth;
+		if (!hasChildren)
+			flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+
+		bool open = ImGui::TreeNodeEx((void*)(intptr_t)idx, flags, "%s", text);
+
+		// Click to navigate disassembly (non-root nodes)
+		if (ImGui::IsItemClicked() && idx >= 5) {
+			uint32 addr = contexts[idx].mAddress;
+			s_disasmAddr = addr & 0xFFFF;
+			s_disasmFollowPC = false;
+			snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", addr & 0xFFFF);
+			s_showDisassembly = true;
+		}
+
+		if (hasChildren && open) {
+			int child = firstChild[idx];
+			while (child >= 0) {
+				drawNode(child);
+				child = nextSibling[child];
+			}
+			ImGui::TreePop();
+		}
+	};
+
+	// Draw root nodes: Main(0), Interrupt(1), IRQ(2), VBI(3), DLI(4)
+	for (int i = 0; i < 5 && i < (int)numContexts; i++) {
+		drawNode(i);
+	}
+}
+
+// --- Phase 5: CSV Export ---
+static void ProfilerExportCSV() {
+	const char *home = getenv("HOME");
+	std::string path;
+	if (home) {
+		path = std::string(home) + "/.config/altirra/profile_export.csv";
+	} else {
+		path = "profile_export.csv";
+	}
+
+	std::ofstream f(path);
+	if (!f.is_open())
+		return;
+
+	bool hasC1 = (s_profilerC1 != kATProfileCounterMode_None);
+	bool hasC2 = (s_profilerC2 != kATProfileCounterMode_None);
+
+	// Header
+	f << "Context,Address,Symbol,Calls,Cycles,Cycles%,Insns,Insns%,CPU Cycles,DMA%,CPI";
+	if (hasC1) f << "," << kCounterModeNames[(int)s_profilerC1];
+	if (hasC2) f << "," << kCounterModeNames[(int)s_profilerC2];
+	f << "\n";
+
+	uint32 totalCycles = s_profilerMerged ? s_profilerMerged->mTotalCycles : 1;
+	uint32 totalInsns = s_profilerMerged ? s_profilerMerged->mTotalInsns : 1;
+	if (totalCycles == 0) totalCycles = 1;
+	if (totalInsns == 0) totalInsns = 1;
+
+	for (const ProfileEntry& e : s_profilerEntries) {
+		float cyclePct = (float)e.cycles * 100.0f / (float)totalCycles;
+		float insnPct = (float)e.insns * 100.0f / (float)totalInsns;
+		float dmaPct = e.cycles ? 100.0f * (1.0f - (float)e.unhaltedCycles / (float)e.cycles) : 0;
+		float cpi = e.insns ? (float)e.cycles / (float)e.insns : 0;
+
+		// Escape symbol for CSV
+		std::string sym = e.sym;
+		if (sym.find(',') != std::string::npos || sym.find('"') != std::string::npos) {
+			std::string escaped;
+			escaped += '"';
+			for (char c : sym) {
+				if (c == '"') escaped += '"';
+				escaped += c;
+			}
+			escaped += '"';
+			sym = escaped;
+		}
+
+		char addrStr[16];
+		snprintf(addrStr, sizeof(addrStr), "$%04X", e.addr);
+
+		f << ProfilerContextName(e.context) << ","
+		  << addrStr << ","
+		  << sym << ","
+		  << e.calls << ","
+		  << e.cycles << ","
+		  << std::fixed << std::setprecision(2) << cyclePct << ","
+		  << e.insns << ","
+		  << std::fixed << std::setprecision(2) << insnPct << ","
+		  << e.unhaltedCycles << ","
+		  << std::fixed << std::setprecision(1) << dmaPct << ","
+		  << std::fixed << std::setprecision(2) << cpi;
+		if (hasC1) f << "," << e.counters[0];
+		if (hasC2) f << "," << e.counters[1];
+		f << "\n";
+	}
+}
+
 static void DrawProfiler() {
 	if (!s_showProfiler)
 		return;
 
-	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(800, 550), ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin("Profiler", &s_showProfiler)) {
 		ImGui::End();
 		return;
@@ -2477,6 +2878,38 @@ static void DrawProfiler() {
 	}
 	ImGui::EndDisabled();
 
+	// --- Phase 4: Boundary rules (collapsible, disabled while recording) ---
+	ImGui::BeginDisabled(s_profilerRunning);
+	if (ImGui::CollapsingHeader("Options")) {
+		ImGui::Text("Frame Boundary:");
+		int rule = (int)s_profilerBoundaryRule;
+		if (ImGui::RadioButton("None", &rule, (int)kATProfileBoundaryRule_None))
+			s_profilerBoundaryRule = (ATProfileBoundaryRule)rule;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("VBlank", &rule, (int)kATProfileBoundaryRule_VBlank))
+			s_profilerBoundaryRule = (ATProfileBoundaryRule)rule;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("PC Address", &rule, (int)kATProfileBoundaryRule_PCAddress))
+			s_profilerBoundaryRule = (ATProfileBoundaryRule)rule;
+		ImGui::SameLine();
+		if (ImGui::RadioButton("PC Addr (Func Return)", &rule, (int)kATProfileBoundaryRule_PCAddressFunction))
+			s_profilerBoundaryRule = (ATProfileBoundaryRule)rule;
+
+		if (s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddress ||
+			s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddressFunction) {
+			ImGui::SetNextItemWidth(120);
+			ImGui::InputText("Address##boundary", s_profilerBoundaryAddr, sizeof(s_profilerBoundaryAddr));
+			if (s_profilerBoundaryRule == kATProfileBoundaryRule_PCAddress) {
+				ImGui::SameLine();
+				ImGui::SetNextItemWidth(120);
+				ImGui::InputText("End Addr##boundary2", s_profilerBoundaryAddr2, sizeof(s_profilerBoundaryAddr2));
+			}
+		}
+
+		ImGui::Checkbox("Global Addresses (65C816)", &s_profilerGlobalAddresses);
+	}
+	ImGui::EndDisabled();
+
 	// Start/Stop button
 	if (s_profilerRunning) {
 		if (ImGui::Button("Stop Profiling")) {
@@ -2490,32 +2923,79 @@ static void DrawProfiler() {
 		}
 	}
 
+	// Export CSV button
+	if (s_profilerHasData && !s_profilerRunning) {
+		ImGui::SameLine();
+		if (ImGui::Button("Export CSV")) {
+			ProfilerExportCSV();
+			extern void ATImGuiShowToast(const char *message);
+			ATImGuiShowToast("Profile exported to ~/.config/altirra/profile_export.csv");
+		}
+	}
+
 	// Summary line
 	if (s_profilerHasData && s_profilerMerged) {
 		uint32 frameCount = (uint32)s_profilerSession.mpFrames.size();
-		ImGui::Text("Frames: %u  |  Cycles: %u  |  Insns: %u  |  Entries: %u",
-			frameCount, s_profilerMerged->mTotalCycles, s_profilerMerged->mTotalInsns,
-			(uint32)s_profilerEntries.size());
+		if (s_profilerSelEnd - s_profilerSelStart < (int)frameCount && frameCount > 1)
+			ImGui::Text("Frames: %u (selected %d-%d)  |  Cycles: %u  |  Insns: %u  |  Entries: %u",
+				frameCount, s_profilerSelStart, s_profilerSelEnd - 1,
+				s_profilerMerged->mTotalCycles, s_profilerMerged->mTotalInsns,
+				(uint32)s_profilerEntries.size());
+		else
+			ImGui::Text("Frames: %u  |  Cycles: %u  |  Insns: %u  |  Entries: %u",
+				frameCount, s_profilerMerged->mTotalCycles, s_profilerMerged->mTotalInsns,
+				(uint32)s_profilerEntries.size());
+	}
+
+	// --- Phase 2: Timeline ---
+	if (s_profilerHasData) {
+		DrawProfilerTimeline();
 	}
 
 	ImGui::Separator();
 
-	// Results table
+	// --- Phase 3: Call Graph tree (when in call graph mode) ---
+	if (s_profilerHasData && s_profilerMode == kATProfileMode_CallGraph
+		&& s_profilerMerged && !s_profilerSession.mContexts.empty()) {
+		DrawProfilerCallGraphTree();
+		ImGui::Separator();
+	}
+
+	// --- Phase 1: Extended results table ---
 	if (s_profilerHasData && !s_profilerEntries.empty()) {
 		uint32 totalCycles = s_profilerMerged ? s_profilerMerged->mTotalCycles : 1;
+		uint32 totalInsns = s_profilerMerged ? s_profilerMerged->mTotalInsns : 1;
 		if (totalCycles == 0) totalCycles = 1;
+		if (totalInsns == 0) totalInsns = 1;
 
-		if (ImGui::BeginTable("##profresults", 5,
+		bool hasC1 = (s_profilerC1 != kATProfileCounterMode_None);
+		bool hasC2 = (s_profilerC2 != kATProfileCounterMode_None);
+		int numCols = 9; // Context, Addr, Symbol, Calls, Cycles, Insns, CPU Cyc, DMA%, CPI
+		if (hasC1) numCols++;
+		if (hasC2) numCols++;
+
+		// Reserve space for selection status bar below the table
+		float statusBarHeight = s_profilerSelectedRows.empty() ? 0 : ImGui::GetTextLineHeightWithSpacing() + 4;
+
+		if (ImGui::BeginTable("##profresults", numCols,
 			ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
 				| ImGuiTableFlags_Resizable | ImGuiTableFlags_Sortable
-				| ImGuiTableFlags_SizingStretchProp,
-			ImVec2(0, 0)))
+				| ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_Hideable,
+			ImVec2(0, -statusBarHeight)))
 		{
-			ImGui::TableSetupColumn("Address", ImGuiTableColumnFlags_DefaultSort, 1.0f);
+			ImGui::TableSetupColumn("Ctx", ImGuiTableColumnFlags_DefaultHide, 0.5f);
+			ImGui::TableSetupColumn("Address", 0, 1.0f);
 			ImGui::TableSetupColumn("Symbol", 0, 2.0f);
-			ImGui::TableSetupColumn("Calls", 0, 1.0f);
+			ImGui::TableSetupColumn("Calls", 0, 0.8f);
 			ImGui::TableSetupColumn("Cycles", ImGuiTableColumnFlags_DefaultSort | ImGuiTableColumnFlags_PreferSortDescending, 1.5f);
 			ImGui::TableSetupColumn("Insns", 0, 1.0f);
+			ImGui::TableSetupColumn("CPU Cyc", ImGuiTableColumnFlags_DefaultHide, 1.0f);
+			ImGui::TableSetupColumn("DMA%", ImGuiTableColumnFlags_DefaultHide, 0.7f);
+			ImGui::TableSetupColumn("CPI", ImGuiTableColumnFlags_DefaultHide, 0.6f);
+			if (hasC1)
+				ImGui::TableSetupColumn(kCounterModeNames[(int)s_profilerC1], ImGuiTableColumnFlags_DefaultHide, 0.8f);
+			if (hasC2)
+				ImGui::TableSetupColumn(kCounterModeNames[(int)s_profilerC2], ImGuiTableColumnFlags_DefaultHide, 0.8f);
 			ImGui::TableSetupScrollFreeze(0, 1);
 			ImGui::TableHeadersRow();
 
@@ -2535,39 +3015,116 @@ static void DrawProfiler() {
 			while (clipper.Step()) {
 				for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) {
 					const ProfileEntry& e = s_profilerEntries[row];
-					float pct = (float)e.cycles * 100.0f / (float)totalCycles;
+					float cyclePct = (float)e.cycles * 100.0f / (float)totalCycles;
+					float insnPct = (float)e.insns * 100.0f / (float)totalInsns;
+					float dmaPct = e.cycles ? 100.0f * (1.0f - (float)e.unhaltedCycles / (float)e.cycles) : 0;
+					float cpi = e.insns ? (float)e.cycles / (float)e.insns : 0;
 
 					ImGui::TableNextRow();
+
+					// Context column
 					ImGui::TableNextColumn();
+					bool isSelected = s_profilerSelectedRows.count(row) > 0;
 
-					char addrStr[16];
-					snprintf(addrStr, sizeof(addrStr), "$%04X", e.addr);
-					if (ImGui::Selectable(addrStr, false, ImGuiSelectableFlags_SpanAllColumns)) {
-						// Navigate disassembly to this address
-						s_disasmAddr = e.addr;
-						s_disasmFollowPC = false;
-						snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", e.addr);
-						s_showDisassembly = true;
+					// Row ID for selection
+					char rowId[32];
+					snprintf(rowId, sizeof(rowId), "##pr%d", row);
+
+					if (ImGui::Selectable(rowId, isSelected,
+						ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowOverlap)) {
+						if (ImGui::GetIO().KeyCtrl) {
+							// Ctrl+click: toggle
+							if (isSelected)
+								s_profilerSelectedRows.erase(row);
+							else
+								s_profilerSelectedRows.insert(row);
+						} else if (ImGui::GetIO().KeyShift && s_profilerLastClickedRow >= 0) {
+							// Shift+click: range select
+							int lo = std::min(s_profilerLastClickedRow, row);
+							int hi = std::max(s_profilerLastClickedRow, row);
+							for (int r = lo; r <= hi; r++)
+								s_profilerSelectedRows.insert(r);
+						} else {
+							// Plain click: single select + navigate
+							s_profilerSelectedRows.clear();
+							s_profilerSelectedRows.insert(row);
+							s_disasmAddr = e.addr;
+							s_disasmFollowPC = false;
+							snprintf(s_disasmAddrBuf, sizeof(s_disasmAddrBuf), "%04X", e.addr);
+							s_showDisassembly = true;
+						}
+						s_profilerLastClickedRow = row;
 					}
+					ImGui::SameLine();
+					ImGui::TextUnformatted(ProfilerContextName(e.context));
 
+					// Address
+					ImGui::TableNextColumn();
+					ImGui::Text("$%04X", e.addr);
+
+					// Symbol
 					ImGui::TableNextColumn();
 					if (!e.sym.empty())
 						ImGui::Text("%s", e.sym.c_str());
 					else
 						ImGui::TextDisabled("---");
 
+					// Calls
 					ImGui::TableNextColumn();
 					ImGui::Text("%u", e.calls);
 
+					// Cycles (with %)
 					ImGui::TableNextColumn();
-					ImGui::Text("%u (%.1f%%)", e.cycles, pct);
+					ImGui::Text("%u (%.1f%%)", e.cycles, cyclePct);
 
+					// Insns (with %)
 					ImGui::TableNextColumn();
-					ImGui::Text("%u", e.insns);
+					ImGui::Text("%u (%.1f%%)", e.insns, insnPct);
+
+					// CPU Cycles (unhalted)
+					ImGui::TableNextColumn();
+					ImGui::Text("%u", e.unhaltedCycles);
+
+					// DMA%
+					ImGui::TableNextColumn();
+					ImGui::Text("%.1f%%", dmaPct);
+
+					// CPI
+					ImGui::TableNextColumn();
+					ImGui::Text("%.2f", cpi);
+
+					// Counter 1
+					if (hasC1) {
+						ImGui::TableNextColumn();
+						ImGui::Text("%u", e.counters[0]);
+					}
+
+					// Counter 2
+					if (hasC2) {
+						ImGui::TableNextColumn();
+						ImGui::Text("%u", e.counters[1]);
+					}
 				}
 			}
 
 			ImGui::EndTable();
+		}
+
+		// --- Phase 6: Selection status bar ---
+		if (!s_profilerSelectedRows.empty()) {
+			uint64_t selCycles = 0, selInsns = 0;
+			for (int r : s_profilerSelectedRows) {
+				if (r >= 0 && r < (int)s_profilerEntries.size()) {
+					selCycles += s_profilerEntries[r].cycles;
+					selInsns += s_profilerEntries[r].insns;
+				}
+			}
+			float selCyclePct = (float)selCycles * 100.0f / (float)totalCycles;
+			float selInsnPct = (float)selInsns * 100.0f / (float)totalInsns;
+			ImGui::Text("Selected %d items: %llu cycles (%.1f%%), %llu insns (%.1f%%)",
+				(int)s_profilerSelectedRows.size(),
+				(unsigned long long)selCycles, selCyclePct,
+				(unsigned long long)selInsns, selInsnPct);
 		}
 	} else if (!s_profilerRunning) {
 		ImGui::TextDisabled("No profiling data. Click \"Start Profiling\" to begin.");
