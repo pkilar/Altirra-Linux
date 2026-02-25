@@ -1234,9 +1234,11 @@ static void DrawMenuBar() {
 
 		if (ImGui::MenuItem("Cold Reset", "Shift+F6")) {
 			g_sim.ColdReset();
+			g_sim.Resume();
 		}
 		if (ImGui::MenuItem("Warm Reset", "F6")) {
 			g_sim.WarmReset();
+			g_sim.Resume();
 		}
 
 		if (ImGui::BeginMenu("Console Switches")) {
@@ -1307,6 +1309,7 @@ static void DrawMenuBar() {
 					g_sim.UnloadAll();
 					g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
 					g_sim.ColdReset();
+					g_sim.Resume();
 					MRUAdd(path.c_str());
 					VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 					char msg[256];
@@ -2128,6 +2131,7 @@ static void DrawSystemConfig() {
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
 		g_sim.LoadROMs();
 		g_sim.ColdReset();
+		g_sim.Resume();
 	}
 
 	ImGui::End();
@@ -2542,6 +2546,7 @@ static void PollFileDialogFallback() {
 						g_sim.UnloadAll();
 						g_sim.Load(result.c_str(), kATMediaWriteMode_RO, nullptr);
 						g_sim.ColdReset();
+						g_sim.Resume();
 						MRUAdd(result.c_str());
 						ShowToast("Booted image");
 					} catch (const std::exception& e) { char m[512]; snprintf(m, sizeof(m), "Boot failed: %s", e.what()); ShowToast(m); }
@@ -2821,8 +2826,10 @@ static void DrawFirmwareManager() {
 		// Window just closed — reload ROMs if defaults were changed
 		if (s_fwDefaultsChanged) {
 			s_fwDefaultsChanged = false;
-			if (g_sim.LoadROMs())
+			if (g_sim.LoadROMs()) {
 				g_sim.ColdReset();
+				g_sim.Resume();
+			}
 		}
 		return;
 	}
@@ -5847,6 +5854,7 @@ void ATImGuiBootImage() {
 			g_sim.UnloadAll();
 			g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
 			g_sim.ColdReset();
+			g_sim.Resume();
 			MRUAdd(path.c_str());
 			VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 			char msg[256];
