@@ -1190,7 +1190,8 @@ int main(int argc, char *argv[]) {
 
 	// Init ImGui
 	g_pImGui = new ATImGuiManager;
-	if (!g_pImGui->Init(window, glContext)) {
+	VDStringA imguiConfigDir = VDTextWToU8(VDFileSplitPathLeft(g_settingsPath));
+	if (!g_pImGui->Init(window, glContext, imguiConfigDir.c_str())) {
 		fprintf(stderr, "Warning: ImGui init failed (continuing without debugger UI)\n");
 		delete g_pImGui;
 		g_pImGui = nullptr;

@@ -42,6 +42,7 @@ class ATIRQController;
 #include "simulator.h"
 #include "constants.h"
 #include "cassette.h"
+#include "disk.h"
 #include "diskinterface.h"
 #include <at/atio/diskfs.h>
 #include "cartridge.h"
@@ -394,6 +395,7 @@ static uint32 s_cartRecommendedIdx = 0;
 // Firmware manager state
 static vdvector<ATFirmwareInfo> s_fwList;
 static bool s_fwListDirty = true;
+static bool s_fwDefaultsChanged = false;
 static uint64 s_fwSelectedId = 0;
 static std::string s_fwScanResult;
 static bool s_fwShowScanResult = false;
@@ -851,6 +853,12 @@ static void TryMountDisk(int index, const VDStringW& path) {
 	try {
 		ATDiskInterface& di = g_sim.GetDiskInterface(index);
 		di.LoadDisk(path.c_str());
+
+		// Enable the built-in disk drive emulator if no external drive
+		// device is attached (matches ATSimulator::Load behavior)
+		if (di.GetClientCount() < 2)
+			g_sim.GetDiskDrive(index).SetEnabled(true);
+
 		VDStringA fname = VDTextWToU8(VDStringW(VDFileSplitPath(path.c_str())));
 		char msg[128];
 		snprintf(msg, sizeof(msg), "D%d: %s", index + 1, fname.c_str());
@@ -2094,6 +2102,7 @@ static void DrawSystemConfig() {
 	ImGui::Separator();
 
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
+		g_sim.LoadROMs();
 		g_sim.ColdReset();
 	}
 
@@ -2770,8 +2779,15 @@ static void FirmwareRefreshList() {
 }
 
 static void DrawFirmwareManager() {
-	if (!s_showFirmwareManager)
+	if (!s_showFirmwareManager) {
+		// Window just closed — reload ROMs if defaults were changed
+		if (s_fwDefaultsChanged) {
+			s_fwDefaultsChanged = false;
+			if (g_sim.LoadROMs())
+				g_sim.ColdReset();
+		}
 		return;
+	}
 
 	if (s_fwListDirty)
 		FirmwareRefreshList();
@@ -2995,8 +3011,10 @@ static void DrawFirmwareManager() {
 		if (ImGui::BeginCombo(comboId, currentName)) {
 			// Built-in option
 			if (ImGui::Selectable("Built-in HLE", currentDefault == 0)) {
-				if (fwMgr)
+				if (fwMgr) {
 					fwMgr->SetDefaultFirmware(def.type, 0);
+					s_fwDefaultsChanged = true;
+				}
 			}
 
 			// Matching firmware entries
@@ -3008,8 +3026,10 @@ static void DrawFirmwareManager() {
 				bool isSelected = (fw.mId == currentDefault);
 
 				if (ImGui::Selectable(u8name.c_str(), isSelected)) {
-					if (fwMgr)
+					if (fwMgr) {
 						fwMgr->SetDefaultFirmware(def.type, fw.mId);
+						s_fwDefaultsChanged = true;
+					}
 				}
 			}
 
