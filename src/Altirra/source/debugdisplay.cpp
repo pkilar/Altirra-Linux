@@ -662,5 +662,7 @@ void ATDebugDisplay::Update() {
 	}
 
 	mpGTIA->GetPalette(mPalette);
-	mpDisplay->SetSourcePersistent(true, mDisplayBuffer);
+
+	if (mpDisplay)
+		mpDisplay->SetSourcePersistent(true, mDisplayBuffer);
 }

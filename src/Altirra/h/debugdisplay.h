@@ -40,6 +40,8 @@ public:
 	void SetDLAddrOverride(sint32 addr) { mDLAddrOverride = addr; }
 	void SetPFAddrOverride(sint32 addr) { mPFAddrOverride = addr; }
 
+	const VDPixmapBuffer& GetFrameBuffer() const { return mDisplayBuffer; }
+
 	void Update();
 
 protected:
