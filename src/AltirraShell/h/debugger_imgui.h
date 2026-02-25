@@ -23,6 +23,7 @@ bool& ATImGuiDebuggerShowPrinterOutput();
 bool& ATImGuiDebuggerShowProfiler();
 bool& ATImGuiDebuggerShowTrace();
 bool& ATImGuiDebuggerShowDebugDisplay();
+bool& ATImGuiDebuggerShowPerformance();
 
 // Navigate source code window to a specific address (opens window if needed)
 void ATImGuiDebuggerNavigateSource(uint32 addr);

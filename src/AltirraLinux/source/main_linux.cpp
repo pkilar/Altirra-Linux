@@ -31,6 +31,7 @@
 #include <at/atcore/device.h>
 #include <at/atcore/asyncdispatcher.h>
 #include <at/atcore/media.h>
+#include <at/atcore/profile.h>
 #include <at/atcore/serializable.h>
 #include <at/ataudio/audiooutput.h>
 #include <at/atio/image.h>
@@ -1033,7 +1034,9 @@ static void RenderAndSwap(SDL_Window *window) {
 	g_pDisplay->SetPixelAspectRatio(g_sim.GetGTIA().GetPixelAspectRatio());
 
 	// Render emulation frame (upload texture + draw quad)
+	ATProfileBeginRegion(kATProfileRegion_DisplayTick);
 	g_pDisplay->RenderFrame();
+	ATProfileEndRegion(kATProfileRegion_DisplayTick);
 
 	// Auto-show overlay when debugger hits a breakpoint
 	if (g_pImGui && !g_pImGui->IsVisible() && ATImGuiDebuggerDidBreak()) {
@@ -1056,7 +1059,9 @@ static void RenderAndSwap(SDL_Window *window) {
 	}
 
 	// Single swap
+	ATProfileBeginRegion(kATProfileRegion_DisplayPresent);
 	SDL_GL_SwapWindow(window);
+	ATProfileEndRegion(kATProfileRegion_DisplayPresent);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1283,7 +1288,9 @@ int main(int argc, char *argv[]) {
 
 	// Main loop
 	while (g_running) {
+		ATProfileBeginRegion(kATProfileRegion_NativeEvents);
 		ProcessEvents(window);
+		ATProfileEndRegion(kATProfileRegion_NativeEvents);
 
 		// Auto-hide mouse cursor after idle period
 		if (ATUIGetPointerAutoHide() && !g_cursorHidden
@@ -1310,10 +1317,12 @@ int main(int argc, char *argv[]) {
 			dbg->Tick();
 
 		// Advance emulation with exception recovery
+		ATProfileBeginRegion(kATProfileRegion_Simulation);
 		ATSimulator::AdvanceResult result;
 		try {
 			result = g_sim.Advance(false);
 		} catch (const MyError& e) {
+			ATProfileEndRegion(kATProfileRegion_Simulation);
 			ATUIShowError(e);
 
 			// Cold reset to recover from broken emulation state
@@ -1323,6 +1332,7 @@ int main(int argc, char *argv[]) {
 			SDL_Delay(16);
 			continue;
 		} catch (const std::exception& e) {
+			ATProfileEndRegion(kATProfileRegion_Simulation);
 			ATUIShowError2(nullptr,
 				VDTextU8ToW(VDStringA(e.what())).c_str(),
 				L"Emulation Error");
@@ -1333,6 +1343,7 @@ int main(int argc, char *argv[]) {
 			SDL_Delay(16);
 			continue;
 		} catch (...) {
+			ATProfileEndRegion(kATProfileRegion_Simulation);
 			ATUIShowError2(nullptr,
 				L"An unknown error occurred during emulation.",
 				L"Emulation Error");
@@ -1343,8 +1354,10 @@ int main(int argc, char *argv[]) {
 			SDL_Delay(16);
 			continue;
 		}
+		ATProfileEndRegion(kATProfileRegion_Simulation);
 
 		if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
+			ATProfileMarkEvent(kATProfileEvent_BeginFrame);
 			RenderAndSwap(window);
 			g_debuggerAutoShowed = false;
 		} else if (result == ATSimulator::kAdvanceResult_Stopped) {
@@ -1357,15 +1370,21 @@ int main(int argc, char *argv[]) {
 				g_debuggerAutoShowed = true;
 			}
 
+			ATProfileMarkEvent(kATProfileEvent_BeginFrame);
 			RenderAndSwap(window);
+
+			ATProfileBeginRegion(kATProfileRegion_IdleFrameDelay);
 			SDL_Delay(16);
+			ATProfileEndRegion(kATProfileRegion_IdleFrameDelay);
 		} else if (result == ATSimulator::kAdvanceResult_Running) {
 			// Our display copies frame data in PostBuffer and immediately
 			// releases the frame, so the GTIA frame tracker never fills up
 			// and Advance() never yields WaitingForFrame. Render whenever
 			// the display has a new frame ready.
-			if (g_pDisplay && g_pDisplay->IsFramePending())
+			if (g_pDisplay && g_pDisplay->IsFramePending()) {
+				ATProfileMarkEvent(kATProfileEvent_BeginFrame);
 				RenderAndSwap(window);
+			}
 			g_debuggerAutoShowed = false;
 		}
 	}

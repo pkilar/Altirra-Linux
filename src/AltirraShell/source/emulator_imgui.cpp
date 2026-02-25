@@ -2000,6 +2000,7 @@ static void DrawMenuBar() {
 			ImGui::Separator();
 			ImGui::MenuItem("Trace Viewer", nullptr, &ATImGuiDebuggerShowTrace());
 			ImGui::MenuItem("Debug Display", nullptr, &ATImGuiDebuggerShowDebugDisplay());
+			ImGui::MenuItem("Performance", nullptr, &ATImGuiDebuggerShowPerformance());
 			ImGui::EndMenu();
 		}
 
