@@ -1,6 +1,8 @@
 #include <stdafx.h>
 
+#ifdef VD_PLATFORM_WINDOWS
 #define INITGUID
+#endif
 
 #include <numeric>
 
@@ -22,6 +24,10 @@
 #include <at/ataudio/audiofilters.h>
 #include <at/ataudio/audiooutput.h>
 
+#ifndef VD_PLATFORM_WINDOWS
+#include <zlib.h>
+#endif
+
 #if defined(VD_CPU_X86) || defined(VD_CPU_AMD64)
 	#include <at/atcore/intrin_sse2.h>
 #elif defined(VD_CPU_ARM64)
@@ -32,8 +38,10 @@
 #include "videowriter.h"
 #include "aviwriter.h"
 #include "gtia.h"
+
 #include "uirender.h"
 
+#ifdef VD_PLATFORM_WINDOWS
 #include <vd2/system/w32assist.h>
 
 #include <windows.h>
@@ -43,6 +51,7 @@
 #include <mfreadwrite.h>
 #include <mftransform.h>
 #include <uuids.h>
+#endif
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -407,6 +416,7 @@ void ATVideoEncoderRLE::CompressInter8(bool encodeAll) {
 class ATVideoEncoderZMBV : public IATVideoEncoder {
 public:
 	ATVideoEncoderZMBV(uint32 w, uint32 h, bool rgb32);
+	~ATVideoEncoderZMBV();
 	void Compress(const VDPixmap& px, bool intra, bool encodeAll) override;
 
 	uint32 GetEncodedLength() const override { return mEncodedLength; }
@@ -450,12 +460,20 @@ protected:
 
 	VDPixmapLayout	mLayout;
 
+#ifdef VD_PLATFORM_WINDOWS
 	VDMemoryBufferStream mDeflateOutputBuffer;
 	VDDeflateStream mDeflateStream;
+#else
+	z_stream mZStream {};
+	bool mZStreamInited = false;
+	vdfastvector<uint8> mZOutputBuffer;
+#endif
 };
 
 ATVideoEncoderZMBV::ATVideoEncoderZMBV(uint32 w, uint32 h, bool rgb32)
+#ifdef VD_PLATFORM_WINDOWS
 	: mDeflateStream(mDeflateOutputBuffer, VDDeflateChecksumMode::None, VDDeflateCompressionLevel::Quick)
+#endif
 {
 	mWidth = w;
 	mHeight = h;
@@ -490,6 +508,22 @@ ATVideoEncoderZMBV::ATVideoEncoderZMBV(uint32 w, uint32 h, bool rgb32)
 	MotionVector v0 = { 0, 0 };
 	mVecBuffer.resize(blkw * (blkh + 1) + 1, v0);
 	mVecBufferPrev.resize(blkw * (blkh + 1) + 1, v0);
+
+#ifndef VD_PLATFORM_WINDOWS
+	mZStream.zalloc = Z_NULL;
+	mZStream.zfree = Z_NULL;
+	mZStream.opaque = Z_NULL;
+	if (deflateInit(&mZStream, Z_BEST_SPEED) == Z_OK)
+		mZStreamInited = true;
+	mZOutputBuffer.resize(rgb32 ? w * h * 8 : w * h * 2);
+#endif
+}
+
+ATVideoEncoderZMBV::~ATVideoEncoderZMBV() {
+#ifndef VD_PLATFORM_WINDOWS
+	if (mZStreamInited)
+		deflateEnd(&mZStream);
+#endif
 }
 
 void ATVideoEncoderZMBV::Compress(const VDPixmap& px, bool intra, bool encodeAll) {
@@ -583,11 +617,12 @@ void ATVideoEncoderZMBV::CompressIntra8(const VDPixmap& px) {
 	}
 
 	// zlib compress frame
+#ifdef VD_PLATFORM_WINDOWS
 	static constexpr uint8 kZlibHeader[2] {
 		0x78,	// 32K window, Deflate
 		0xDA,	// maximum compression, no dictionary, check offset = 0x1A
 	};
-	
+
 	mDeflateOutputBuffer.Clear();
 	mDeflateOutputBuffer.Write(kZlibHeader, 2);
 
@@ -604,6 +639,24 @@ void ATVideoEncoderZMBV::CompressIntra8(const VDPixmap& px) {
 	}
 
 	memcpy(base, zdata.data(), zdataLen);
+#else
+	// Use system zlib for ZMBV compression (compatible with ffmpeg/VLC decoders)
+	deflateReset(&mZStream);
+	uint32 uncompressedLen = (uint32)(dst - base);
+	mZStream.next_in = (Bytef *)base;
+	mZStream.avail_in = uncompressedLen;
+	mZStream.next_out = (Bytef *)mZOutputBuffer.data();
+	mZStream.avail_out = (uInt)mZOutputBuffer.size();
+	deflate(&mZStream, Z_SYNC_FLUSH);
+	size_t zdataLen = mZOutputBuffer.size() - mZStream.avail_out;
+
+	if (mPackBuffer.size() < zdataLen + 8) {
+		mPackBuffer.resize(zdataLen + 8);
+		base = mPackBuffer.data() + 8;
+	}
+
+	memcpy(base, mZOutputBuffer.data(), zdataLen);
+#endif
 
 	// write frame
 	mEncodedLength = zdataLen + 7;
@@ -1171,6 +1224,7 @@ void ATVideoEncoderZMBV::CompressInter8(bool encodeAll) {
 	}
 
 	// zlib compress frame
+#ifdef VD_PLATFORM_WINDOWS
 	mDeflateOutputBuffer.Clear();
 	mDeflateStream.Write(base, dst - base);
 	mDeflateStream.FlushToByteBoundary();
@@ -1184,6 +1238,22 @@ void ATVideoEncoderZMBV::CompressInter8(bool encodeAll) {
 	}
 
 	memcpy(base, zdata.data(), zdataLen);
+#else
+	uint32 uncompressedLen = (uint32)(dst - base);
+	mZStream.next_in = (Bytef *)base;
+	mZStream.avail_in = uncompressedLen;
+	mZStream.next_out = (Bytef *)mZOutputBuffer.data();
+	mZStream.avail_out = (uInt)mZOutputBuffer.size();
+	deflate(&mZStream, Z_SYNC_FLUSH);
+	size_t zdataLen = mZOutputBuffer.size() - mZStream.avail_out;
+
+	if (mPackBuffer.size() - (mEncodedOffset + 1) < zdataLen) {
+		mPackBuffer.resize(zdataLen + mEncodedOffset + 1);
+		base = mPackBuffer.data() + mEncodedOffset + 1;
+	}
+
+	memcpy(base, mZOutputBuffer.data(), zdataLen);
+#endif
 
 	// write frame
 	mEncodedLength = zdataLen + 1;
@@ -1431,6 +1501,8 @@ bool ATAVIEncoder::Finalize(MyError& error) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+
+#ifdef VD_PLATFORM_WINDOWS
 
 class ATMFSampleAllocatorW32 final : public IMFSinkWriterCallback {
 public:
@@ -2848,6 +2920,8 @@ void ATMediaFoundationEncoderW32::EndAudioFrame() {
 	mpAudioDstEnd = nullptr;
 }
 
+#endif // VD_PLATFORM_WINDOWS
+
 ///////////////////////////////////////////////////////////////////////////////
 
 class ATVideoWriter final : public IATVideoWriter, public IATGTIAVideoTap, public IATAudioTap {
@@ -3016,6 +3090,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 	
 	bool useYUV = false;
 
+#ifdef VD_PLATFORM_WINDOWS
 	switch(venc) {
 		case kATVideoEncoding_WMV7:
 		case kATVideoEncoding_WMV9:
@@ -3027,6 +3102,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		default:
 			break;
 	}
+#endif
 
 	if (useYUV) {
 		// Ensure even/odd frame size for 4:2:0 since odd support is not guaranteed in MF (much less defined, really).
@@ -3064,7 +3140,7 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		const float dstyf = ((float)frameh - dsthf) * 0.5f;
 		vdrect32f dstrect(dstxf, dstyf, (float)framew - dstxf, (float)frameh - dstyf);
 
-		IVDPixmapResampler::FilterMode filterMode;
+		IVDPixmapResampler::FilterMode filterMode = IVDPixmapResampler::kFilterPoint;
 		switch(resamplingMode) {
 			case ATVideoRecordingResamplingMode::Nearest:
 				filterMode = IVDPixmapResampler::kFilterPoint;
@@ -3103,12 +3179,14 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 			mpMediaEncoder = new ATAVIEncoder(filename, venc, w, h, encodingFrameRate, palette, samplingRate, stereo, encodeAllFrames);
 			break;
 
+#ifdef VD_PLATFORM_WINDOWS
 		case kATVideoEncoding_WMV7:
 		case kATVideoEncoding_WMV9:
 		case kATVideoEncoding_H264_AAC:
 		case kATVideoEncoding_H264_MP3:
 			mpMediaEncoder = new ATMediaFoundationEncoderW32(filename, venc, videoBitRate, audioBitRate, w, h, encodingFrameRate, palette, samplingRate, stereo, useYUV);
 			break;
+#endif
 
 		default:
 			throw MyError("Unimplemented compression mode.");

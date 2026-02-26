@@ -5,6 +5,7 @@
 
 find_package(SDL2 REQUIRED)
 find_package(OpenGL REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # Collect all Altirra source files
 file(GLOB ALTIRRA_ALL_SOURCES
@@ -203,7 +204,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"startuplogger.cpp"
 	"texteditor.cpp"
 	"tracenative.cpp"
-	"videowriter.cpp"
 )
 
 # Build the filtered source list
@@ -293,6 +293,7 @@ target_link_libraries(altirra
 		# External libraries
 		SDL2::SDL2
 		OpenGL::GL
+		ZLIB::ZLIB
 
 		# System libraries
 		pthread

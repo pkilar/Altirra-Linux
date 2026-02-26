@@ -61,6 +61,9 @@ struct ATImGuiIndicatorState {
 	char mModemConnection[32] = {};    // Modem connection string (e.g., "9600", "RING")
 	uint8 mCartridgeActivityCounter = 0; // Cartridge bank-switch flash countdown (0-20)
 	uint32 mDiskLEDFlags = 0;          // Per-drive LED ready state (bit 0 = D1)
+	float mRecordingTime = -1.0f;      // Video recording elapsed time (-1 = not recording)
+	sint64 mRecordingSize = 0;         // Video recording file size in bytes
+	bool mbRecordingPaused = false;    // Video recording paused state
 };
 
 ATImGuiIndicatorState& ATImGuiGetIndicatorState();
