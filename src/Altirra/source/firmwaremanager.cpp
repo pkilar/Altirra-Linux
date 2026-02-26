@@ -31,6 +31,7 @@
 #include "resource.h"
 
 bool g_ATFirmwarePathPortabilityEnabled;
+static VDStringW g_ATFirmwareBasePath;
 
 static constexpr const char *kATFirmwareTypeNames[]={
 	"",
@@ -169,10 +170,54 @@ void ATSetFirmwarePathPortabilityMode(bool portable) {
 	g_ATFirmwarePathPortabilityEnabled = portable;
 }
 
+void ATSetFirmwareBasePath(const wchar_t *path) {
+	g_ATFirmwareBasePath = path;
+	if (!g_ATFirmwareBasePath.empty() && g_ATFirmwareBasePath.back() != L'/')
+		g_ATFirmwareBasePath += L'/';
+}
+
+const VDStringW& ATGetFirmwareBasePath() {
+	return g_ATFirmwareBasePath;
+}
+
+// Sanitize a relative path: strip ".." components to prevent escaping the base path.
+// If the result is empty (all components were ".."), return just the filename.
+static VDStringW SanitizeFirmwarePath(const VDStringW& relPath) {
+	vdvector<VDStringW> components;
+	const wchar_t *p = relPath.c_str();
+	const wchar_t *end = p + relPath.size();
+
+	while (p < end) {
+		const wchar_t *sep = p;
+		while (sep < end && *sep != L'/' && *sep != L'\\')
+			++sep;
+
+		VDStringW component(p, (uint32)(sep - p));
+		p = sep < end ? sep + 1 : sep;
+
+		if (component == L".." || component == L".")
+			continue;
+		if (!component.empty())
+			components.push_back(std::move(component));
+	}
+
+	if (components.empty())
+		return VDStringW();
+
+	VDStringW result;
+	for (size_t i = 0; i < components.size(); ++i) {
+		if (i > 0)
+			result += L'/';
+		result += components[i];
+	}
+	return result;
+}
+
 uint64 ATGetFirmwareIdFromPath(const wchar_t *path) {
 	VDStringW relPath;
 	if (!VDFileIsRelativePath(path)) {
-		relPath = VDFileGetRelativePath(VDGetProgramPath().c_str(), path, g_ATFirmwarePathPortabilityEnabled);
+		const VDStringW& basePath = g_ATFirmwareBasePath.empty() ? VDGetProgramPath() : g_ATFirmwareBasePath;
+		relPath = VDFileGetRelativePath(basePath.c_str(), path, g_ATFirmwarePathPortabilityEnabled);
 
 		if (!relPath.empty())
 			path = relPath.c_str();
@@ -447,8 +492,14 @@ bool ATFirmwareManager::GetFirmwareInfo(uint64 id, ATFirmwareInfo& fwinfo) const
 		if (!key.getString("Path", fwinfo.mPath))
 			return false;
 
-		if (VDFileIsRelativePath(fwinfo.mPath.c_str()))
-			fwinfo.mPath = VDMakePath(VDGetProgramPath().c_str(), fwinfo.mPath.c_str());
+		if (VDFileIsRelativePath(fwinfo.mPath.c_str())) {
+			const VDStringW& basePath = g_ATFirmwareBasePath.empty() ? VDGetProgramPath() : g_ATFirmwareBasePath;
+			VDStringW sanitized = SanitizeFirmwarePath(fwinfo.mPath);
+			if (sanitized.empty())
+				fwinfo.mPath = VDMakePath(basePath.c_str(), fwinfo.mPath.c_str());
+			else
+				fwinfo.mPath = VDMakePath(basePath.c_str(), sanitized.c_str());
+		}
 
 		if (!key.getString("Name", fwinfo.mName))
 			return false;
@@ -770,8 +821,8 @@ void ATFirmwareManager::AddFirmware(const ATFirmwareInfo& info) {
 	VDRegistryAppKey key(name.c_str());
 	key.setString("Name", info.mName.c_str());
 
-	const VDStringW& programPath = VDGetProgramPath();
-	const VDStringW& relPath = VDFileGetRelativePath(programPath.c_str(), info.mPath.c_str(), g_ATFirmwarePathPortabilityEnabled);
+	const VDStringW& basePath = g_ATFirmwareBasePath.empty() ? VDGetProgramPath() : g_ATFirmwareBasePath;
+	const VDStringW& relPath = VDFileGetRelativePath(basePath.c_str(), info.mPath.c_str(), g_ATFirmwarePathPortabilityEnabled);
 	const VDStringW *path = relPath.empty() ? &info.mPath : &relPath;
 
 	key.setString("Path", path->c_str());
