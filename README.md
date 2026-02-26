@@ -25,7 +25,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Audio**: SDL2 audio output with POKEY emulation
 - **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
 - **UI**: Full Dear ImGui interface with menus, dialogs, and configuration
-- **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, console, hardware register inspection, and CPU target switching
+- **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
 - **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
 - **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
 - **Settings**: Portable INI-based configuration at `~/.config/altirra/Altirra.ini`
@@ -161,24 +161,19 @@ Settings are stored in `~/.config/altirra/Altirra.ini` by default. All emulator 
 
 ## Port Status
 
-The Linux port is approximately **98% complete** relative to the Windows version.
+The Linux port is approximately **99% complete** relative to the Windows version.
 
 ### Fully Functional
 
 - Complete emulation core (all CPUs, chips, peripherals, disk/cassette/cartridge)
 - Full ImGui UI with all configuration dialogs
-- Integrated debugger with 9+ tool windows
+- Integrated debugger with 12+ tool windows
 - Disk explorer with filesystem operations
 - Input mapping with binding editor
 - Save states (quick save/load and file-based)
 - Audio/video recording
 - Network emulation (socket layer with epoll)
 - Firmware discovery and management
-
-### Not Implemented
-
-- **Profiler/performance views** — Windows has a rich profiler UI (timeline, source pane, stats tree) used primarily by Atari developers. This is a significant standalone feature planned for a future effort.
-- **ATUICommandManager** — Windows command dispatch system; all commands are accessible through ImGui menus instead.
 
 ### Intentionally Disabled
 

@@ -1332,16 +1332,21 @@ namespace {
 		}
 
 		void FastWrite(const void *data, uint32 bytes) override {
-			if (mFD < 0) return;
-			const uint8 *p = (const uint8 *)data;
+			if (mFD < 0 || bytes == 0) return;
+			// Handle NULL data as zero-padding (used for AVI chunk alignment)
+			const uint8 zeroBuf[8] = {0};
+			const uint8 *p = data ? (const uint8 *)data : zeroBuf;
 			uint32 remaining = bytes;
 			while (remaining > 0) {
-				ssize_t written = ::write(mFD, p, remaining);
+				uint32 toWrite = remaining;
+				if (!data && toWrite > sizeof(zeroBuf))
+					toWrite = sizeof(zeroBuf);
+				ssize_t written = ::write(mFD, p, toWrite);
 				if (written < 0) {
 					if (errno == EINTR) continue;
 					throw MyWin32Error("Write error: %%s", errno);
 				}
-				p += written;
+				if (data) p += written;
 				remaining -= (uint32)written;
 			}
 			mFastWritePos += bytes;
