@@ -1136,6 +1136,7 @@ int main(int argc, char *argv[]) {
 
 	// Set up firmware search paths
 	VDStringW configDir = ATGetLinuxConfigDir();
+	ATSetFirmwareBasePath(configDir.c_str());
 	ATScanLinuxFirmwarePaths(configDir);
 
 	// Add user-specified ROM path

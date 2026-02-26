@@ -155,6 +155,9 @@ struct ATFirmwareInfo {
 
 void ATSetFirmwarePathPortabilityMode(bool portable);
 
+void ATSetFirmwareBasePath(const wchar_t *path);
+const VDStringW& ATGetFirmwareBasePath();
+
 const char *ATGetFirmwareTypeName(ATFirmwareType type);
 ATFirmwareType ATGetFirmwareTypeFromName(const char *type);
 uint64 ATGetFirmwareIdFromPath(const wchar_t *path);
