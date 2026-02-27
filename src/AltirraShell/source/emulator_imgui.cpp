@@ -147,18 +147,22 @@ static std::string s_devEditTag;
 
 // ============= Device config descriptor system =============
 
-enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect, IntInput };
+enum class DevCfgType { Checkbox, IntDropdown, StringEdit, PathSelect, IntInput, FloatInput, BitfieldCheckbox, CompoundIntDropdown };
 
 struct DevCfgChoice { int value; const char *name; };
+struct DevCfgCompoundPair { uint32 val1; uint32 val2; };
 
 struct DevCfgControl {
 	DevCfgType type;
-	const char *propKey;       // property key in ATPropertySet
+	const char *propKey;       // property key in ATPropertySet; for CompoundIntDropdown: first key
 	const char *label;         // display label
-	const DevCfgChoice *choices; // for dropdown (null-terminated by name==nullptr)
+	const DevCfgChoice *choices; // for dropdown/bitfield choices
 	int choiceCount;
-	bool defaultBool;          // for checkbox
-	const char *browseTitle;   // for path select
+	bool defaultBool;          // for checkbox; for CompoundIntDropdown: true=store as bools
+	const char *browseTitle;   // for path select; for CompoundIntDropdown: second property key
+	// Extended fields (zero-initialized for existing controls via aggregate init)
+	const DevCfgCompoundPair *pairs;       // CompoundIntDropdown: value pair lookup
+	float floatMin, floatMax, floatDefault; // FloatInput: range and default
 };
 
 struct DevCfgDescriptor {
@@ -250,13 +254,18 @@ static const DevCfgChoice kSoundBoardBaseChoices[] = {
 	{0xD280, "$D280"}, {0xD2C0, "$D2C0"}, {0xD600, "$D600"}, {0xD700, "$D700"},
 };
 
-static const DevCfgChoice kCovoxBaseChoices[] = {
-	{0xD100, "$D100"}, {0xD280, "$D280"}, {0xD500, "$D500"},
-	{0xD600, "$D600"}, {0xD700, "$D700"},
+static const DevCfgChoice kCovoxRangeChoices[] = {
+	{0, "$D100, 256 bytes"},
+	{1, "$D280, 128 bytes"},
+	{2, "$D500, 256 bytes"},
+	{3, "$D600, 64 bytes"},
+	{4, "$D600, 256 bytes"},
+	{5, "$D700, 256 bytes"},
 };
 
-static const DevCfgChoice kCovoxSizeChoices[] = {
-	{0x40, "$40 (64 bytes)"}, {0x80, "$80 (128 bytes)"}, {0x100, "$100 (256 bytes)"},
+static const DevCfgCompoundPair kCovoxRangeValues[] = {
+	{0xD100, 0x100}, {0xD280, 0x80}, {0xD500, 0x100},
+	{0xD600, 0x40}, {0xD600, 0x100}, {0xD700, 0x100},
 };
 
 static const DevCfgChoice kCovoxChannelChoices[] = {
@@ -290,6 +299,16 @@ static const DevCfgChoice kBBRamSizeChoices[] = {
 	{8, "8K"}, {32, "32K"}, {64, "64K"},
 };
 
+static const DevCfgChoice kBBDipSwitchBits[] = {
+	{0x01, "SW1: Ignore printer fault"},
+	{0x02, "SW2: Enable HD + high-speed SIO"},
+	{0x04, "SW3: Enable printer port"},
+	{0x08, "SW4: Enable RS232 port"},
+	{0x10, "SW5: Enable printer linefeeds"},
+	{0x20, "SW6: ProWriter printer mode"},
+	{0x40, "SW7: MIO compatibility mode"},
+};
+
 static const DevCfgChoice kBBFloppySlotChoices[] = {
 	{0, "Not Connected"}, {1, "D1:"}, {2, "D2:"}, {3, "D3:"}, {4, "D4:"},
 	{5, "D5:"}, {6, "D6:"}, {7, "D7:"}, {8, "D8:"}, {9, "D9:"},
@@ -316,6 +335,18 @@ static const DevCfgChoice kATR8000DriveTypeChoices[] = {
 
 static const DevCfgChoice kPercomDriveTypeChoices[] = {
 	{0, "None"}, {1, "5.25\" (40 track)"}, {2, "5.25\" (80 track)"},
+};
+
+static const DevCfgChoice kPercomATFDCChoices[] = {
+	{0, "1771+1791 (DD capable)"},
+	{1, "1771+1795 (DD, side compare)"},
+	{2, "1771 only (SD only)"},
+};
+
+static const DevCfgCompoundPair kPercomATFDCValues[] = {
+	{0, 1},  // use1795=false, ddcapable=true
+	{1, 1},  // use1795=true, ddcapable=true
+	{0, 0},  // use1795=false, ddcapable=false
 };
 
 static const DevCfgChoice kAMDCDriveTypeChoices[] = {
@@ -414,6 +445,7 @@ static const DevCfgControl kCfgDiskDriveFull[] = {
 static const DevCfgControl kCfgDiskDriveHappy810[] = {
 	{ DevCfgType::IntDropdown, "id", "Drive ID", kDriveIDChoices, 4, false, nullptr },
 	{ DevCfgType::Checkbox, "autospeed", "Auto-Speed", nullptr, 0, false, nullptr },
+	{ DevCfgType::FloatInput, "autospeedrate", "Auto-Speed Rate (RPM)", nullptr, 0, false, nullptr, nullptr, 200.0f, 400.0f, 266.0f },
 };
 
 static const DevCfgControl kCfgDiskDrive815[] = {
@@ -427,8 +459,7 @@ static const DevCfgControl kCfgSoundBoard[] = {
 };
 
 static const DevCfgControl kCfgCovox[] = {
-	{ DevCfgType::IntDropdown, "base", "Base Address", kCovoxBaseChoices, 5, false, nullptr },
-	{ DevCfgType::IntDropdown, "size", "Address Size", kCovoxSizeChoices, 3, false, nullptr },
+	{ DevCfgType::CompoundIntDropdown, "base", "Address Range", kCovoxRangeChoices, 6, false, "size", kCovoxRangeValues },
 	{ DevCfgType::IntDropdown, "channels", "Channels", kCovoxChannelChoices, 2, false, nullptr },
 };
 
@@ -476,7 +507,7 @@ static const DevCfgControl kCfgPipeSerial[] = {
 };
 
 static const DevCfgControl kCfgBlackBox[] = {
-	{ DevCfgType::IntInput, "dipsw", "DIP Switches (0-255)", nullptr, 0, false, nullptr },
+	{ DevCfgType::BitfieldCheckbox, "dipsw", "DIP Switches", kBBDipSwitchBits, 7, false, nullptr },
 	{ DevCfgType::IntDropdown, "blksize", "Sector Size", kBlkSizeChoices, 2, false, nullptr },
 	{ DevCfgType::IntDropdown, "ramsize", "RAM Size", kBBRamSizeChoices, 3, false, nullptr },
 };
@@ -514,8 +545,7 @@ static const DevCfgControl kCfgDiskDrivePercom[] = {
 };
 
 static const DevCfgControl kCfgDiskDrivePercomAT[] = {
-	{ DevCfgType::Checkbox, "use1795", "Use 1795 FDC (Side Compare Always On)", nullptr, 0, false, nullptr },
-	{ DevCfgType::Checkbox, "ddcapable", "Double Density Capable", nullptr, 0, true, nullptr },
+	{ DevCfgType::CompoundIntDropdown, "use1795", "FDC Type", kPercomATFDCChoices, 3, true, "ddcapable", kPercomATFDCValues },
 	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
 	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
 	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
@@ -710,6 +740,78 @@ static bool DrawStructuredDeviceConfig(ATPropertySet& props, const DevCfgTagMapp
 					if (val < 0) val = 0;
 					props.SetUint32(ctrl.propKey, (uint32)val);
 					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::FloatInput: {
+				float val = props.GetFloat(ctrl.propKey, ctrl.floatDefault);
+				ImGui::SetNextItemWidth(150);
+				if (ImGui::SliderFloat(ctrl.label, &val, ctrl.floatMin, ctrl.floatMax, "%.1f")) {
+					props.SetFloat(ctrl.propKey, val);
+					changed = true;
+				}
+				break;
+			}
+
+			case DevCfgType::BitfieldCheckbox: {
+				uint32 val = props.GetUint32(ctrl.propKey, 0);
+				ImGui::Text("%s", ctrl.label);
+				ImGui::Indent();
+				for (int j = 0; j < ctrl.choiceCount; j++) {
+					uint32 bit = (uint32)ctrl.choices[j].value;
+					bool bitSet = (val & bit) != 0;
+					if (ImGui::Checkbox(ctrl.choices[j].name, &bitSet)) {
+						if (bitSet)
+							val |= bit;
+						else
+							val &= ~bit;
+						props.SetUint32(ctrl.propKey, val);
+						changed = true;
+					}
+				}
+				ImGui::Unindent();
+				break;
+			}
+
+			case DevCfgType::CompoundIntDropdown: {
+				const char *propKey2 = ctrl.browseTitle; // second property key
+				uint32 val1, val2;
+				if (ctrl.defaultBool) {
+					val1 = props.GetBool(ctrl.propKey, false) ? 1 : 0;
+					val2 = props.GetBool(propKey2, false) ? 1 : 0;
+				} else {
+					val1 = props.GetUint32(ctrl.propKey, 0);
+					val2 = props.GetUint32(propKey2, 0);
+				}
+
+				// Find current selection by matching both values
+				int selIdx = 0;
+				for (int j = 0; j < ctrl.choiceCount; j++) {
+					if (ctrl.pairs[j].val1 == val1 && ctrl.pairs[j].val2 == val2) {
+						selIdx = j;
+						break;
+					}
+				}
+
+				ImGui::SetNextItemWidth(250);
+				if (ImGui::BeginCombo(ctrl.label, ctrl.choices[selIdx].name)) {
+					for (int j = 0; j < ctrl.choiceCount; j++) {
+						bool selected = (j == selIdx);
+						if (ImGui::Selectable(ctrl.choices[j].name, selected)) {
+							if (ctrl.defaultBool) {
+								props.SetBool(ctrl.propKey, ctrl.pairs[j].val1 != 0);
+								props.SetBool(propKey2, ctrl.pairs[j].val2 != 0);
+							} else {
+								props.SetUint32(ctrl.propKey, ctrl.pairs[j].val1);
+								props.SetUint32(propKey2, ctrl.pairs[j].val2);
+							}
+							changed = true;
+						}
+						if (selected)
+							ImGui::SetItemDefaultFocus();
+					}
+					ImGui::EndCombo();
 				}
 				break;
 			}
