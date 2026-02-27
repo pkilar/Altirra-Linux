@@ -173,7 +173,7 @@ Settings are stored in `~/.config/altirra/Altirra.ini` by default. All emulator 
 
 ## Port Status
 
-The Linux port is approximately **99.5% complete** relative to the Windows version.
+The Linux port is approximately **99.8% complete** relative to the Windows version.
 
 ### Fully Functional
 
