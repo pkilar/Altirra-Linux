@@ -64,6 +64,8 @@ struct ATImGuiIndicatorState {
 	float mRecordingTime = -1.0f;      // Video recording elapsed time (-1 = not recording)
 	sint64 mRecordingSize = 0;         // Video recording file size in bytes
 	bool mbRecordingPaused = false;    // Video recording paused state
+	uint8 mLedStatus = 0;             // LED mask (bit 0 = L1, bit 1 = L2) — 1200XL only
+	double mCyclesPerSecond = 0.0;    // CPU master clock rate
 };
 
 ATImGuiIndicatorState& ATImGuiGetIndicatorState();

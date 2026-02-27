@@ -2313,6 +2313,20 @@ static void DrawStatusBar() {
 
 		ImGui::TextColored(ImVec4(0.8f, 0.8f, 1.0f, 1.0f), "%s %s", hwName, vsName);
 
+		// 1200XL LED indicators (only shown when active)
+		{
+			uint8 leds = ATImGuiGetIndicatorState().mLedStatus;
+			if (leds) {
+				ImGui::SameLine(0, 16);
+				if (leds & 1)
+					ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "L1");
+				if (leds & 2) {
+					ImGui::SameLine(0, 4);
+					ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "L2");
+				}
+			}
+		}
+
 		// Disk status with activity indicators
 		// Colors per drive (dim/bright pairs, matching Windows palette)
 		static const ImVec4 kDiskDim[8] = {

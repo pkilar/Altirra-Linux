@@ -865,8 +865,12 @@ public:
 	// IATUIRenderer — non-indicator methods remain no-ops
 	bool IsVisible() const override { return false; }
 	void SetVisible(bool) override {}
-	void SetCyclesPerSecond(double) override {}
-	void SetLedStatus(uint8) override {}
+	void SetCyclesPerSecond(double rate) override {
+		ATImGuiGetIndicatorState().mCyclesPerSecond = rate;
+	}
+	void SetLedStatus(uint8 mask) override {
+		ATImGuiGetIndicatorState().mLedStatus = mask;
+	}
 	void SetHeldButtonStatus(uint8) override {}
 	void SetPendingHoldMode(bool) override {}
 	void SetPendingHeldKey(int) override {}

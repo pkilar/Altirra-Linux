@@ -222,6 +222,38 @@ foreach(src ${ALTIRRA_ALL_SOURCES})
 	endif()
 endforeach()
 
+# Embed resource files from Altirra/res at configure time
+include(${CMAKE_SOURCE_DIR}/cmake/EmbedResources.cmake)
+embed_resources(
+	OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.cpp
+	RESOURCE_DIR ${CMAKE_SOURCE_DIR}/src/Altirra/res
+	STUFF
+		112 changes.txt
+		143 dbghelp.txt
+		164 about.txt
+		166 trackstep.pcm
+		167 DiskSpin.pcm
+		168 TrackStep2.pcm
+		169 menu_default.txt
+		201 TrackStep3.pcm
+		223 compatdb.atcpengine
+		225 romset.html
+		235 cmdhelp.txt
+		253 speaker-click.pcm
+		260 dbghelp-template.html
+		261 1030relay.pcm
+		264 printer-1029-pin.pcm
+		265 printer-1029-platen.pcm
+		266 printer-1029-retract.pcm
+		267 printer-1029-home.pcm
+		268 printer-1025-feed.pcm
+	PNG
+		231 traceViewerToolbar.png
+		233 profilerToolbar.png
+		237 warning.png
+		272 firmware.png
+)
+
 # Linux replacement implementations
 set(LINUX_SOURCES
 	source/main_linux.cpp
@@ -231,6 +263,7 @@ set(LINUX_SOURCES
 	source/modemtcp_linux.cpp
 	source/uikeyboard_linux.cpp
 	source/worker_linux.cpp
+	${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.cpp
 )
 
 # Build executable
