@@ -222,27 +222,86 @@ foreach(src ${ALTIRRA_ALL_SOURCES})
 	endif()
 endforeach()
 
-# Build ATDiskLoader128 with MADS at configure time (IDR_DISKLOADER128 = resource ID 150)
-set(DISKLOADER128_BIN "")
+# Build firmware ROMs with MADS at configure time
 find_program(MADS_EXECUTABLE mads)
-if(MADS_EXECUTABLE)
-	set(DISKLOADER128_BIN "${CMAKE_CURRENT_BINARY_DIR}/atdiskloader128.bin")
-	execute_process(
-		COMMAND ${MADS_EXECUTABLE} -d:MEMORY=128 -s -p -b:$0700
-				-o:${DISKLOADER128_BIN}
-				${CMAKE_SOURCE_DIR}/src/Kernel/source/ATDiskLoader/main.s
-		RESULT_VARIABLE MADS_RESULT
-		OUTPUT_VARIABLE MADS_OUTPUT
-		ERROR_VARIABLE MADS_ERROR
-	)
-	if(NOT MADS_RESULT EQUAL 0)
-		message(WARNING "MADS failed to assemble ATDiskLoader128: ${MADS_ERROR}")
-		set(DISKLOADER128_BIN "")
-	else()
-		message(STATUS "Assembled ATDiskLoader128 -> ${DISKLOADER128_BIN}")
+
+# Helper macro to assemble a single ROM with MADS
+macro(mads_assemble OUTPUT_VAR OUTPUT_NAME)
+	set(${OUTPUT_VAR} "")
+	if(MADS_EXECUTABLE)
+		set(${OUTPUT_VAR} "${CMAKE_CURRENT_BINARY_DIR}/${OUTPUT_NAME}")
+		execute_process(
+			COMMAND ${MADS_EXECUTABLE} ${ARGN}
+					-o:${${OUTPUT_VAR}}
+			RESULT_VARIABLE _MADS_RESULT
+			OUTPUT_VARIABLE _MADS_OUTPUT
+			ERROR_VARIABLE _MADS_ERROR
+		)
+		if(NOT _MADS_RESULT EQUAL 0)
+			message(WARNING "MADS failed to assemble ${OUTPUT_NAME}: ${_MADS_ERROR}")
+			set(${OUTPUT_VAR} "")
+		else()
+			message(STATUS "Assembled ${OUTPUT_NAME} -> ${${OUTPUT_VAR}}")
+		endif()
 	endif()
-else()
-	message(STATUS "MADS not found — ATDiskLoader128 (IDR_DISKLOADER128) will not be embedded")
+endmacro()
+
+set(KERNEL_SRC ${CMAKE_SOURCE_DIR}/src/Kernel)
+set(KERNEL_SHARED ${KERNEL_SRC}/source/Shared)
+
+# ATDiskLoader128 (IDR_DISKLOADER128 = 150)
+mads_assemble(DISKLOADER128_BIN atdiskloader128.bin
+	-d:MEMORY=128 -s -p -b:$0700
+	${KERNEL_SRC}/source/ATDiskLoader/main.s)
+
+# Kernel ROMs — AltirraOS replacement firmware
+# kernel.rom (IDR_KERNEL = 110) — 400/800 mode
+mads_assemble(KERNEL_BIN kernel.rom
+	-d:_KERNEL_XLXE=0 -s -p -i:${KERNEL_SHARED} -b:$d800
+	${KERNEL_SRC}/source/main.xasm)
+
+# kernelxl.rom (IDR_KERNELXL = 174) — XL/XE/XEGS mode
+mads_assemble(KERNELXL_BIN kernelxl.rom
+	-d:_KERNEL_XLXE=1 -s -p -i:${KERNEL_SHARED} -b:$c000
+	${KERNEL_SRC}/source/main.xasm)
+
+# kernel816.rom (IDR_KERNEL816 = 236) — 65C816 mode
+mads_assemble(KERNEL816_BIN kernel816.rom
+	-d:_KERNEL_XLXE=1 -d:_KERNEL_816=1 -s -p -i:${KERNEL_SHARED} -b:$c000
+	${KERNEL_SRC}/source/main.xasm)
+
+# superkernel.rom (IDR_5200KERNEL = 136) — Atari 5200 mode
+mads_assemble(SUPERKERNEL_BIN superkernel.rom
+	-s -p -i:${KERNEL_SHARED} -b:$f800
+	${KERNEL_SRC}/source/SuperKernel/main.xasm)
+
+# nokernel.rom (IDR_NOKERNEL = 124) — placeholder "no kernel"
+mads_assemble(NOKERNEL_BIN nokernel.rom
+	-s -p -i:${KERNEL_SHARED} -b:$c000
+	${KERNEL_SRC}/source/NoKernel/main.xasm)
+
+# nocartridge.rom (IDR_NOCARTRIDGE = 138) — placeholder "no cartridge"
+mads_assemble(NOCARTRIDGE_BIN nocartridge.rom
+	-s -p -b:$b000
+	${KERNEL_SRC}/source/NoCartridge/main.s)
+
+# nohdbios.rom (IDR_NOHDBIOS = 154) — "no HDB BIOS" placeholder
+mads_assemble(NOHDBIOS_BIN nohdbios.rom
+	-s -p -b:$d800
+	${KERNEL_SRC}/source/NoHDBIOS/main.s)
+
+# nogame.rom (IDR_NOGAME = 162) — "no GAME" placeholder
+mads_assemble(NOGAME_BIN nogame.rom
+	-s -p -b:$a000
+	${KERNEL_SRC}/source/NoGame/main.s)
+
+# atbasic.bin (IDR_BASIC = 125) — Altirra 8K BASIC cartridge
+mads_assemble(ATBASIC_BIN atbasic.bin
+	-c -s -d:CART=1 -b:$a000
+	${CMAKE_SOURCE_DIR}/src/ATBasic/source/atbasic.s)
+
+if(NOT MADS_EXECUTABLE)
+	message(STATUS "MADS not found — kernel ROMs and firmware will not be embedded")
 endif()
 
 # Embed resource files from Altirra/res at configure time
@@ -270,8 +329,36 @@ set(STUFF_RESOURCES
 	267 printer-1029-home.pcm
 	268 printer-1025-feed.pcm
 )
+# Conditionally include MADS-assembled firmware ROMs
 if(DISKLOADER128_BIN)
 	list(APPEND STUFF_RESOURCES 150 ${DISKLOADER128_BIN})
+endif()
+if(KERNEL_BIN)
+	list(APPEND STUFF_RESOURCES 110 ${KERNEL_BIN})
+endif()
+if(KERNELXL_BIN)
+	list(APPEND STUFF_RESOURCES 174 ${KERNELXL_BIN})
+endif()
+if(KERNEL816_BIN)
+	list(APPEND STUFF_RESOURCES 236 ${KERNEL816_BIN})
+endif()
+if(SUPERKERNEL_BIN)
+	list(APPEND STUFF_RESOURCES 136 ${SUPERKERNEL_BIN})
+endif()
+if(NOKERNEL_BIN)
+	list(APPEND STUFF_RESOURCES 124 ${NOKERNEL_BIN})
+endif()
+if(NOCARTRIDGE_BIN)
+	list(APPEND STUFF_RESOURCES 138 ${NOCARTRIDGE_BIN})
+endif()
+if(NOHDBIOS_BIN)
+	list(APPEND STUFF_RESOURCES 154 ${NOHDBIOS_BIN})
+endif()
+if(NOGAME_BIN)
+	list(APPEND STUFF_RESOURCES 162 ${NOGAME_BIN})
+endif()
+if(ATBASIC_BIN)
+	list(APPEND STUFF_RESOURCES 125 ${ATBASIC_BIN})
 endif()
 
 embed_resources(

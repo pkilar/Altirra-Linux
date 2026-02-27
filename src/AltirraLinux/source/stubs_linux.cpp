@@ -84,6 +84,7 @@
 #include "debugger.h"
 #include "constants.h"
 #include "firmwaremanager.h"
+#include "settings.h"
 #include <at/atdebugger/target.h>
 #include "devicemanager.h"
 #include "directorywatcher.h"
@@ -93,6 +94,7 @@
 #include "trace.h"
 #include <at/atcore/cio.h>
 #include <at/atcore/constants.h>
+#include "uienhancedtext.h"
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -221,11 +223,13 @@ bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 static bool s_showFPS = false;
 static bool s_showStatusBar = true;
 static bool s_turbo = false;
+static bool s_slowMotion = false;
 static bool s_fullscreen = false;
 
 bool ATUIGetShowFPS() { return s_showFPS; }
 bool ATUIGetShowStatusBar() { return s_showStatusBar; }
 bool ATUIGetTurbo() { return s_turbo; }
+bool ATUIGetSlowMotion() { return s_slowMotion; }
 bool ATUIGetFullscreen() { return s_fullscreen; }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -304,18 +308,77 @@ void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
 void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
+// Enhanced text engine instance — accessible from emulator_imgui.cpp and main_linux.cpp
+static IATUIEnhancedTextEngine *g_pEnhancedTextEngine = nullptr;
+
+IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine() {
+	return g_pEnhancedTextEngine;
+}
+
+// Output callback that triggers display refresh
+class ATLinuxEnhancedTextOutput : public IATUIEnhancedTextOutput {
+public:
+	void InvalidateTextOutput() override {
+		// The display update is driven by the per-frame Update() call in
+		// RenderAndSwap(), so we don't need to do anything special here.
+	}
+};
+
+static ATLinuxEnhancedTextOutput g_enhancedTextOutput;
+
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
-	s_enhancedTextMode = v;
 	extern ATSimulator g_sim;
+	extern ATDisplaySDL2 *ATGetLinuxDisplay();
+
+	ATUIEnhancedTextMode oldMode = s_enhancedTextMode;
+	s_enhancedTextMode = v;
+
+	// Destroy old engine if switching away from enhanced text
+	if (oldMode != kATUIEnhancedTextMode_None && v == kATUIEnhancedTextMode_None) {
+		if (g_pEnhancedTextEngine) {
+			g_pEnhancedTextEngine->Shutdown();
+			delete g_pEnhancedTextEngine;
+			g_pEnhancedTextEngine = nullptr;
+		}
+
+		g_sim.SetVirtualScreenEnabled(false);
+		return;
+	}
+
 	switch (v) {
 		case kATUIEnhancedTextMode_None:
+			g_sim.SetVirtualScreenEnabled(false);
+			break;
+
 		case kATUIEnhancedTextMode_Hardware:
 			g_sim.SetVirtualScreenEnabled(false);
 			break;
+
 		case kATUIEnhancedTextMode_Software:
 			g_sim.SetVirtualScreenEnabled(true);
 			g_sim.GetPokey().PushBreak();
 			break;
+	}
+
+	if (v != kATUIEnhancedTextMode_None) {
+		// Keep GTIA connected to the display so frame timing continues
+		// to work normally. The enhanced text engine's framebuffer is
+		// set as persistent source in RenderAndSwap(), overwriting
+		// GTIA's output before the display renders.
+
+		if (!g_pEnhancedTextEngine) {
+			g_pEnhancedTextEngine = ATUICreateEnhancedTextEngine();
+			g_pEnhancedTextEngine->Init(&g_enhancedTextOutput, &g_sim);
+
+			// Initialize with current window size
+			ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+			if (disp) {
+				int w = 0, h = 0;
+				disp->GetWindowSize(w, h);
+				if (w > 0 && h > 0)
+					g_pEnhancedTextEngine->OnSize(w, h);
+			}
+		}
 	}
 }
 void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; ATUIUpdateSpeedTiming(); }
@@ -344,6 +407,10 @@ void ATUISetSpeedModifier(float v) {
 	ATUIUpdateSpeedTiming();
 }
 void ATUISetTargetPointerVisible(bool v) { s_targetPointerVisible = v; }
+void ATUISetSlowMotion(bool v) {
+	s_slowMotion = v;
+	ATUIUpdateSpeedTiming();
+}
 void ATUISetTurbo(bool v) {
 	s_turbo = v;
 	extern ATSimulator g_sim;
@@ -425,8 +492,11 @@ void ATUIUpdateSpeedTiming() {
 	// rate = g_speedModifier + 1.0, but our UI already provides the rate.
 	double rate = 1.0;
 
-	if (!g_sim.IsTurboModeEnabled())
+	if (!g_sim.IsTurboModeEnabled()) {
 		rate = (double)s_speedModifier;
+		if (s_slowMotion)
+			rate *= 0.5;
+	}
 
 	rate = std::clamp<double>(rate, 0.01, 100.0);
 
@@ -573,10 +643,121 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 	}
 }
 
-bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
+bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool switchProfiles) {
 	extern ATSimulator g_sim;
+
+	ATHardwareMode prevMode = g_sim.GetHardwareMode();
+	if (prevMode == mode)
+		return true;
+
+	// Map hardware mode to default profile
+	ATDefaultProfile defaultProfile;
+	switch (mode) {
+		case kATHardwareMode_800:
+			defaultProfile = kATDefaultProfile_800;
+			break;
+		case kATHardwareMode_5200:
+			defaultProfile = kATDefaultProfile_5200;
+			break;
+		case kATHardwareMode_XEGS:
+			defaultProfile = kATDefaultProfile_XEGS;
+			break;
+		case kATHardwareMode_1200XL:
+			defaultProfile = kATDefaultProfile_1200XL;
+			break;
+		default:
+			defaultProfile = kATDefaultProfile_XL;
+			break;
+	}
+
+	const uint32 oldProfileId = ATSettingsGetCurrentProfileId();
+	const uint32 newProfileId = ATGetDefaultProfileId(defaultProfile);
+	const bool switchingProfile = switchProfiles
+		&& (newProfileId != kATProfileId_Invalid && newProfileId != oldProfileId);
+
+	const bool switching5200 = (mode == kATHardwareMode_5200 || prevMode == kATHardwareMode_5200);
+
+	// Switch profile if needed (loads all settings for that hardware)
+	if (switchingProfile)
+		ATSettingsSwitchProfile(newProfileId);
+
+	if (switching5200) {
+		g_sim.UnloadAll();
+
+		if (mode == kATHardwareMode_5200) {
+			g_sim.LoadCartridge5200Default();
+			g_sim.SetMemoryMode(kATMemoryMode_16K);
+		}
+	}
+
 	g_sim.SetHardwareMode(mode);
+
+	// Check for incompatible kernel
+	switch (g_sim.GetKernelMode()) {
+		case kATKernelMode_Default:
+			break;
+		case kATKernelMode_XL:
+			if (!kATHardwareModeTraits[mode].mbRunsXLOS)
+				g_sim.SetKernel(0);
+			break;
+		case kATKernelMode_5200:
+			if (mode != kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+		default:
+			if (mode == kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+	}
+
+	if (mode == kATHardwareMode_5200 && g_sim.GetVideoStandard() != kATVideoStandard_NTSC) {
+		g_sim.SetVideoStandard(kATVideoStandard_NTSC);
+		ATUIUpdateSpeedTiming();
+	}
+
+	g_sim.ColdReset();
 	return true;
+}
+
+void ATUISwitchMemoryMode(VDGUIHandle, ATMemoryMode mode) {
+	extern ATSimulator g_sim;
+
+	if (g_sim.GetMemoryMode() == mode)
+		return;
+
+	switch (g_sim.GetHardwareMode()) {
+		case kATHardwareMode_5200:
+			if (mode != kATMemoryMode_16K)
+				return;
+			break;
+
+		case kATHardwareMode_800XL:
+			if (mode == kATMemoryMode_48K ||
+				mode == kATMemoryMode_52K ||
+				mode == kATMemoryMode_8K ||
+				mode == kATMemoryMode_24K ||
+				mode == kATMemoryMode_32K ||
+				mode == kATMemoryMode_40K)
+				return;
+			break;
+
+		case kATHardwareMode_1200XL:
+		case kATHardwareMode_XEGS:
+		case kATHardwareMode_130XE:
+		case kATHardwareMode_1400XL:
+			if (mode == kATMemoryMode_48K ||
+				mode == kATMemoryMode_52K ||
+				mode == kATMemoryMode_8K ||
+				mode == kATMemoryMode_16K ||
+				mode == kATMemoryMode_24K ||
+				mode == kATMemoryMode_32K ||
+				mode == kATMemoryMode_40K)
+				return;
+			break;
+	}
+
+	g_sim.SetMemoryMode(mode);
+	g_sim.ColdReset();
 }
 bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId) {
 	extern ATSimulator g_sim;

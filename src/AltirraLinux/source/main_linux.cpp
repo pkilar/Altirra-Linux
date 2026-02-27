@@ -63,6 +63,9 @@
 #include <debugger_imgui.h>
 #include <emulator_imgui.h>
 #include <imgui.h>
+#include "uienhancedtext.h"
+#include <at/atcore/devicevideo.h>
+#include <at/atui/uiwidget.h>
 
 #include <SDL.h>
 #include <GL/gl.h>
@@ -85,9 +88,14 @@
 void ATInitDebugger();
 void ATShutdownDebugger();
 
+#include "compatengine.h"
+
 // Forward declarations from uiregistry.cpp
 void ATUILoadRegistry(const wchar_t *path);
 void ATUISaveRegistry(const wchar_t *fnpath);
+
+// Enhanced text engine accessor (defined in stubs_linux.cpp)
+IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine();
 
 // Global simulator instance — matches Windows main.cpp
 ATSimulator g_sim;
@@ -906,6 +914,55 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 		}
 
+		// Enhanced text engine input routing — when active and not in raw
+		// input mode, the engine handles keyboard events instead of POKEY.
+		{
+			IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
+			if (enhText && !enhText->IsRawInputEnabled()) {
+				if (event.type == SDL_KEYDOWN) {
+					uint32 vk = 0;
+					switch (event.key.keysym.scancode) {
+						case SDL_SCANCODE_LEFT:      vk = kATUIVK_Left; break;
+						case SDL_SCANCODE_RIGHT:     vk = kATUIVK_Right; break;
+						case SDL_SCANCODE_UP:        vk = kATUIVK_Up; break;
+						case SDL_SCANCODE_DOWN:      vk = kATUIVK_Down; break;
+						case SDL_SCANCODE_BACKSPACE: vk = kATUIVK_Back; break;
+						case SDL_SCANCODE_DELETE:    vk = kATUIVK_Delete; break;
+						case SDL_SCANCODE_RETURN:
+						case SDL_SCANCODE_KP_ENTER:  vk = kATUIVK_Return; break;
+						case SDL_SCANCODE_CAPSLOCK:  vk = kATUIVK_CapsLock; break;
+						default: break;
+					}
+					if (vk && enhText->OnKeyDown(vk))
+						continue;
+				} else if (event.type == SDL_KEYUP) {
+					uint32 vk = 0;
+					switch (event.key.keysym.scancode) {
+						case SDL_SCANCODE_LEFT:      vk = kATUIVK_Left; break;
+						case SDL_SCANCODE_RIGHT:     vk = kATUIVK_Right; break;
+						case SDL_SCANCODE_UP:        vk = kATUIVK_Up; break;
+						case SDL_SCANCODE_DOWN:      vk = kATUIVK_Down; break;
+						case SDL_SCANCODE_BACKSPACE: vk = kATUIVK_Back; break;
+						case SDL_SCANCODE_DELETE:    vk = kATUIVK_Delete; break;
+						case SDL_SCANCODE_RETURN:
+						case SDL_SCANCODE_KP_ENTER:  vk = kATUIVK_Return; break;
+						case SDL_SCANCODE_CAPSLOCK:  vk = kATUIVK_CapsLock; break;
+						default: break;
+					}
+					if (vk && enhText->OnKeyUp(vk))
+						continue;
+				} else if (event.type == SDL_TEXTINPUT) {
+					// SDL_TEXTINPUT gives us UTF-8 text — forward printable ASCII chars
+					for (const char *p = event.text.text; *p; ++p) {
+						uint8 ch = (uint8)*p;
+						if (ch >= 0x20 && ch < 0x7F)
+							enhText->OnChar(ch);
+					}
+					continue;
+				}
+			}
+		}
+
 		// Keyboard mapping → POKEY (type characters into Atari emulation)
 		ProcessAtariKeyboard(event);
 
@@ -937,6 +994,11 @@ static void ProcessEvents(SDL_Window *window) {
 						g_pausedByInactive = false;
 						g_sim.Resume();
 					}
+				} else if (event.window.event == SDL_WINDOWEVENT_RESIZED
+					|| event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+					IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
+					if (enhText)
+						enhText->OnSize(event.window.data1, event.window.data2);
 				}
 				break;
 
@@ -1035,6 +1097,20 @@ static void RenderAndSwap(SDL_Window *window) {
 
 	// Update pixel aspect ratio from GTIA for correct display scaling
 	g_pDisplay->SetPixelAspectRatio(g_sim.GetGTIA().GetPixelAspectRatio());
+
+	// Update enhanced text engine if active — this produces the framebuffer
+	// and pushes it to the display instead of the GTIA's normal output.
+	IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
+	if (enhText) {
+		enhText->Update(false);
+		IATDeviceVideoOutput *vo = enhText->GetVideoOutput();
+		if (vo) {
+			const VDPixmap& fb = vo->GetFrameBuffer();
+			if (fb.data && fb.w > 0 && fb.h > 0) {
+				g_pDisplay->SetSourcePersistent(true, fb, true, nullptr, nullptr);
+			}
+		}
+	}
 
 	// Render emulation frame (upload texture + draw quad)
 	ATProfileBeginRegion(kATProfileRegion_DisplayTick);
@@ -1218,8 +1294,9 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "ImGui initialized (F12 to toggle overlay)\n");
 	}
 
-	// Init debugger (must be after sim init)
+	// Init debugger and compatibility database (must be after sim init)
 	ATInitDebugger();
+	ATCompatInit();
 	ATImGuiDebuggerInit();
 	ATImGuiEmulatorInit();
 	fprintf(stderr, "Debugger initialized\n");
@@ -1504,6 +1581,7 @@ int main(int argc, char *argv[]) {
 	ATImGuiEmulatorShutdown();
 	ATImGuiDebuggerShutdown();
 	ATShutdownDebugger();
+	ATCompatShutdown();
 
 	// Shutdown simulator
 	g_sim.Shutdown();

@@ -67,6 +67,7 @@ class ATIRQController;
 #include "inputmap.h"
 #include "joystick.h"
 #include "autosavemanager.h"
+#include "settings.h"
 
 #include <SDL.h>
 
@@ -84,6 +85,9 @@ void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
 
 // Firmware switching (defined in stubs_linux.cpp)
 bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId);
+
+// Speed timing update (defined in stubs_linux.cpp)
+void ATUIUpdateSpeedTiming();
 
 extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
@@ -115,6 +119,7 @@ static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
 static bool s_showCheater = false;
+static bool s_showProfileManager = false;
 
 // Cheat engine state
 static bool s_cheaterInitialized = false;
@@ -1152,24 +1157,49 @@ static const char *kHardwareModeNames[] = {
 };
 static_assert(sizeof(kHardwareModeNames) / sizeof(kHardwareModeNames[0]) == kATHardwareModeCount);
 
-static const char *kMemoryModeNames[] = {
-	"48K",
-	"52K",
-	"64K",
-	"128K",
-	"320K",
-	"576K",
-	"1088K",
-	"16K",
-	"8K",
-	"24K",
-	"32K",
-	"40K",
-	"320K Compy",
-	"576K Compy",
-	"256K"
+// Memory modes sorted by size (matching Windows UI order) with descriptive labels.
+// The enum order is non-sequential (48K,52K,64K,128K,...,16K,8K,...), so we use an
+// indirection table to display them in sorted order.
+struct MemoryModeEntry {
+	ATMemoryMode mode;
+	const char *label;
 };
-static_assert(sizeof(kMemoryModeNames) / sizeof(kMemoryModeNames[0]) == kATMemoryModeCount);
+
+static const MemoryModeEntry kSortedMemoryModes[] = {
+	{ kATMemoryMode_8K,			"8K" },
+	{ kATMemoryMode_16K,		"16K" },
+	{ kATMemoryMode_24K,		"24K" },
+	{ kATMemoryMode_32K,		"32K" },
+	{ kATMemoryMode_40K,		"40K" },
+	{ kATMemoryMode_48K,		"48K (800)" },
+	{ kATMemoryMode_52K,		"52K" },
+	{ kATMemoryMode_64K,		"64K (800XL/1200XL)" },
+	{ kATMemoryMode_128K,		"128K (130XE)" },
+	{ kATMemoryMode_256K,		"256K (Rambo)" },
+	{ kATMemoryMode_320K,		"320K (Rambo)" },
+	{ kATMemoryMode_320K_Compy,	"320K (Compy)" },
+	{ kATMemoryMode_576K,		"576K (Rambo)" },
+	{ kATMemoryMode_576K_Compy,	"576K (Compy)" },
+	{ kATMemoryMode_1088K,		"1088K" },
+};
+static_assert(sizeof(kSortedMemoryModes) / sizeof(kSortedMemoryModes[0]) == kATMemoryModeCount);
+
+// Helper to find the sorted index for a given ATMemoryMode
+static int MemoryModeToSortedIndex(ATMemoryMode mode) {
+	for (int i = 0; i < (int)kATMemoryModeCount; ++i) {
+		if (kSortedMemoryModes[i].mode == mode)
+			return i;
+	}
+	return 0;
+}
+
+// ImGui combo callback for sorted memory modes
+static bool MemoryModeComboGetter(void *, int idx, const char **out) {
+	if (idx < 0 || idx >= (int)kATMemoryModeCount)
+		return false;
+	*out = kSortedMemoryModes[idx].label;
+	return true;
+}
 
 static const char *kVideoStandardNames[] = {
 	"NTSC",
@@ -1630,7 +1660,7 @@ static void DrawMenuBar() {
 			ATHardwareMode curHW = g_sim.GetHardwareMode();
 			for (uint32 i = 0; i < kATHardwareModeCount; ++i) {
 				if (ImGui::MenuItem(kHardwareModeNames[i], nullptr, curHW == (ATHardwareMode)i)) {
-					g_sim.SetHardwareMode((ATHardwareMode)i);
+					ATUISwitchHardwareMode(nullptr, (ATHardwareMode)i, true);
 				}
 			}
 			ImGui::EndMenu();
@@ -1665,7 +1695,8 @@ static void DrawMenuBar() {
 				vdvector<ATFirmwareInfo> fwList;
 				fwMgr->GetFirmwareList(fwList);
 
-				bool hasSep = false;
+				// Filter to matching firmware and sort alphabetically by name
+				vdvector<const ATFirmwareInfo *> matchList;
 				for (const ATFirmwareInfo& fw : fwList) {
 					if (!fw.mbVisible)
 						continue;
@@ -1688,17 +1719,22 @@ static void DrawMenuBar() {
 							break;
 					}
 
-					if (!match)
-						continue;
+					if (match)
+						matchList.push_back(&fw);
+				}
 
-					if (!hasSep) {
-						ImGui::Separator();
-						hasSep = true;
-					}
+				std::sort(matchList.begin(), matchList.end(),
+					[](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+						return a->mName.comparei(b->mName) < 0;
+					});
 
-					VDStringA u8name = VDTextWToU8(fw.mName);
-					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw.mId == curKernel)) {
-						ATUISwitchKernel(nullptr, fw.mId);
+				if (!matchList.empty())
+					ImGui::Separator();
+
+				for (const ATFirmwareInfo *fw : matchList) {
+					VDStringA u8name = VDTextWToU8(fw->mName);
+					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw->mId == curKernel)) {
+						ATUISwitchKernel(nullptr, fw->mId);
 					}
 				}
 			}
@@ -1708,9 +1744,9 @@ static void DrawMenuBar() {
 
 		if (ImGui::BeginMenu("Memory")) {
 			ATMemoryMode curMem = g_sim.GetMemoryMode();
-			for (uint32 i = 0; i < kATMemoryModeCount; ++i) {
-				if (ImGui::MenuItem(kMemoryModeNames[i], nullptr, curMem == (ATMemoryMode)i)) {
-					g_sim.SetMemoryMode((ATMemoryMode)i);
+			for (const auto& entry : kSortedMemoryModes) {
+				if (ImGui::MenuItem(entry.label, nullptr, curMem == entry.mode)) {
+					ATUISwitchMemoryMode(nullptr, entry.mode);
 				}
 			}
 			ImGui::EndMenu();
@@ -1720,7 +1756,12 @@ static void DrawMenuBar() {
 			ATVideoStandard curVS = g_sim.GetVideoStandard();
 			for (uint32 i = 0; i < kATVideoStandardCount; ++i) {
 				if (ImGui::MenuItem(kVideoStandardNames[i], nullptr, curVS == (ATVideoStandard)i)) {
+					// Block video standard change in 5200 mode (must be NTSC)
+					if (g_sim.GetHardwareMode() == kATHardwareMode_5200 && (ATVideoStandard)i != kATVideoStandard_NTSC)
+						continue;
 					g_sim.SetVideoStandard((ATVideoStandard)i);
+					ATUIUpdateSpeedTiming();
+					g_sim.ColdReset();
 				}
 			}
 			ImGui::EndMenu();
@@ -1837,6 +1878,28 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
 			ATImGuiRequestQuit();
 		}
+
+		ImGui::EndMenu();
+	}
+
+	// --- Profiles menu ---
+	if (ImGui::BeginMenu("Profiles")) {
+		vdfastvector<uint32> profileIds;
+		ATSettingsProfileEnum(profileIds);
+		uint32 currentId = ATSettingsGetCurrentProfileId();
+
+		for (uint32 id : profileIds) {
+			if (!ATSettingsProfileGetVisible(id))
+				continue;
+			VDStringW name = ATSettingsProfileGetName(id);
+			VDStringA u8name = VDTextWToU8(name);
+			if (ImGui::MenuItem(u8name.c_str(), nullptr, id == currentId))
+				ATSettingsSwitchProfile(id);
+		}
+
+		ImGui::Separator();
+		if (ImGui::MenuItem("Profile Manager..."))
+			s_showProfileManager = true;
 
 		ImGui::EndMenu();
 	}
@@ -2419,6 +2482,17 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Enhanced Text")) {
+			ATUIEnhancedTextMode curMode = ATUIGetEnhancedTextMode();
+			if (ImGui::MenuItem("None", nullptr, curMode == kATUIEnhancedTextMode_None))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_None);
+			if (ImGui::MenuItem("Hardware", nullptr, curMode == kATUIEnhancedTextMode_Hardware))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Hardware);
+			if (ImGui::MenuItem("Software (CIO)", nullptr, curMode == kATUIEnhancedTextMode_Software))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Software);
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Video Settings..."))
@@ -2462,6 +2536,12 @@ static void DrawMenuBar() {
 		bool turbo = ATUIGetTurbo();
 		if (ImGui::MenuItem("Turbo", nullptr, &turbo))
 			ATUISetTurbo(turbo);
+
+		{
+			bool slowmo = ATUIGetSlowMotion();
+			if (ImGui::MenuItem("Slow Motion", nullptr, &slowmo))
+				ATUISetSlowMotion(slowmo);
+		}
 
 		ImGui::Separator();
 
@@ -2643,6 +2723,13 @@ static void DrawMenuBar() {
 
 // ============= System Configuration Window =============
 
+// Pending state for System Settings dialog — edited by combos,
+// applied only when "Apply & Cold Reset" is pressed.
+static int s_pendingHwMode = -1;
+static int s_pendingMemMode = -1;
+static int s_pendingVideoStd = -1;
+static bool s_pendingBasic = false;
+
 static void DrawSystemConfig() {
 	if (!s_showSystemConfig)
 		return;
@@ -2653,42 +2740,40 @@ static void DrawSystemConfig() {
 		return;
 	}
 
+	// Sync pending state from simulator on first open
+	if (s_pendingHwMode < 0) {
+		s_pendingHwMode = (int)g_sim.GetHardwareMode();
+		s_pendingMemMode = MemoryModeToSortedIndex(g_sim.GetMemoryMode());
+		s_pendingVideoStd = (int)g_sim.GetVideoStandard();
+		s_pendingBasic = g_sim.IsBASICEnabled();
+	}
+
 	// Hardware mode
-	int hwMode = (int)g_sim.GetHardwareMode();
 	ImGui::Text("Hardware:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##hw", &hwMode, kHardwareModeNames, kATHardwareModeCount))
-		g_sim.SetHardwareMode((ATHardwareMode)hwMode);
+	ImGui::Combo("##hw", &s_pendingHwMode, kHardwareModeNames, kATHardwareModeCount);
 
 	// Memory mode
-	int memMode = (int)g_sim.GetMemoryMode();
 	ImGui::Text("Memory:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##mem", &memMode, kMemoryModeNames, kATMemoryModeCount))
-		g_sim.SetMemoryMode((ATMemoryMode)memMode);
+	ImGui::Combo("##mem", &s_pendingMemMode, MemoryModeComboGetter, nullptr, kATMemoryModeCount);
 
 	// Video standard
-	int videoStd = (int)g_sim.GetVideoStandard();
 	ImGui::Text("Video:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##vid", &videoStd, kVideoStandardNames, kATVideoStandardCount))
-		g_sim.SetVideoStandard((ATVideoStandard)videoStd);
+	ImGui::Combo("##vid", &s_pendingVideoStd, kVideoStandardNames, kATVideoStandardCount);
 
 	// BASIC
-	bool basicEnabled = g_sim.IsBASICEnabled();
 	ImGui::Text("BASIC:");
 	ImGui::SameLine(100);
-	if (ImGui::Checkbox("##basic", &basicEnabled)) {
-		g_sim.SetBASICEnabled(basicEnabled);
-		g_sim.ColdReset();
-	}
+	ImGui::Checkbox("##basic", &s_pendingBasic);
 
 	ImGui::Separator();
 
-	// Display options
+	// Display options (applied immediately — not emulation state)
 	{
 		bool statusBar = ATUIGetShowStatusBar();
 		if (ImGui::Checkbox("Show Status Bar", &statusBar))
@@ -2698,10 +2783,30 @@ static void DrawSystemConfig() {
 	ImGui::Separator();
 
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
+		auto newHW = (ATHardwareMode)s_pendingHwMode;
+		auto newMem = kSortedMemoryModes[s_pendingMemMode].mode;
+		auto newVid = (ATVideoStandard)s_pendingVideoStd;
+
+		// Switch hardware mode (sets stock defaults for memory/kernel)
+		ATUISwitchHardwareMode(nullptr, newHW, false);
+
+		// Apply user's explicit overrides from the dialog
+		ATUISwitchMemoryMode(nullptr, newMem);
+		g_sim.SetVideoStandard(newVid);
+		g_sim.SetBASICEnabled(s_pendingBasic);
+
+		ATUIUpdateSpeedTiming();
 		g_sim.LoadROMs();
 		g_sim.ColdReset();
 		g_sim.Resume();
+
+		// Reset pending state so next open re-syncs
+		s_pendingHwMode = -1;
 	}
+
+	// Reset pending state when dialog is closed
+	if (!s_showSystemConfig)
+		s_pendingHwMode = -1;
 
 	ImGui::End();
 }
@@ -3134,7 +3239,7 @@ static void DrawAbout() {
 	ImGui::Separator();
 	ImGui::TextWrapped(
 		"Atari 800/800XL/5200 emulator by Avery Lee.\n"
-		"Linux port using SDL2, OpenGL, and Dear ImGui.\n"
+		"Linux port by Paul Kilar using SDL2, OpenGL, and Dear ImGui.\n"
 		"\n"
 		"This program is free software under the GNU General "
 		"Public License v2 or later."
@@ -3518,6 +3623,135 @@ static void DrawCartridgeBrowser() {
 	ImGui::End();
 }
 
+// ============= Profile Manager Window =============
+
+static void DrawProfileManager() {
+	if (!s_showProfileManager)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(450, 350), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Profile Manager", &s_showProfileManager)) {
+		ImGui::End();
+		return;
+	}
+
+	vdfastvector<uint32> profileIds;
+	ATSettingsProfileEnum(profileIds);
+	uint32 currentId = ATSettingsGetCurrentProfileId();
+	static uint32 s_selectedProfileId = 0;
+	static char s_nameBuf[128] = "";
+	static bool s_renamePrefill = false;
+
+	// Profile list
+	if (ImGui::BeginChild("ProfileList", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2), ImGuiChildFlags_Borders)) {
+		for (uint32 id : profileIds) {
+			if (!ATSettingsProfileGetVisible(id))
+				continue;
+			VDStringW name = ATSettingsProfileGetName(id);
+			VDStringA u8name = VDTextWToU8(name);
+			if (id == currentId)
+				u8name += " (active)";
+
+			if (ImGui::Selectable(u8name.c_str(), s_selectedProfileId == id))
+				s_selectedProfileId = id;
+		}
+	}
+	ImGui::EndChild();
+
+	// Determine if selection is valid and whether it's a built-in default profile
+	bool hasSelection = ATSettingsIsValidProfile(s_selectedProfileId);
+	bool isDefault = false;
+	if (hasSelection) {
+		for (int i = 0; i < kATDefaultProfileCount; ++i) {
+			if (ATGetDefaultProfileId((ATDefaultProfile)i) == s_selectedProfileId) {
+				isDefault = true;
+				break;
+			}
+		}
+	}
+
+	// Action buttons
+	if (ImGui::Button("Switch To") && hasSelection && s_selectedProfileId != currentId)
+		ATSettingsSwitchProfile(s_selectedProfileId);
+
+	ImGui::SameLine();
+	if (ImGui::Button("New...")) {
+		s_nameBuf[0] = 0;
+		ImGui::OpenPopup("NewProfile");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Rename...") && hasSelection && !isDefault) {
+		VDStringW curName = ATSettingsProfileGetName(s_selectedProfileId);
+		VDStringA u8cur = VDTextWToU8(curName);
+		vdstrlcpy(s_nameBuf, u8cur.c_str(), sizeof(s_nameBuf));
+		s_renamePrefill = true;
+		ImGui::OpenPopup("RenameProfile");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Delete") && hasSelection && !isDefault)
+		ImGui::OpenPopup("ConfirmDelete");
+
+	// New profile popup
+	if (ImGui::BeginPopup("NewProfile")) {
+		ImGui::Text("Profile name:");
+		ImGui::InputText("##newname", s_nameBuf, sizeof(s_nameBuf));
+		if (ImGui::Button("Create") && s_nameBuf[0]) {
+			uint32 newId = ATSettingsGenerateProfileId();
+			ATSettingsProfileSetName(newId, VDTextU8ToW(VDStringA(s_nameBuf)).c_str());
+			ATSettingsProfileSetVisible(newId, true);
+			ATSettingsProfileSetCategoryMask(newId, kATSettingsCategory_AllCategories);
+			ATSettingsSwitchProfile(newId);
+			s_selectedProfileId = newId;
+			s_nameBuf[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	// Rename popup
+	if (ImGui::BeginPopup("RenameProfile")) {
+		ImGui::Text("New name:");
+		if (s_renamePrefill) {
+			ImGui::SetKeyboardFocusHere();
+			s_renamePrefill = false;
+		}
+		ImGui::InputText("##rename", s_nameBuf, sizeof(s_nameBuf));
+		if (ImGui::Button("OK") && s_nameBuf[0]) {
+			ATSettingsProfileSetName(s_selectedProfileId,
+				VDTextU8ToW(VDStringA(s_nameBuf)).c_str());
+			s_nameBuf[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	// Delete confirmation popup
+	if (ImGui::BeginPopup("ConfirmDelete")) {
+		VDStringW dname = ATSettingsProfileGetName(s_selectedProfileId);
+		VDStringA u8dname = VDTextWToU8(dname);
+		ImGui::Text("Delete profile \"%s\"?", u8dname.c_str());
+		if (ImGui::Button("Delete")) {
+			ATSettingsProfileDelete(s_selectedProfileId);
+			s_selectedProfileId = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	ImGui::End();
+}
+
 // ============= Firmware Manager Window =============
 
 static void FirmwareRefreshList() {
@@ -3686,35 +3920,58 @@ static void DrawFirmwareManager() {
 
 	if (ImGui::BeginTable("##fwtable", 3,
 		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
-			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp
+			| ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate,
 		ImVec2(0, 200)))
 	{
-		ImGui::TableSetupColumn("Name", 0, 2.0f);
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort, 2.0f);
 		ImGui::TableSetupColumn("Type", 0, 1.0f);
 		ImGui::TableSetupColumn("Path", 0, 2.0f);
 		ImGui::TableHeadersRow();
 
+		// Build sorted index of visible firmware
+		vdvector<const ATFirmwareInfo *> sortedFw;
 		for (const ATFirmwareInfo& fw : s_fwList) {
-			if (!fw.mbVisible)
-				continue;
+			if (fw.mbVisible)
+				sortedFw.push_back(&fw);
+		}
 
+		if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
+			if (sortSpecs->SpecsCount > 0) {
+				const auto& spec = sortSpecs->Specs[0];
+				bool ascending = (spec.SortDirection == ImGuiSortDirection_Ascending);
+				std::sort(sortedFw.begin(), sortedFw.end(),
+					[&spec, ascending](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+						int cmp = 0;
+						switch (spec.ColumnIndex) {
+							case 0: cmp = a->mName.comparei(b->mName); break;
+							case 1: cmp = strcmp(ATGetFirmwareTypeDisplayName(a->mType),
+								ATGetFirmwareTypeDisplayName(b->mType)); break;
+							case 2: cmp = a->mPath.comparei(b->mPath); break;
+						}
+						return ascending ? cmp < 0 : cmp > 0;
+					});
+			}
+		}
+
+		for (const ATFirmwareInfo *fw : sortedFw) {
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 
-			VDStringA u8name = VDTextWToU8(fw.mName);
-			bool selected = (s_fwSelectedId == fw.mId);
+			VDStringA u8name = VDTextWToU8(fw->mName);
+			bool selected = (s_fwSelectedId == fw->mId);
 
 			if (ImGui::Selectable(u8name.c_str(), selected,
 				ImGuiSelectableFlags_SpanAllColumns))
 			{
-				s_fwSelectedId = fw.mId;
+				s_fwSelectedId = fw->mId;
 			}
 
 			ImGui::TableNextColumn();
-			ImGui::Text("%s", ATGetFirmwareTypeDisplayName(fw.mType));
+			ImGui::Text("%s", ATGetFirmwareTypeDisplayName(fw->mType));
 
 			ImGui::TableNextColumn();
-			VDStringA u8path = VDTextWToU8(fw.mPath);
+			VDStringA u8path = VDTextWToU8(fw->mPath);
 			ImGui::Text("%s", u8path.c_str());
 		}
 
@@ -3770,17 +4027,24 @@ static void DrawFirmwareManager() {
 				}
 			}
 
-			// Matching firmware entries
+			// Matching firmware entries, sorted alphabetically
+			vdvector<const ATFirmwareInfo *> matchingFw;
 			for (const ATFirmwareInfo& fw : s_fwList) {
-				if (fw.mType != def.type || !fw.mbVisible)
-					continue;
+				if (fw.mType == def.type && fw.mbVisible)
+					matchingFw.push_back(&fw);
+			}
+			std::sort(matchingFw.begin(), matchingFw.end(),
+				[](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+					return a->mName.comparei(b->mName) < 0;
+				});
 
-				VDStringA u8name = VDTextWToU8(fw.mName);
-				bool isSelected = (fw.mId == currentDefault);
+			for (const ATFirmwareInfo *fw : matchingFw) {
+				VDStringA u8name = VDTextWToU8(fw->mName);
+				bool isSelected = (fw->mId == currentDefault);
 
 				if (ImGui::Selectable(u8name.c_str(), isSelected)) {
 					if (fwMgr) {
-						fwMgr->SetDefaultFirmware(def.type, fw.mId);
+						fwMgr->SetDefaultFirmware(def.type, fw->mId);
 						s_fwDefaultsChanged = true;
 					}
 				}
@@ -5005,12 +5269,12 @@ static void DrawCPUOptions() {
 	// Memory options
 	if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
 		// Memory mode (also in System Settings, duplicated for convenience)
-		int memMode = (int)g_sim.GetMemoryMode();
+		int memIdx = MemoryModeToSortedIndex(g_sim.GetMemoryMode());
 		ImGui::Text("Memory:");
 		ImGui::SameLine(120);
 		ImGui::SetNextItemWidth(180);
-		if (ImGui::Combo("##memmode", &memMode, kMemoryModeNames, kATMemoryModeCount))
-			g_sim.SetMemoryMode((ATMemoryMode)memMode);
+		if (ImGui::Combo("##memmode", &memIdx, MemoryModeComboGetter, nullptr, kATMemoryModeCount))
+			ATUISwitchMemoryMode(nullptr, kSortedMemoryModes[memIdx].mode);
 
 		// Axlon memory
 		uint8 axlonBits = g_sim.GetAxlonMemoryMode();
@@ -6556,6 +6820,7 @@ void ATImGuiEmulatorDraw() {
 	DrawBootOptions();
 	DrawCassetteControl();
 	DrawCartridgeBrowser();
+	DrawProfileManager();
 	DrawFirmwareManager();
 	DrawAudioOptions();
 	DrawVideoConfig();

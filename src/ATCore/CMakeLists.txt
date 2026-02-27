@@ -46,7 +46,6 @@ if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|amd64")
 	set_source_files_properties(source/fft_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|ARM64|arm64")
 	list(APPEND ATCORE_SOURCES
-		source/fft_arm64.cpp
 		source/fft_neon.cpp
 	)
 endif()
