@@ -32,6 +32,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <unordered_map>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/stat.h>
@@ -46,20 +47,54 @@
 extern bool ATEmbeddedLoadMiscResource(int id, vdfastvector<uint8>& data);
 extern bool ATEmbeddedLoadImageResource(uint32 id, const void *& pData, size_t& size);
 
+// ATLockResource returns a pointer to static data that remains valid for program lifetime.
+// We maintain a cache of loaded resources since ATEmbeddedLoadMiscResource copies to a vector.
+static std::unordered_map<uint32, vdfastvector<uint8>> s_lockedResources;
+
 const void *ATLockResource(uint32 id, size_t& size) {
-	size = 0;
-	return nullptr;
+	auto it = s_lockedResources.find(id);
+	if (it != s_lockedResources.end()) {
+		size = it->second.size();
+		return it->second.data();
+	}
+
+	vdfastvector<uint8> data;
+	if (!ATEmbeddedLoadMiscResource(id, data)) {
+		size = 0;
+		return nullptr;
+	}
+
+	auto [insertIt, _] = s_lockedResources.emplace(id, std::move(data));
+	size = insertIt->second.size();
+	return insertIt->second.data();
 }
 
 bool ATLoadKernelResource(int id, void *dst, uint32 offset, uint32 size, bool allowPartial) {
-	return false;
+	vdfastvector<uint8> data;
+	if (!ATEmbeddedLoadMiscResource(id, data))
+		return false;
+
+	if (offset >= data.size())
+		return false;
+
+	size_t avail = data.size() - offset;
+	if (size > avail) {
+		if (!allowPartial)
+			return false;
+		size = (uint32)avail;
+	}
+
+	memcpy(dst, data.data() + offset, size);
+	return true;
 }
 
 bool ATLoadKernelResource(int id, vdfastvector<uint8>& data) {
-	return false;
+	return ATEmbeddedLoadMiscResource(id, data);
 }
 
 bool ATLoadKernelResourceLZPacked(int id, vdfastvector<uint8>& data) {
+	// LZ-packed resources (nomio, noblackbox) require ATCompiler's lzpack tool
+	// which is not available on Linux. These are niche firmware placeholders.
 	return false;
 }
 

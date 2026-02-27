@@ -221,11 +221,13 @@ bool ATUIIsElevationRequiredForMountVHDImage() { return false; }
 static bool s_showFPS = false;
 static bool s_showStatusBar = true;
 static bool s_turbo = false;
+static bool s_slowMotion = false;
 static bool s_fullscreen = false;
 
 bool ATUIGetShowFPS() { return s_showFPS; }
 bool ATUIGetShowStatusBar() { return s_showStatusBar; }
 bool ATUIGetTurbo() { return s_turbo; }
+bool ATUIGetSlowMotion() { return s_slowMotion; }
 bool ATUIGetFullscreen() { return s_fullscreen; }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -344,6 +346,10 @@ void ATUISetSpeedModifier(float v) {
 	ATUIUpdateSpeedTiming();
 }
 void ATUISetTargetPointerVisible(bool v) { s_targetPointerVisible = v; }
+void ATUISetSlowMotion(bool v) {
+	s_slowMotion = v;
+	ATUIUpdateSpeedTiming();
+}
 void ATUISetTurbo(bool v) {
 	s_turbo = v;
 	extern ATSimulator g_sim;
@@ -425,8 +431,11 @@ void ATUIUpdateSpeedTiming() {
 	// rate = g_speedModifier + 1.0, but our UI already provides the rate.
 	double rate = 1.0;
 
-	if (!g_sim.IsTurboModeEnabled())
+	if (!g_sim.IsTurboModeEnabled()) {
 		rate = (double)s_speedModifier;
+		if (s_slowMotion)
+			rate *= 0.5;
+	}
 
 	rate = std::clamp<double>(rate, 0.01, 100.0);
 
@@ -575,8 +584,96 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 
 bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
 	extern ATSimulator g_sim;
+
+	ATHardwareMode prevMode = g_sim.GetHardwareMode();
+	if (prevMode == mode)
+		return true;
+
+	// Check if we are switching to or from 5200 mode
+	const bool switching5200 = (mode == kATHardwareMode_5200 || prevMode == kATHardwareMode_5200);
+
+	if (switching5200) {
+		g_sim.UnloadAll();
+
+		// 5200 mode needs the default cart and 16K memory
+		if (mode == kATHardwareMode_5200) {
+			g_sim.LoadCartridge5200Default();
+			g_sim.SetMemoryMode(kATMemoryMode_16K);
+		}
+	}
+
 	g_sim.SetHardwareMode(mode);
+
+	// Check for incompatible kernel
+	switch (g_sim.GetKernelMode()) {
+		case kATKernelMode_Default:
+			break;
+
+		case kATKernelMode_XL:
+			if (!kATHardwareModeTraits[mode].mbRunsXLOS)
+				g_sim.SetKernel(0);
+			break;
+
+		case kATKernelMode_5200:
+			if (mode != kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+
+		default:
+			if (mode == kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+	}
+
+	// If we are in 5200 mode, we must be in NTSC
+	if (mode == kATHardwareMode_5200 && g_sim.GetVideoStandard() != kATVideoStandard_NTSC) {
+		g_sim.SetVideoStandard(kATVideoStandard_NTSC);
+		ATUIUpdateSpeedTiming();
+	}
+
+	g_sim.ColdReset();
 	return true;
+}
+
+void ATUISwitchMemoryMode(VDGUIHandle, ATMemoryMode mode) {
+	extern ATSimulator g_sim;
+
+	if (g_sim.GetMemoryMode() == mode)
+		return;
+
+	switch (g_sim.GetHardwareMode()) {
+		case kATHardwareMode_5200:
+			if (mode != kATMemoryMode_16K)
+				return;
+			break;
+
+		case kATHardwareMode_800XL:
+			if (mode == kATMemoryMode_48K ||
+				mode == kATMemoryMode_52K ||
+				mode == kATMemoryMode_8K ||
+				mode == kATMemoryMode_24K ||
+				mode == kATMemoryMode_32K ||
+				mode == kATMemoryMode_40K)
+				return;
+			break;
+
+		case kATHardwareMode_1200XL:
+		case kATHardwareMode_XEGS:
+		case kATHardwareMode_130XE:
+		case kATHardwareMode_1400XL:
+			if (mode == kATMemoryMode_48K ||
+				mode == kATMemoryMode_52K ||
+				mode == kATMemoryMode_8K ||
+				mode == kATMemoryMode_16K ||
+				mode == kATMemoryMode_24K ||
+				mode == kATMemoryMode_32K ||
+				mode == kATMemoryMode_40K)
+				return;
+			break;
+	}
+
+	g_sim.SetMemoryMode(mode);
+	g_sim.ColdReset();
 }
 bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId) {
 	extern ATSimulator g_sim;

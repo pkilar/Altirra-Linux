@@ -85,6 +85,9 @@ void ATGetFirmwareSearchPaths(vdvector<VDStringW>& paths);
 // Firmware switching (defined in stubs_linux.cpp)
 bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId);
 
+// Speed timing update (defined in stubs_linux.cpp)
+void ATUIUpdateSpeedTiming();
+
 extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
 
@@ -1152,24 +1155,49 @@ static const char *kHardwareModeNames[] = {
 };
 static_assert(sizeof(kHardwareModeNames) / sizeof(kHardwareModeNames[0]) == kATHardwareModeCount);
 
-static const char *kMemoryModeNames[] = {
-	"48K",
-	"52K",
-	"64K",
-	"128K",
-	"320K",
-	"576K",
-	"1088K",
-	"16K",
-	"8K",
-	"24K",
-	"32K",
-	"40K",
-	"320K Compy",
-	"576K Compy",
-	"256K"
+// Memory modes sorted by size (matching Windows UI order) with descriptive labels.
+// The enum order is non-sequential (48K,52K,64K,128K,...,16K,8K,...), so we use an
+// indirection table to display them in sorted order.
+struct MemoryModeEntry {
+	ATMemoryMode mode;
+	const char *label;
 };
-static_assert(sizeof(kMemoryModeNames) / sizeof(kMemoryModeNames[0]) == kATMemoryModeCount);
+
+static const MemoryModeEntry kSortedMemoryModes[] = {
+	{ kATMemoryMode_8K,			"8K" },
+	{ kATMemoryMode_16K,		"16K" },
+	{ kATMemoryMode_24K,		"24K" },
+	{ kATMemoryMode_32K,		"32K" },
+	{ kATMemoryMode_40K,		"40K" },
+	{ kATMemoryMode_48K,		"48K (800)" },
+	{ kATMemoryMode_52K,		"52K" },
+	{ kATMemoryMode_64K,		"64K (800XL/1200XL)" },
+	{ kATMemoryMode_128K,		"128K (130XE)" },
+	{ kATMemoryMode_256K,		"256K (Rambo)" },
+	{ kATMemoryMode_320K,		"320K (Rambo)" },
+	{ kATMemoryMode_320K_Compy,	"320K (Compy)" },
+	{ kATMemoryMode_576K,		"576K (Rambo)" },
+	{ kATMemoryMode_576K_Compy,	"576K (Compy)" },
+	{ kATMemoryMode_1088K,		"1088K" },
+};
+static_assert(sizeof(kSortedMemoryModes) / sizeof(kSortedMemoryModes[0]) == kATMemoryModeCount);
+
+// Helper to find the sorted index for a given ATMemoryMode
+static int MemoryModeToSortedIndex(ATMemoryMode mode) {
+	for (int i = 0; i < (int)kATMemoryModeCount; ++i) {
+		if (kSortedMemoryModes[i].mode == mode)
+			return i;
+	}
+	return 0;
+}
+
+// ImGui combo callback for sorted memory modes
+static bool MemoryModeComboGetter(void *, int idx, const char **out) {
+	if (idx < 0 || idx >= (int)kATMemoryModeCount)
+		return false;
+	*out = kSortedMemoryModes[idx].label;
+	return true;
+}
 
 static const char *kVideoStandardNames[] = {
 	"NTSC",
@@ -1630,7 +1658,7 @@ static void DrawMenuBar() {
 			ATHardwareMode curHW = g_sim.GetHardwareMode();
 			for (uint32 i = 0; i < kATHardwareModeCount; ++i) {
 				if (ImGui::MenuItem(kHardwareModeNames[i], nullptr, curHW == (ATHardwareMode)i)) {
-					g_sim.SetHardwareMode((ATHardwareMode)i);
+					ATUISwitchHardwareMode(nullptr, (ATHardwareMode)i, false);
 				}
 			}
 			ImGui::EndMenu();
@@ -1665,7 +1693,8 @@ static void DrawMenuBar() {
 				vdvector<ATFirmwareInfo> fwList;
 				fwMgr->GetFirmwareList(fwList);
 
-				bool hasSep = false;
+				// Filter to matching firmware and sort alphabetically by name
+				vdvector<const ATFirmwareInfo *> matchList;
 				for (const ATFirmwareInfo& fw : fwList) {
 					if (!fw.mbVisible)
 						continue;
@@ -1688,17 +1717,22 @@ static void DrawMenuBar() {
 							break;
 					}
 
-					if (!match)
-						continue;
+					if (match)
+						matchList.push_back(&fw);
+				}
 
-					if (!hasSep) {
-						ImGui::Separator();
-						hasSep = true;
-					}
+				std::sort(matchList.begin(), matchList.end(),
+					[](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+						return a->mName.comparei(b->mName) < 0;
+					});
 
-					VDStringA u8name = VDTextWToU8(fw.mName);
-					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw.mId == curKernel)) {
-						ATUISwitchKernel(nullptr, fw.mId);
+				if (!matchList.empty())
+					ImGui::Separator();
+
+				for (const ATFirmwareInfo *fw : matchList) {
+					VDStringA u8name = VDTextWToU8(fw->mName);
+					if (ImGui::MenuItem(u8name.c_str(), nullptr, fw->mId == curKernel)) {
+						ATUISwitchKernel(nullptr, fw->mId);
 					}
 				}
 			}
@@ -1708,9 +1742,9 @@ static void DrawMenuBar() {
 
 		if (ImGui::BeginMenu("Memory")) {
 			ATMemoryMode curMem = g_sim.GetMemoryMode();
-			for (uint32 i = 0; i < kATMemoryModeCount; ++i) {
-				if (ImGui::MenuItem(kMemoryModeNames[i], nullptr, curMem == (ATMemoryMode)i)) {
-					g_sim.SetMemoryMode((ATMemoryMode)i);
+			for (const auto& entry : kSortedMemoryModes) {
+				if (ImGui::MenuItem(entry.label, nullptr, curMem == entry.mode)) {
+					ATUISwitchMemoryMode(nullptr, entry.mode);
 				}
 			}
 			ImGui::EndMenu();
@@ -1720,7 +1754,12 @@ static void DrawMenuBar() {
 			ATVideoStandard curVS = g_sim.GetVideoStandard();
 			for (uint32 i = 0; i < kATVideoStandardCount; ++i) {
 				if (ImGui::MenuItem(kVideoStandardNames[i], nullptr, curVS == (ATVideoStandard)i)) {
+					// Block video standard change in 5200 mode (must be NTSC)
+					if (g_sim.GetHardwareMode() == kATHardwareMode_5200 && (ATVideoStandard)i != kATVideoStandard_NTSC)
+						continue;
 					g_sim.SetVideoStandard((ATVideoStandard)i);
+					ATUIUpdateSpeedTiming();
+					g_sim.ColdReset();
 				}
 			}
 			ImGui::EndMenu();
@@ -2419,6 +2458,17 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Enhanced Text")) {
+			ATUIEnhancedTextMode curMode = ATUIGetEnhancedTextMode();
+			if (ImGui::MenuItem("None", nullptr, curMode == kATUIEnhancedTextMode_None))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_None);
+			if (ImGui::MenuItem("Hardware", nullptr, curMode == kATUIEnhancedTextMode_Hardware))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Hardware);
+			if (ImGui::MenuItem("Software (CIO)", nullptr, curMode == kATUIEnhancedTextMode_Software))
+				ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Software);
+			ImGui::EndMenu();
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::MenuItem("Video Settings..."))
@@ -2462,6 +2512,12 @@ static void DrawMenuBar() {
 		bool turbo = ATUIGetTurbo();
 		if (ImGui::MenuItem("Turbo", nullptr, &turbo))
 			ATUISetTurbo(turbo);
+
+		{
+			bool slowmo = ATUIGetSlowMotion();
+			if (ImGui::MenuItem("Slow Motion", nullptr, &slowmo))
+				ATUISetSlowMotion(slowmo);
+		}
 
 		ImGui::Separator();
 
@@ -2643,6 +2699,13 @@ static void DrawMenuBar() {
 
 // ============= System Configuration Window =============
 
+// Pending state for System Settings dialog — edited by combos,
+// applied only when "Apply & Cold Reset" is pressed.
+static int s_pendingHwMode = -1;
+static int s_pendingMemMode = -1;
+static int s_pendingVideoStd = -1;
+static bool s_pendingBasic = false;
+
 static void DrawSystemConfig() {
 	if (!s_showSystemConfig)
 		return;
@@ -2653,42 +2716,40 @@ static void DrawSystemConfig() {
 		return;
 	}
 
+	// Sync pending state from simulator on first open
+	if (s_pendingHwMode < 0) {
+		s_pendingHwMode = (int)g_sim.GetHardwareMode();
+		s_pendingMemMode = MemoryModeToSortedIndex(g_sim.GetMemoryMode());
+		s_pendingVideoStd = (int)g_sim.GetVideoStandard();
+		s_pendingBasic = g_sim.IsBASICEnabled();
+	}
+
 	// Hardware mode
-	int hwMode = (int)g_sim.GetHardwareMode();
 	ImGui::Text("Hardware:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##hw", &hwMode, kHardwareModeNames, kATHardwareModeCount))
-		g_sim.SetHardwareMode((ATHardwareMode)hwMode);
+	ImGui::Combo("##hw", &s_pendingHwMode, kHardwareModeNames, kATHardwareModeCount);
 
 	// Memory mode
-	int memMode = (int)g_sim.GetMemoryMode();
 	ImGui::Text("Memory:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##mem", &memMode, kMemoryModeNames, kATMemoryModeCount))
-		g_sim.SetMemoryMode((ATMemoryMode)memMode);
+	ImGui::Combo("##mem", &s_pendingMemMode, MemoryModeComboGetter, nullptr, kATMemoryModeCount);
 
 	// Video standard
-	int videoStd = (int)g_sim.GetVideoStandard();
 	ImGui::Text("Video:");
 	ImGui::SameLine(100);
 	ImGui::SetNextItemWidth(180);
-	if (ImGui::Combo("##vid", &videoStd, kVideoStandardNames, kATVideoStandardCount))
-		g_sim.SetVideoStandard((ATVideoStandard)videoStd);
+	ImGui::Combo("##vid", &s_pendingVideoStd, kVideoStandardNames, kATVideoStandardCount);
 
 	// BASIC
-	bool basicEnabled = g_sim.IsBASICEnabled();
 	ImGui::Text("BASIC:");
 	ImGui::SameLine(100);
-	if (ImGui::Checkbox("##basic", &basicEnabled)) {
-		g_sim.SetBASICEnabled(basicEnabled);
-		g_sim.ColdReset();
-	}
+	ImGui::Checkbox("##basic", &s_pendingBasic);
 
 	ImGui::Separator();
 
-	// Display options
+	// Display options (applied immediately — not emulation state)
 	{
 		bool statusBar = ATUIGetShowStatusBar();
 		if (ImGui::Checkbox("Show Status Bar", &statusBar))
@@ -2698,10 +2759,68 @@ static void DrawSystemConfig() {
 	ImGui::Separator();
 
 	if (ImGui::Button("Apply & Cold Reset", ImVec2(180, 0))) {
+		auto newHW = (ATHardwareMode)s_pendingHwMode;
+		auto newMem = kSortedMemoryModes[s_pendingMemMode].mode;
+		auto newVid = (ATVideoStandard)s_pendingVideoStd;
+		ATHardwareMode prevHW = g_sim.GetHardwareMode();
+
+		// Handle 5200 transitions
+		bool switching5200 = (newHW == kATHardwareMode_5200 || prevHW == kATHardwareMode_5200)
+			&& newHW != prevHW;
+		if (switching5200) {
+			g_sim.UnloadAll();
+			if (newHW == kATHardwareMode_5200) {
+				g_sim.LoadCartridge5200Default();
+				newMem = kATMemoryMode_16K;
+			}
+		}
+
+		// Apply hardware mode
+		if (newHW != prevHW) {
+			g_sim.SetHardwareMode(newHW);
+
+			// Check for incompatible kernel
+			switch (g_sim.GetKernelMode()) {
+				case kATKernelMode_Default:
+					break;
+				case kATKernelMode_XL:
+					if (!kATHardwareModeTraits[newHW].mbRunsXLOS)
+						g_sim.SetKernel(0);
+					break;
+				case kATKernelMode_5200:
+					if (newHW != kATHardwareMode_5200)
+						g_sim.SetKernel(0);
+					break;
+				default:
+					if (newHW == kATHardwareMode_5200)
+						g_sim.SetKernel(0);
+					break;
+			}
+		}
+
+		// Apply video standard (5200 must be NTSC)
+		if (newHW == kATHardwareMode_5200)
+			newVid = kATVideoStandard_NTSC;
+		g_sim.SetVideoStandard(newVid);
+
+		// Apply memory mode with validation
+		g_sim.SetMemoryMode(newMem);
+
+		// Apply BASIC
+		g_sim.SetBASICEnabled(s_pendingBasic);
+
+		ATUIUpdateSpeedTiming();
 		g_sim.LoadROMs();
 		g_sim.ColdReset();
 		g_sim.Resume();
+
+		// Reset pending state so next open re-syncs
+		s_pendingHwMode = -1;
 	}
+
+	// Reset pending state when dialog is closed
+	if (!s_showSystemConfig)
+		s_pendingHwMode = -1;
 
 	ImGui::End();
 }
@@ -3686,35 +3805,58 @@ static void DrawFirmwareManager() {
 
 	if (ImGui::BeginTable("##fwtable", 3,
 		ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY
-			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp,
+			| ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp
+			| ImGuiTableFlags_Sortable | ImGuiTableFlags_SortTristate,
 		ImVec2(0, 200)))
 	{
-		ImGui::TableSetupColumn("Name", 0, 2.0f);
+		ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_DefaultSort, 2.0f);
 		ImGui::TableSetupColumn("Type", 0, 1.0f);
 		ImGui::TableSetupColumn("Path", 0, 2.0f);
 		ImGui::TableHeadersRow();
 
+		// Build sorted index of visible firmware
+		vdvector<const ATFirmwareInfo *> sortedFw;
 		for (const ATFirmwareInfo& fw : s_fwList) {
-			if (!fw.mbVisible)
-				continue;
+			if (fw.mbVisible)
+				sortedFw.push_back(&fw);
+		}
 
+		if (ImGuiTableSortSpecs *sortSpecs = ImGui::TableGetSortSpecs()) {
+			if (sortSpecs->SpecsCount > 0) {
+				const auto& spec = sortSpecs->Specs[0];
+				bool ascending = (spec.SortDirection == ImGuiSortDirection_Ascending);
+				std::sort(sortedFw.begin(), sortedFw.end(),
+					[&spec, ascending](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+						int cmp = 0;
+						switch (spec.ColumnIndex) {
+							case 0: cmp = a->mName.comparei(b->mName); break;
+							case 1: cmp = strcmp(ATGetFirmwareTypeDisplayName(a->mType),
+								ATGetFirmwareTypeDisplayName(b->mType)); break;
+							case 2: cmp = a->mPath.comparei(b->mPath); break;
+						}
+						return ascending ? cmp < 0 : cmp > 0;
+					});
+			}
+		}
+
+		for (const ATFirmwareInfo *fw : sortedFw) {
 			ImGui::TableNextRow();
 			ImGui::TableNextColumn();
 
-			VDStringA u8name = VDTextWToU8(fw.mName);
-			bool selected = (s_fwSelectedId == fw.mId);
+			VDStringA u8name = VDTextWToU8(fw->mName);
+			bool selected = (s_fwSelectedId == fw->mId);
 
 			if (ImGui::Selectable(u8name.c_str(), selected,
 				ImGuiSelectableFlags_SpanAllColumns))
 			{
-				s_fwSelectedId = fw.mId;
+				s_fwSelectedId = fw->mId;
 			}
 
 			ImGui::TableNextColumn();
-			ImGui::Text("%s", ATGetFirmwareTypeDisplayName(fw.mType));
+			ImGui::Text("%s", ATGetFirmwareTypeDisplayName(fw->mType));
 
 			ImGui::TableNextColumn();
-			VDStringA u8path = VDTextWToU8(fw.mPath);
+			VDStringA u8path = VDTextWToU8(fw->mPath);
 			ImGui::Text("%s", u8path.c_str());
 		}
 
@@ -3770,17 +3912,24 @@ static void DrawFirmwareManager() {
 				}
 			}
 
-			// Matching firmware entries
+			// Matching firmware entries, sorted alphabetically
+			vdvector<const ATFirmwareInfo *> matchingFw;
 			for (const ATFirmwareInfo& fw : s_fwList) {
-				if (fw.mType != def.type || !fw.mbVisible)
-					continue;
+				if (fw.mType == def.type && fw.mbVisible)
+					matchingFw.push_back(&fw);
+			}
+			std::sort(matchingFw.begin(), matchingFw.end(),
+				[](const ATFirmwareInfo *a, const ATFirmwareInfo *b) {
+					return a->mName.comparei(b->mName) < 0;
+				});
 
-				VDStringA u8name = VDTextWToU8(fw.mName);
-				bool isSelected = (fw.mId == currentDefault);
+			for (const ATFirmwareInfo *fw : matchingFw) {
+				VDStringA u8name = VDTextWToU8(fw->mName);
+				bool isSelected = (fw->mId == currentDefault);
 
 				if (ImGui::Selectable(u8name.c_str(), isSelected)) {
 					if (fwMgr) {
-						fwMgr->SetDefaultFirmware(def.type, fw.mId);
+						fwMgr->SetDefaultFirmware(def.type, fw->mId);
 						s_fwDefaultsChanged = true;
 					}
 				}
@@ -5005,12 +5154,12 @@ static void DrawCPUOptions() {
 	// Memory options
 	if (ImGui::CollapsingHeader("Memory", ImGuiTreeNodeFlags_DefaultOpen)) {
 		// Memory mode (also in System Settings, duplicated for convenience)
-		int memMode = (int)g_sim.GetMemoryMode();
+		int memIdx = MemoryModeToSortedIndex(g_sim.GetMemoryMode());
 		ImGui::Text("Memory:");
 		ImGui::SameLine(120);
 		ImGui::SetNextItemWidth(180);
-		if (ImGui::Combo("##memmode", &memMode, kMemoryModeNames, kATMemoryModeCount))
-			g_sim.SetMemoryMode((ATMemoryMode)memMode);
+		if (ImGui::Combo("##memmode", &memIdx, MemoryModeComboGetter, nullptr, kATMemoryModeCount))
+			ATUISwitchMemoryMode(nullptr, kSortedMemoryModes[memIdx].mode);
 
 		// Axlon memory
 		uint8 axlonBits = g_sim.GetAxlonMemoryMode();

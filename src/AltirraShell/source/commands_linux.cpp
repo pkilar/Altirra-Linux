@@ -76,6 +76,10 @@ static void OnCmdSystemTogglePauseWhenInactive() {
 	ATUISetPauseWhenInactive(!ATUIGetPauseWhenInactive());
 }
 
+static void OnCmdSystemToggleSlowMotion() {
+	ATUISetSlowMotion(!ATUIGetSlowMotion());
+}
+
 static void OnCmdSystemToggleWarpSpeed() {
 	ATUISetTurbo(!ATUIGetTurbo());
 }
@@ -377,6 +381,7 @@ static const ATUICommand kLinuxCommands[] = {
 	{ "System.ColdReset", OnCmdSystemColdReset },
 	{ "System.ColdResetComputerOnly", OnCmdSystemColdResetComputerOnly },
 	{ "System.TogglePauseWhenInactive", OnCmdSystemTogglePauseWhenInactive },
+	{ "System.ToggleSlowMotion", OnCmdSystemToggleSlowMotion },
 	{ "System.ToggleWarpSpeed", OnCmdSystemToggleWarpSpeed },
 	{ "System.ToggleFPPatch", OnCmdSystemToggleFPPatch },
 	{ "System.ToggleKeyboardPresent", OnCmdSystemToggleKeyboardPresent },
