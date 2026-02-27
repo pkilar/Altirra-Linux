@@ -217,6 +217,115 @@ static const DevCfgChoice kConnectRateChoices[] = {
 	{115200, "115200"}, {230400, "230400"},
 };
 
+static const DevCfgChoice kVBXEVersionChoices[] = {
+	{120, "FX 1.20"}, {124, "FX 1.24"}, {126, "FX 1.26"},
+};
+
+static const DevCfgChoice kXEP80PortChoices[] = {
+	{1, "Port 1"}, {2, "Port 2"}, {3, "Port 3 (400/800)"}, {4, "Port 4 (400/800)"},
+};
+
+static const DevCfgChoice kDonglePortChoices[] = {
+	{0, "Port 1"}, {1, "Port 2"}, {2, "Port 3 (400/800)"}, {3, "Port 4 (400/800)"},
+};
+
+static const DevCfgChoice kPrinterTranslationChoices[] = {
+	{0, "Translate EOL"}, {1, "Raw"}, {2, "ATASCII to UTF-8"},
+};
+
+static const DevCfgChoice kDriveIDChoices[] = {
+	{0, "Drive 1 (D1:)"}, {1, "Drive 2 (D2:)"}, {2, "Drive 3 (D3:)"}, {3, "Drive 4 (D4:)"},
+};
+
+static const DevCfgChoice k815IDChoices[] = {
+	{0, "Drives 1-2 (D1:-D2:)"}, {2, "Drives 3-4 (D3:-D4:)"},
+	{4, "Drives 5-6 (D5:-D6:)"}, {6, "Drives 7-8 (D7:-D8:)"},
+};
+
+static const DevCfgChoice kSoundBoardVersionChoices[] = {
+	{110, "1.1 (VBXE-based)"}, {120, "1.2 (with multiplier)"}, {200, "2.0 Preview"},
+};
+
+static const DevCfgChoice kSoundBoardBaseChoices[] = {
+	{0xD280, "$D280"}, {0xD2C0, "$D2C0"}, {0xD600, "$D600"}, {0xD700, "$D700"},
+};
+
+static const DevCfgChoice kCovoxBaseChoices[] = {
+	{0xD100, "$D100"}, {0xD280, "$D280"}, {0xD500, "$D500"},
+	{0xD600, "$D600"}, {0xD700, "$D700"},
+};
+
+static const DevCfgChoice kCovoxSizeChoices[] = {
+	{0x40, "$40 (64 bytes)"}, {0x80, "$80 (128 bytes)"}, {0x100, "$100 (256 bytes)"},
+};
+
+static const DevCfgChoice kCovoxChannelChoices[] = {
+	{1, "Mono"}, {4, "Stereo"},
+};
+
+static const DevCfgChoice k850EmuLevelChoices[] = {
+	{0, "None (emulated R: handler only)"},
+	{1, "Minimal (stub loader only)"},
+	{2, "Full (SIO protocol + 6502 R: handler)"},
+};
+
+static const DevCfgChoice k850BaudChoices[] = {
+	{0, "Auto"}, {1, "300"}, {2, "45.5"}, {3, "50"}, {4, "56.875"},
+	{5, "75"}, {6, "110"}, {7, "134.5"}, {8, "150"},
+	{10, "600"}, {11, "1200"}, {12, "1800"}, {13, "2400"},
+	{14, "4800"}, {15, "9600"},
+};
+
+static const DevCfgChoice kMultiplexerIDChoices[] = {
+	{-1, "Host"}, {0, "Client (ID 1)"}, {1, "Client (ID 2)"}, {2, "Client (ID 3)"},
+	{3, "Client (ID 4)"}, {4, "Client (ID 5)"}, {5, "Client (ID 6)"},
+	{6, "Client (ID 7)"}, {7, "Client (ID 8)"},
+};
+
+static const DevCfgChoice kBlkSizeChoices[] = {
+	{256, "256 bytes"}, {512, "512 bytes"},
+};
+
+static const DevCfgChoice kBBRamSizeChoices[] = {
+	{8, "8K"}, {32, "32K"}, {64, "64K"},
+};
+
+static const DevCfgChoice kBBFloppySlotChoices[] = {
+	{0, "Not Connected"}, {1, "D1:"}, {2, "D2:"}, {3, "D3:"}, {4, "D4:"},
+	{5, "D5:"}, {6, "D6:"}, {7, "D7:"}, {8, "D8:"}, {9, "D9:"},
+	{10, "D10:"}, {11, "D11:"}, {12, "D12:"}, {13, "D13:"}, {14, "D14:"},
+};
+
+static const DevCfgChoice kBBFloppyTypeChoices[] = {
+	{0, "180K 5.25\" 40-track SS"},
+	{1, "360K 5.25\" 40-track DS"},
+	{2, "1.2M 5.25\" 80-track DS HD"},
+	{3, "360K 3.5\" 80-track SS"},
+	{4, "720K 3.5\" 80-track DS"},
+	{5, "1.4M 3.5\" 80-track DS HD"},
+	{6, "1M 8\" 77-track DS HD"},
+};
+
+static const DevCfgChoice kBBFloppyMappingChoices[] = {
+	{0, "XF551"}, {1, "ATR8000"}, {2, "PERCOM"},
+};
+
+static const DevCfgChoice kATR8000DriveTypeChoices[] = {
+	{0, "None"}, {1, "5.25\""}, {2, "8\""},
+};
+
+static const DevCfgChoice kPercomDriveTypeChoices[] = {
+	{0, "None"}, {1, "5.25\" (40 track)"}, {2, "5.25\" (80 track)"},
+};
+
+static const DevCfgChoice kAMDCDriveTypeChoices[] = {
+	{0, "None"}, {1, "3\"/5.25\" (40 track)"}, {2, "3\"/5.25\" (80 track)"},
+};
+
+static const DevCfgChoice k1020ColorChoices[] = {
+	{0x000000, "Black"}, {0x181FF0, "Blue"}, {0x0B9C2F, "Green"}, {0xC91B12, "Red"},
+};
+
 static const DevCfgControl kCfgModem[] = {
 	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
@@ -258,6 +367,183 @@ static const DevCfgControl kCfgCustomDev[] = {
 	{ DevCfgType::Checkbox, "allowunsafe", "Allow Unsafe Ops", nullptr, 0, false, nullptr },
 };
 
+static const DevCfgControl kCfgVBXE[] = {
+	{ DevCfgType::IntDropdown, "version", "Hardware Version", kVBXEVersionChoices, 3, false, nullptr },
+	{ DevCfgType::Checkbox, "alt_page", "Alternate Page", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "shared_mem", "Shared Memory", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgXEP80[] = {
+	{ DevCfgType::IntDropdown, "port", "Joystick Port", kXEP80PortChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgVeronica[] = {
+	{ DevCfgType::Checkbox, "version1", "V1 (Three RAM Chips)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgCorvus[] = {
+	{ DevCfgType::Checkbox, "altports", "Use Ports 1+2 (XL/XE Compatible)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgComputerEyes[] = {
+	{ DevCfgType::IntInput, "brightness", "Brightness (0-100)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgParFileWriter[] = {
+	{ DevCfgType::PathSelect, "path", "Output Path", nullptr, 0, false, "Select Output File" },
+	{ DevCfgType::Checkbox, "text_mode", "Text Mode (EOL Conversion)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgVideoStillImage[] = {
+	{ DevCfgType::PathSelect, "path", "Image Path", nullptr, 0, false, "Select Image File" },
+};
+
+static const DevCfgControl kCfgDongle[] = {
+	{ DevCfgType::IntDropdown, "port", "Joystick Port", kDonglePortChoices, 4, false, nullptr },
+	{ DevCfgType::StringEdit, "mapping", "Mapping (16 Hex Digits)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPrinterHLE[] = {
+	{ DevCfgType::IntDropdown, "translation_mode", "Translation Mode", kPrinterTranslationChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveFull[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kDriveIDChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveHappy810[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kDriveIDChoices, 4, false, nullptr },
+	{ DevCfgType::Checkbox, "autospeed", "Auto-Speed", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrive815[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive Pair", k815IDChoices, 4, false, nullptr },
+	{ DevCfgType::Checkbox, "accurate_invert", "Accurate Invert", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgSoundBoard[] = {
+	{ DevCfgType::IntDropdown, "version", "Hardware Version", kSoundBoardVersionChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "base", "Base Address", kSoundBoardBaseChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgCovox[] = {
+	{ DevCfgType::IntDropdown, "base", "Base Address", kCovoxBaseChoices, 5, false, nullptr },
+	{ DevCfgType::IntDropdown, "size", "Address Size", kCovoxSizeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "channels", "Channels", kCovoxChannelChoices, 2, false, nullptr },
+};
+
+static const DevCfgControl kCfg850[] = {
+	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "baudex", "Extended Baud Rates", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "emulevel", "Emulation Level", k850EmuLevelChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfg850Full[] = {
+	{ DevCfgType::IntDropdown, "serbaud1", "Port 1 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud2", "Port 2 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud3", "Port 3 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud4", "Port 4 Baud Rate", k850BaudChoices, 15, false, nullptr },
+};
+
+static const DevCfgControl kCfg1400XL[] = {
+	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "telnet", "Telnet Emulation", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "telnetlf", "Telnet LF Mode", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "ipv6", "Listen IPv6", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialaddr", "Dial Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialsvc", "Dial Service", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgNetSerial[] = {
+	{ DevCfgType::StringEdit, "connect_addr", "Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "port", "TCP Port", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "baud_rate", "Baud Rate", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "listen", "Listen Mode", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgMultiplexer[] = {
+	{ DevCfgType::IntDropdown, "device_id", "Device ID", kMultiplexerIDChoices, 9, false, nullptr },
+	{ DevCfgType::StringEdit, "host_address", "Host Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "port", "TCP Port", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "allow_external", "Allow External Connections", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPipeSerial[] = {
+	{ DevCfgType::StringEdit, "pipe_name", "Pipe Name", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "baud_rate", "Baud Rate", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgBlackBox[] = {
+	{ DevCfgType::IntInput, "dipsw", "DIP Switches (0-255)", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "blksize", "Sector Size", kBlkSizeChoices, 2, false, nullptr },
+	{ DevCfgType::IntDropdown, "ramsize", "RAM Size", kBBRamSizeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgBlackBoxFloppy[] = {
+	{ DevCfgType::IntDropdown, "driveslot0", "Slot 1 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Slot 1 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping0", "Slot 1 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot1", "Slot 2 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Slot 2 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping1", "Slot 2 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot2", "Slot 3 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Slot 3 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping2", "Slot 3 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot3", "Slot 4 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Slot 4 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping3", "Slot 4 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveATR8000[] = {
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::StringEdit, "signal1", "Signal 1 (rts/dtr)", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "signal2", "Signal 2 (cts/dsr/cd/srts)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercom[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kIDChoices, 8, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercomAT[] = {
+	{ DevCfgType::Checkbox, "use1795", "Use 1795 FDC (Side Compare Always On)", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "ddcapable", "Double Density Capable", nullptr, 0, true, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercomATSPD[] = {
+	{ DevCfgType::Checkbox, "use1795", "Use 1795 FDC (Side Compare Always On)", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveAMDC[] = {
+	{ DevCfgType::IntInput, "switches", "DIP Switches", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "drive2", "Second External Drive", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "extdrive0", "External Drive 1 Type", kAMDCDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "extdrive1", "External Drive 2 Type", kAMDCDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfg1020[] = {
+	{ DevCfgType::IntDropdown, "pencolor0", "Pen 1 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor1", "Pen 2 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor2", "Pen 3 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor3", "Pen 4 Color", k1020ColorChoices, 4, false, nullptr },
+};
+
 // --- Tag → descriptor lookup ---
 
 struct DevCfgTagMapping {
@@ -294,6 +580,52 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("pclink", "PCLink", kCfgPCLink),
 	DEVCFG_ENTRY("hostfs", "Host FS Bridge", kCfgHostFS),
 	DEVCFG_ENTRY("customdev", "Custom Device", kCfgCustomDev),
+	DEVCFG_ENTRY("custom", "Custom Device", kCfgCustomDev),
+	DEVCFG_ENTRY("vbxe", "VBXE", kCfgVBXE),
+	DEVCFG_ENTRY("xep80", "XEP-80", kCfgXEP80),
+	DEVCFG_ENTRY("veronica", "Veronica", kCfgVeronica),
+	DEVCFG_ENTRY("corvus", "Corvus Disk", kCfgCorvus),
+	DEVCFG_ENTRY("computereyes", "Computer Eyes", kCfgComputerEyes),
+	DEVCFG_ENTRY("parfilewriter", "Parallel File Writer", kCfgParFileWriter),
+	DEVCFG_ENTRY("videostillimage", "Video Still Image", kCfgVideoStillImage),
+	DEVCFG_ENTRY("dongle", "Dongle", kCfgDongle),
+	DEVCFG_ENTRY("printer", "Printer (P:)", kCfgPrinterHLE),
+	DEVCFG_ENTRY("diskdrive810", "810 Disk Drive", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive810archiver", "810 Archiver", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050", "1050 Disk Drive", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveusdoubler", "US Doubler", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivespeedy1050", "Speedy 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivehappy1050", "Happy 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivesuperarchiver", "Super Archiver", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivesuperarchiverbw", "Super Archiver (B&W)", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivetoms1050", "Toms 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050duplicator", "1050 Duplicator", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivetygrys1050", "Tygrys 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050turbo", "1050 Turbo", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050turboii", "1050 Turbo II", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveisplate", "IS-Plate", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveindusgt", "Indus GT", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivexf551", "XF551", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive810turbo", "810 Turbo", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivespeedyxf", "Speedy XF", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivehappy810", "Happy 810", kCfgDiskDriveHappy810),
+	DEVCFG_ENTRY("diskdrive815", "815 Dual Disk Drive", kCfgDiskDrive815),
+	DEVCFG_ENTRY("soundboard", "SoundBoard", kCfgSoundBoard),
+	DEVCFG_ENTRY("covox", "Covox", kCfgCovox),
+	DEVCFG_ENTRY("850", "850 Interface", kCfg850),
+	DEVCFG_ENTRY("850full", "850 Interface (Full)", kCfg850Full),
+	DEVCFG_ENTRY("1400xl", "1400XL Modem", kCfg1400XL),
+	DEVCFG_ENTRY("netserial", "Network Serial", kCfgNetSerial),
+	DEVCFG_ENTRY("multiplexer", "Multiplexer", kCfgMultiplexer),
+	DEVCFG_ENTRY("pipeserial", "Pipe Serial", kCfgPipeSerial),
+	DEVCFG_ENTRY("blackbox", "Black Box", kCfgBlackBox),
+	DEVCFG_ENTRY("blackboxfloppy", "Black Box Floppy", kCfgBlackBoxFloppy),
+	DEVCFG_ENTRY("diskdriveatr8000", "ATR8000", kCfgDiskDriveATR8000),
+	DEVCFG_ENTRY("diskdrivepercom", "Percom RFD", kCfgDiskDrivePercom),
+	DEVCFG_ENTRY("diskdrivepercomat", "Percom AT", kCfgDiskDrivePercomAT),
+	DEVCFG_ENTRY("diskdrivepercomatspd", "Percom AT-SPD", kCfgDiskDrivePercomATSPD),
+	DEVCFG_ENTRY("diskdriveamdc", "AM&DC", kCfgDiskDriveAMDC),
+	DEVCFG_ENTRY("1020", "1020 Color Printer", kCfg1020),
 };
 
 #undef DEVCFG_ENTRY
@@ -4313,15 +4645,25 @@ static void DrawDeviceManager() {
 		const auto& defs = devMgr->GetDeviceDefinitions();
 
 		ImGui::Text("Select device type:");
-		if (ImGui::BeginListBox("##devlist", ImVec2(400, 250))) {
-			for (int i = 0; i < (int)defs.size(); ++i) {
-				const ATDeviceDefinition *def = defs[i];
-				if (def->mFlags & (kATDeviceDefFlag_Internal | kATDeviceDefFlag_Hidden))
-					continue;
 
+		// Build sorted index of visible devices
+		vdfastvector<int> sortedIndices;
+		for (int i = 0; i < (int)defs.size(); ++i) {
+			const ATDeviceDefinition *def = defs[i];
+			if (def->mFlags & (kATDeviceDefFlag_Internal | kATDeviceDefFlag_Hidden))
+				continue;
+			sortedIndices.push_back(i);
+		}
+		std::sort(sortedIndices.begin(), sortedIndices.end(), [&defs](int a, int b) {
+			return wcscmp(defs[a]->mpName, defs[b]->mpName) < 0;
+		});
+
+		if (ImGui::BeginListBox("##devlist", ImVec2(400, 250))) {
+			for (int idx : sortedIndices) {
+				const ATDeviceDefinition *def = defs[idx];
 				VDStringA u8name = VDTextWToU8(VDStringW(def->mpName));
-				if (ImGui::Selectable(u8name.c_str(), s_devAddSelectedIdx == i))
-					s_devAddSelectedIdx = i;
+				if (ImGui::Selectable(u8name.c_str(), s_devAddSelectedIdx == idx))
+					s_devAddSelectedIdx = idx;
 			}
 			ImGui::EndListBox();
 		}

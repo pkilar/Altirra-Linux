@@ -5,8 +5,9 @@ cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL2 for
 display, audio, and input, OpenGL 2.1 for rendering, and Dear ImGui for the
 configuration and debugger overlay.
 
-> **Status**: ~99.5% feature-complete. Core emulation, UI, debugger, recording,
-> disk explorer, and all configuration dialogs are fully functional.
+> **Status**: ~99.8% feature-complete. Core emulation, UI, debugger, recording,
+> disk explorer, and all configuration dialogs are fully functional. The generic
+> device config system covers 66 of 67 Windows device tags.
 
 ## Prerequisites
 
@@ -238,7 +239,7 @@ succeeds.
 
 - No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
 - No physical disk access (intentionally disabled for security)
-- Some device-specific configuration dialogs have fewer fields than Windows version (generic config system covers most devices)
+- A few complex device dialogs use simplified controls (e.g., DIP switches as integer input, compound dropdowns as separate controls)
 
 ## Running the test suite
 
