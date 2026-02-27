@@ -217,6 +217,22 @@ static const DevCfgChoice kConnectRateChoices[] = {
 	{115200, "115200"}, {230400, "230400"},
 };
 
+static const DevCfgChoice kVBXEVersionChoices[] = {
+	{120, "FX 1.20"}, {124, "FX 1.24"}, {126, "FX 1.26"},
+};
+
+static const DevCfgChoice kXEP80PortChoices[] = {
+	{1, "Port 1"}, {2, "Port 2"}, {3, "Port 3 (400/800)"}, {4, "Port 4 (400/800)"},
+};
+
+static const DevCfgChoice kDonglePortChoices[] = {
+	{0, "Port 1"}, {1, "Port 2"}, {2, "Port 3 (400/800)"}, {3, "Port 4 (400/800)"},
+};
+
+static const DevCfgChoice kPrinterTranslationChoices[] = {
+	{0, "Translate EOL"}, {1, "Raw"}, {2, "ATASCII to UTF-8"},
+};
+
 static const DevCfgControl kCfgModem[] = {
 	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
@@ -258,6 +274,46 @@ static const DevCfgControl kCfgCustomDev[] = {
 	{ DevCfgType::Checkbox, "allowunsafe", "Allow Unsafe Ops", nullptr, 0, false, nullptr },
 };
 
+static const DevCfgControl kCfgVBXE[] = {
+	{ DevCfgType::IntDropdown, "version", "Hardware Version", kVBXEVersionChoices, 3, false, nullptr },
+	{ DevCfgType::Checkbox, "alt_page", "Alternate Page", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "shared_mem", "Shared Memory", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgXEP80[] = {
+	{ DevCfgType::IntDropdown, "port", "Joystick Port", kXEP80PortChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgVeronica[] = {
+	{ DevCfgType::Checkbox, "version1", "V1 (Three RAM Chips)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgCorvus[] = {
+	{ DevCfgType::Checkbox, "altports", "Use Ports 1+2 (XL/XE Compatible)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgComputerEyes[] = {
+	{ DevCfgType::IntInput, "brightness", "Brightness (0-100)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgParFileWriter[] = {
+	{ DevCfgType::PathSelect, "path", "Output Path", nullptr, 0, false, "Select Output File" },
+	{ DevCfgType::Checkbox, "text_mode", "Text Mode (EOL Conversion)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgVideoStillImage[] = {
+	{ DevCfgType::PathSelect, "path", "Image Path", nullptr, 0, false, "Select Image File" },
+};
+
+static const DevCfgControl kCfgDongle[] = {
+	{ DevCfgType::IntDropdown, "port", "Joystick Port", kDonglePortChoices, 4, false, nullptr },
+	{ DevCfgType::StringEdit, "mapping", "Mapping (16 Hex Digits)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPrinterHLE[] = {
+	{ DevCfgType::IntDropdown, "translation_mode", "Translation Mode", kPrinterTranslationChoices, 3, false, nullptr },
+};
+
 // --- Tag → descriptor lookup ---
 
 struct DevCfgTagMapping {
@@ -294,6 +350,16 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("pclink", "PCLink", kCfgPCLink),
 	DEVCFG_ENTRY("hostfs", "Host FS Bridge", kCfgHostFS),
 	DEVCFG_ENTRY("customdev", "Custom Device", kCfgCustomDev),
+	DEVCFG_ENTRY("custom", "Custom Device", kCfgCustomDev),
+	DEVCFG_ENTRY("vbxe", "VBXE", kCfgVBXE),
+	DEVCFG_ENTRY("xep80", "XEP-80", kCfgXEP80),
+	DEVCFG_ENTRY("veronica", "Veronica", kCfgVeronica),
+	DEVCFG_ENTRY("corvus", "Corvus Disk", kCfgCorvus),
+	DEVCFG_ENTRY("computereyes", "Computer Eyes", kCfgComputerEyes),
+	DEVCFG_ENTRY("parfilewriter", "Parallel File Writer", kCfgParFileWriter),
+	DEVCFG_ENTRY("videostillimage", "Video Still Image", kCfgVideoStillImage),
+	DEVCFG_ENTRY("dongle", "Dongle", kCfgDongle),
+	DEVCFG_ENTRY("printer", "Printer (P:)", kCfgPrinterHLE),
 };
 
 #undef DEVCFG_ENTRY
