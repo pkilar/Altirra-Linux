@@ -85,6 +85,8 @@
 void ATInitDebugger();
 void ATShutdownDebugger();
 
+#include "compatengine.h"
+
 // Forward declarations from uiregistry.cpp
 void ATUILoadRegistry(const wchar_t *path);
 void ATUISaveRegistry(const wchar_t *fnpath);
@@ -1218,8 +1220,9 @@ int main(int argc, char *argv[]) {
 		fprintf(stderr, "ImGui initialized (F12 to toggle overlay)\n");
 	}
 
-	// Init debugger (must be after sim init)
+	// Init debugger and compatibility database (must be after sim init)
 	ATInitDebugger();
+	ATCompatInit();
 	ATImGuiDebuggerInit();
 	ATImGuiEmulatorInit();
 	fprintf(stderr, "Debugger initialized\n");
@@ -1504,6 +1507,7 @@ int main(int argc, char *argv[]) {
 	ATImGuiEmulatorShutdown();
 	ATImGuiDebuggerShutdown();
 	ATShutdownDebugger();
+	ATCompatShutdown();
 
 	// Shutdown simulator
 	g_sim.Shutdown();
