@@ -41,6 +41,18 @@
 
 #include "uirender.h"
 
+#ifdef AT_HAVE_FFMPEG
+extern "C" {
+#include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
+#include <libavutil/opt.h>
+#include <libavutil/imgutils.h>
+#include <libavutil/channel_layout.h>
+#include <libswscale/swscale.h>
+#include <libswresample/swresample.h>
+}
+#endif
+
 #ifdef VD_PLATFORM_WINDOWS
 #include <vd2/system/w32assist.h>
 
@@ -1499,6 +1511,367 @@ bool ATAVIEncoder::Finalize(MyError& error) {
 
 	return error.empty();
 }
+
+///////////////////////////////////////////////////////////////////////////////
+
+#ifdef AT_HAVE_FFMPEG
+
+class ATFFmpegEncoder final : public IATMediaEncoder {
+public:
+	ATFFmpegEncoder(const wchar_t *filename, uint32 videoBitRate, uint32 audioBitRate,
+		uint32 w, uint32 h, const VDFraction& frameRate, double samplingRate, bool stereo);
+	~ATFFmpegEncoder();
+
+	sint64 GetCurrentSize() override;
+
+	void WriteVideo(const VDPixmap& px) override;
+	void BeginAudioFrame(uint32 bytes, uint32 samples) override;
+	void WriteAudio(const sint16 *data, uint32 bytes) override;
+	void EndAudioFrame() override;
+
+	bool Finalize(MyError& e) override;
+
+private:
+	void FlushEncoder(AVCodecContext *codecCtx, AVStream *stream);
+
+	AVFormatContext *mpFormatCtx = nullptr;
+	AVCodecContext *mpVideoCodecCtx = nullptr;
+	AVCodecContext *mpAudioCodecCtx = nullptr;
+	AVStream *mpVideoStream = nullptr;
+	AVStream *mpAudioStream = nullptr;
+	SwsContext *mpSwsCtx = nullptr;
+	SwrContext *mpSwrCtx = nullptr;
+	AVFrame *mpVideoFrame = nullptr;
+	AVFrame *mpAudioFrame = nullptr;
+	AVPacket *mpPacket = nullptr;
+	AVPixelFormat mLastSrcFmt = AV_PIX_FMT_NONE;
+
+	uint32 mWidth = 0;
+	uint32 mHeight = 0;
+	int64_t mVideoFrameCount = 0;
+	int64_t mAudioSamplesWritten = 0;
+
+	vdfastvector<sint16> mAudioBuffer;
+	uint32 mAudioBufferPos = 0;
+	bool mbStereo = false;
+	int mAudioFrameSize = 0;
+};
+
+ATFFmpegEncoder::ATFFmpegEncoder(const wchar_t *filename, uint32 videoBitRate, uint32 audioBitRate,
+	uint32 w, uint32 h, const VDFraction& frameRate, double samplingRate, bool stereo)
+	: mWidth(w)
+	, mHeight(h)
+	, mbStereo(stereo)
+{
+	VDStringA path(VDTextWToU8(VDStringW(filename)));
+
+	int ret = avformat_alloc_output_context2(&mpFormatCtx, nullptr, "mp4", path.c_str());
+	if (ret < 0 || !mpFormatCtx)
+		throw MyError("FFmpeg: Failed to create MP4 output context.");
+
+	// === Video stream ===
+	const AVCodec *videoCodec = avcodec_find_encoder(AV_CODEC_ID_H264);
+	if (!videoCodec)
+		throw MyError("FFmpeg: H.264 encoder not found. Install libx264.");
+
+	mpVideoStream = avformat_new_stream(mpFormatCtx, videoCodec);
+	if (!mpVideoStream)
+		throw MyError("FFmpeg: Failed to create video stream.");
+
+	mpVideoCodecCtx = avcodec_alloc_context3(videoCodec);
+	if (!mpVideoCodecCtx)
+		throw MyError("FFmpeg: Failed to allocate video codec context.");
+
+	mpVideoCodecCtx->width = w;
+	mpVideoCodecCtx->height = h;
+	mpVideoCodecCtx->pix_fmt = AV_PIX_FMT_YUV420P;
+	mpVideoCodecCtx->color_range = AVCOL_RANGE_MPEG;
+	mpVideoCodecCtx->colorspace = AVCOL_SPC_BT709;
+	mpVideoCodecCtx->color_primaries = AVCOL_PRI_BT709;
+	mpVideoCodecCtx->color_trc = AVCOL_TRC_BT709;
+	mpVideoCodecCtx->bit_rate = videoBitRate ? videoBitRate : 2000000;
+	mpVideoCodecCtx->time_base = AVRational{(int)frameRate.getLo(), (int)frameRate.getHi()};
+	mpVideoCodecCtx->gop_size = 60;
+	mpVideoCodecCtx->max_b_frames = 2;
+
+	av_opt_set(mpVideoCodecCtx->priv_data, "preset", "medium", 0);
+	av_opt_set(mpVideoCodecCtx->priv_data, "tune", "animation", 0);
+
+	if (mpFormatCtx->oformat->flags & AVFMT_GLOBALHEADER)
+		mpVideoCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+	ret = avcodec_open2(mpVideoCodecCtx, videoCodec, nullptr);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to open H.264 encoder.");
+
+	ret = avcodec_parameters_from_context(mpVideoStream->codecpar, mpVideoCodecCtx);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to copy video codec parameters.");
+
+	mpVideoStream->time_base = mpVideoCodecCtx->time_base;
+
+	// === Audio stream ===
+	const AVCodec *audioCodec = avcodec_find_encoder(AV_CODEC_ID_AAC);
+	if (!audioCodec)
+		throw MyError("FFmpeg: AAC encoder not found.");
+
+	mpAudioStream = avformat_new_stream(mpFormatCtx, audioCodec);
+	if (!mpAudioStream)
+		throw MyError("FFmpeg: Failed to create audio stream.");
+
+	mpAudioCodecCtx = avcodec_alloc_context3(audioCodec);
+	if (!mpAudioCodecCtx)
+		throw MyError("FFmpeg: Failed to allocate audio codec context.");
+
+	mpAudioCodecCtx->sample_rate = 48000;
+	mpAudioCodecCtx->bit_rate = audioBitRate ? audioBitRate : 128000;
+	mpAudioCodecCtx->sample_fmt = AV_SAMPLE_FMT_FLTP;
+	AVChannelLayout chLayout = stereo ? AVChannelLayout AV_CHANNEL_LAYOUT_STEREO : AVChannelLayout AV_CHANNEL_LAYOUT_MONO;
+	av_channel_layout_copy(&mpAudioCodecCtx->ch_layout, &chLayout);
+	mpAudioCodecCtx->time_base = AVRational{1, 48000};
+
+	if (mpFormatCtx->oformat->flags & AVFMT_GLOBALHEADER)
+		mpAudioCodecCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+	ret = avcodec_open2(mpAudioCodecCtx, audioCodec, nullptr);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to open AAC encoder.");
+
+	ret = avcodec_parameters_from_context(mpAudioStream->codecpar, mpAudioCodecCtx);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to copy audio codec parameters.");
+
+	mpAudioStream->time_base = mpAudioCodecCtx->time_base;
+
+	mAudioFrameSize = mpAudioCodecCtx->frame_size;
+	if (mAudioFrameSize <= 0)
+		mAudioFrameSize = 1024;
+
+	// === SwrContext for S16 -> FLTP conversion ===
+	ret = swr_alloc_set_opts2(&mpSwrCtx,
+		&mpAudioCodecCtx->ch_layout, AV_SAMPLE_FMT_FLTP, 48000,
+		&mpAudioCodecCtx->ch_layout, AV_SAMPLE_FMT_S16, 48000,
+		0, nullptr);
+	if (ret < 0 || !mpSwrCtx)
+		throw MyError("FFmpeg: Failed to create audio resampler.");
+
+	ret = swr_init(mpSwrCtx);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to init audio resampler.");
+
+	// === Open output file ===
+	if (!(mpFormatCtx->oformat->flags & AVFMT_NOFILE)) {
+		ret = avio_open(&mpFormatCtx->pb, path.c_str(), AVIO_FLAG_WRITE);
+		if (ret < 0)
+			throw MyError("FFmpeg: Failed to open output file '%s'.", path.c_str());
+	}
+
+	ret = avformat_write_header(mpFormatCtx, nullptr);
+	if (ret < 0)
+		throw MyError("FFmpeg: Failed to write MP4 header.");
+
+	// === Allocate frames ===
+	mpVideoFrame = av_frame_alloc();
+	mpVideoFrame->format = AV_PIX_FMT_YUV420P;
+	mpVideoFrame->width = w;
+	mpVideoFrame->height = h;
+	av_frame_get_buffer(mpVideoFrame, 0);
+
+	mpAudioFrame = av_frame_alloc();
+	mpAudioFrame->format = AV_SAMPLE_FMT_FLTP;
+	av_channel_layout_copy(&mpAudioFrame->ch_layout, &mpAudioCodecCtx->ch_layout);
+	mpAudioFrame->sample_rate = 48000;
+	mpAudioFrame->nb_samples = mAudioFrameSize;
+	av_frame_get_buffer(mpAudioFrame, 0);
+
+	mpPacket = av_packet_alloc();
+
+	// === SwsContext for BGRA -> YUV420P ===
+	// mpSwsCtx created lazily in WriteVideo based on actual input format
+
+	int channels = stereo ? 2 : 1;
+	mAudioBuffer.resize(mAudioFrameSize * channels, 0);
+	mAudioBufferPos = 0;
+}
+
+ATFFmpegEncoder::~ATFFmpegEncoder() {
+	if (mpPacket)
+		av_packet_free(&mpPacket);
+	if (mpVideoFrame)
+		av_frame_free(&mpVideoFrame);
+	if (mpAudioFrame)
+		av_frame_free(&mpAudioFrame);
+	if (mpSwsCtx)
+		sws_freeContext(mpSwsCtx);
+	if (mpSwrCtx)
+		swr_free(&mpSwrCtx);
+	if (mpVideoCodecCtx)
+		avcodec_free_context(&mpVideoCodecCtx);
+	if (mpAudioCodecCtx)
+		avcodec_free_context(&mpAudioCodecCtx);
+	if (mpFormatCtx) {
+		if (mpFormatCtx->pb)
+			avio_closep(&mpFormatCtx->pb);
+		avformat_free_context(mpFormatCtx);
+	}
+}
+
+sint64 ATFFmpegEncoder::GetCurrentSize() {
+	if (mpFormatCtx && mpFormatCtx->pb)
+		return avio_tell(mpFormatCtx->pb);
+	return 0;
+}
+
+void ATFFmpegEncoder::WriteVideo(const VDPixmap& px) {
+	av_frame_make_writable(mpVideoFrame);
+
+	// Determine source pixel format and plane layout from VDPixmap
+	AVPixelFormat srcFmt;
+	const uint8_t *srcData[4] = {};
+	int srcStride[4] = {};
+
+	switch (px.format) {
+		case nsVDPixmap::kPixFormat_YUV420_Planar:
+		case nsVDPixmap::kPixFormat_YUV420_Planar_709:
+			srcFmt = AV_PIX_FMT_YUV420P;
+			srcData[0] = (const uint8_t *)px.data;
+			srcData[1] = (const uint8_t *)px.data2;
+			srcData[2] = (const uint8_t *)px.data3;
+			srcStride[0] = (int)px.pitch;
+			srcStride[1] = (int)px.pitch2;
+			srcStride[2] = (int)px.pitch3;
+			break;
+
+		case nsVDPixmap::kPixFormat_YUV444_Planar:
+		case nsVDPixmap::kPixFormat_YUV444_Planar_709:
+			srcFmt = AV_PIX_FMT_YUV444P;
+			srcData[0] = (const uint8_t *)px.data;
+			srcData[1] = (const uint8_t *)px.data2;
+			srcData[2] = (const uint8_t *)px.data3;
+			srcStride[0] = (int)px.pitch;
+			srcStride[1] = (int)px.pitch2;
+			srcStride[2] = (int)px.pitch3;
+			break;
+
+		default: // XRGB8888
+			srcFmt = AV_PIX_FMT_BGRA;
+			srcData[0] = (const uint8_t *)px.data;
+			srcStride[0] = (int)px.pitch;
+			break;
+	}
+
+	// Recreate swscale context if input format changed
+	if (srcFmt != mLastSrcFmt) {
+		if (mpSwsCtx)
+			sws_freeContext(mpSwsCtx);
+		mpSwsCtx = sws_getContext(mWidth, mHeight, srcFmt,
+			mWidth, mHeight, AV_PIX_FMT_YUV420P,
+			SWS_BILINEAR, nullptr, nullptr, nullptr);
+		if (!mpSwsCtx)
+			return;
+		mLastSrcFmt = srcFmt;
+	}
+
+	sws_scale(mpSwsCtx, srcData, srcStride, 0, mHeight,
+		mpVideoFrame->data, mpVideoFrame->linesize);
+
+	mpVideoFrame->pts = mVideoFrameCount++;
+
+	int ret = avcodec_send_frame(mpVideoCodecCtx, mpVideoFrame);
+	while (ret >= 0) {
+		ret = avcodec_receive_packet(mpVideoCodecCtx, mpPacket);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			break;
+		av_packet_rescale_ts(mpPacket, mpVideoCodecCtx->time_base, mpVideoStream->time_base);
+		mpPacket->stream_index = mpVideoStream->index;
+		av_interleaved_write_frame(mpFormatCtx, mpPacket);
+		av_packet_unref(mpPacket);
+	}
+}
+
+void ATFFmpegEncoder::BeginAudioFrame(uint32 bytes, uint32 samples) {
+	// Nothing to do — we accumulate in WriteAudio
+}
+
+void ATFFmpegEncoder::WriteAudio(const sint16 *data, uint32 bytes) {
+	int channels = mbStereo ? 2 : 1;
+	uint32 samplesPerChannel = bytes / (2 * channels);
+	const sint16 *src = data;
+
+	while (samplesPerChannel > 0) {
+		uint32 spaceLeft = (uint32)(mAudioFrameSize - mAudioBufferPos / channels);
+		uint32 toCopy = std::min(samplesPerChannel, spaceLeft);
+		uint32 samplesToCopy = toCopy * channels;
+
+		memcpy(mAudioBuffer.data() + mAudioBufferPos, src, samplesToCopy * sizeof(sint16));
+		mAudioBufferPos += samplesToCopy;
+		src += samplesToCopy;
+		samplesPerChannel -= toCopy;
+
+		if (mAudioBufferPos / channels >= (uint32)mAudioFrameSize) {
+			// Buffer full — encode one frame
+			av_frame_make_writable(mpAudioFrame);
+			mpAudioFrame->nb_samples = mAudioFrameSize;
+
+			const uint8_t *inData[1] = { (const uint8_t *)mAudioBuffer.data() };
+			swr_convert(mpSwrCtx, mpAudioFrame->data, mAudioFrameSize,
+				inData, mAudioFrameSize);
+
+			mpAudioFrame->pts = mAudioSamplesWritten;
+			mAudioSamplesWritten += mAudioFrameSize;
+
+			int ret = avcodec_send_frame(mpAudioCodecCtx, mpAudioFrame);
+			while (ret >= 0) {
+				ret = avcodec_receive_packet(mpAudioCodecCtx, mpPacket);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+					break;
+				av_packet_rescale_ts(mpPacket, mpAudioCodecCtx->time_base, mpAudioStream->time_base);
+				mpPacket->stream_index = mpAudioStream->index;
+				av_interleaved_write_frame(mpFormatCtx, mpPacket);
+				av_packet_unref(mpPacket);
+			}
+
+			mAudioBufferPos = 0;
+		}
+	}
+}
+
+void ATFFmpegEncoder::EndAudioFrame() {
+	// Nothing to do — audio frames are flushed in WriteAudio when buffer is full
+}
+
+void ATFFmpegEncoder::FlushEncoder(AVCodecContext *codecCtx, AVStream *stream) {
+	avcodec_send_frame(codecCtx, nullptr);
+	while (true) {
+		int ret = avcodec_receive_packet(codecCtx, mpPacket);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			break;
+		if (ret < 0)
+			break;
+		av_packet_rescale_ts(mpPacket, codecCtx->time_base, stream->time_base);
+		mpPacket->stream_index = stream->index;
+		av_interleaved_write_frame(mpFormatCtx, mpPacket);
+		av_packet_unref(mpPacket);
+	}
+}
+
+bool ATFFmpegEncoder::Finalize(MyError& e) {
+	try {
+		if (mpVideoCodecCtx && mpFormatCtx)
+			FlushEncoder(mpVideoCodecCtx, mpVideoStream);
+		if (mpAudioCodecCtx && mpFormatCtx)
+			FlushEncoder(mpAudioCodecCtx, mpAudioStream);
+
+		if (mpFormatCtx)
+			av_write_trailer(mpFormatCtx);
+	} catch (...) {
+		e = MyError("FFmpeg: Error during finalization.");
+		return false;
+	}
+	return true;
+}
+
+#endif // AT_HAVE_FFMPEG
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -3102,6 +3475,9 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		default:
 			break;
 	}
+#elif defined(AT_HAVE_FFMPEG)
+	if (venc == kATVideoEncoding_H264_AAC)
+		useYUV = true;
 #endif
 
 	if (useYUV) {
@@ -3185,6 +3561,13 @@ void ATVideoWriter::Init(const wchar_t *filename, ATVideoEncoding venc,
 		case kATVideoEncoding_H264_AAC:
 		case kATVideoEncoding_H264_MP3:
 			mpMediaEncoder = new ATMediaFoundationEncoderW32(filename, venc, videoBitRate, audioBitRate, w, h, encodingFrameRate, palette, samplingRate, stereo, useYUV);
+			break;
+#endif
+
+#ifdef AT_HAVE_FFMPEG
+		case kATVideoEncoding_H264_AAC:
+			mpMediaEncoder = new ATFFmpegEncoder(filename, videoBitRate, audioBitRate,
+				w, h, encodingFrameRate, samplingRate, stereo);
 			break;
 #endif
 

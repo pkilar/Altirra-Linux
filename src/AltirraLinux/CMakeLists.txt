@@ -301,6 +301,21 @@ target_link_libraries(altirra
 		m
 )
 
+# Optional FFmpeg support for H.264 recording
+if(AT_HAVE_FFMPEG)
+	target_compile_definitions(altirra PRIVATE AT_HAVE_FFMPEG)
+	target_include_directories(altirra PRIVATE
+		${LIBAVCODEC_INCLUDE_DIRS} ${LIBAVFORMAT_INCLUDE_DIRS}
+		${LIBAVUTIL_INCLUDE_DIRS} ${LIBSWSCALE_INCLUDE_DIRS}
+		${LIBSWRESAMPLE_INCLUDE_DIRS}
+	)
+	target_link_libraries(altirra PRIVATE
+		${LIBAVCODEC_LIBRARIES} ${LIBAVFORMAT_LIBRARIES}
+		${LIBAVUTIL_LIBRARIES} ${LIBSWSCALE_LIBRARIES}
+		${LIBSWRESAMPLE_LIBRARIES}
+	)
+endif()
+
 # Install targets
 install(TARGETS altirra RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_SOURCE_DIR}/data/altirra.desktop DESTINATION share/applications)
