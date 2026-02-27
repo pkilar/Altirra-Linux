@@ -15,7 +15,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - Cartridge support (100+ mapper types)
 - H: host device and PCLink file sharing
 - IDE hard disk emulation
-- Ethernet emulation (DragonCart)
+- Modem emulation via TCP sockets
 - Save states
 - Built-in BASIC compiler/interpreter
 
@@ -25,14 +25,16 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Audio**: SDL2 audio output with POKEY emulation
 - **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
 - **UI**: Full Dear ImGui interface with menus, dialogs, and configuration
-- **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
+- **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, source-level debugging, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
 - **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
 - **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
 - **Settings**: Portable INI-based configuration at `~/.config/altirra/Altirra.ini`
 - **File dialogs**: Native dialogs via zenity (GTK) or kdialog (KDE) with ImGui fallback
 - **Firmware discovery**: Automatic ROM scanning from multiple paths
 - **Screenshots**: PNG screenshot capture
-- **Recording**: Audio recording (WAV/PCM/SAP/VGM)
+- **Video recording**: AVI (ZMBV lossless, Raw, RLE) and H.264+AAC MP4 (requires optional FFmpeg libraries)
+- **Audio recording**: WAV, raw PCM, SAP, VGM
+- **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode
 
 ### Keyboard Shortcuts
 
@@ -60,23 +62,33 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - SDL2 development libraries
 - OpenGL development libraries
 - Git (for Dear ImGui fetch)
+- FFmpeg development libraries (optional, enables H.264+AAC video recording)
 
 #### Debian/Ubuntu
 
 ```bash
 sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev git
+
+# Optional: H.264 video recording
+sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
 #### Arch Linux
 
 ```bash
 sudo pacman -S base-devel cmake ninja sdl2 mesa git
+
+# Optional: H.264 video recording
+sudo pacman -S ffmpeg
 ```
 
 #### Fedora
 
 ```bash
 sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel git
+
+# Optional: H.264 video recording
+sudo dnf install ffmpeg-free-devel
 ```
 
 ### Build
@@ -171,12 +183,15 @@ The Linux port is approximately **99% complete** relative to the Windows version
 - Disk explorer with filesystem operations
 - Input mapping with binding editor
 - Save states (quick save/load and file-based)
-- Audio/video recording
-- Network emulation (socket layer with epoll)
+- Audio recording (WAV/PCM/SAP/VGM) and video recording (AVI + H.264/MP4)
+- Network emulation (modem TCP via POSIX sockets, socket layer with epoll)
 - Firmware discovery and management
+- Source-level debugging with symbol file support
+- Precision frame pacing with speed control
 
 ### Intentionally Disabled
 
+- **DragonCart Ethernet** — stubbed (modem TCP works)
 - **Raw disk access** (ATIDEPhysicalDisk) — disabled for security
 - **ETW tracing** (ATCreateNativeTracer) — Windows-specific tracing infrastructure
 - **Win32 resource loading** — not applicable on Linux
@@ -192,6 +207,7 @@ src/
   AltirraLinux/source/
     main_linux.cpp                      # Entry point, SDL2 window, main loop, settings
     stubs_linux.cpp                     # Implementations for Windows-only interfaces
+    console_linux.cpp                   # Debug console, source window bridge
   AltirraShell/source/
     emulator_imgui.cpp                  # ImGui UI (menus, dialogs, status bar)
     debugger_imgui.cpp                  # ImGui debugger windows
