@@ -210,17 +210,13 @@ recording dialog.
 
 ## Known limitations
 
-- No cartridge browser or ROM set manager UI
-- No input mapping configuration (keyboard layout is fixed)
-- No custom display shaders or screen effects (bloom, scanlines, etc.)
-- No network emulation (DragonCart, modem)
-- No physical disk access
-- No directory/file watching (inotify not yet implemented)
-- No async file I/O (synchronous stubs only)
+- No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
+- No physical disk access (intentionally disabled for security)
 - Speed modifier adjusts audio rate but does not implement precision frame
   pacing (full timing match with the Windows build is future work)
 - Save states work for in-memory quick save/load and file-based `.atstate2`;
   not all device types may serialize correctly yet
+- No source-level debugging windows (hex/disasm debugging available)
 
 ## Running the test suite
 
