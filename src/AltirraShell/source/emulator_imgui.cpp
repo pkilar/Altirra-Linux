@@ -242,6 +242,46 @@ static const DevCfgChoice k815IDChoices[] = {
 	{4, "Drives 5-6 (D5:-D6:)"}, {6, "Drives 7-8 (D7:-D8:)"},
 };
 
+static const DevCfgChoice kSoundBoardVersionChoices[] = {
+	{110, "1.1 (VBXE-based)"}, {120, "1.2 (with multiplier)"}, {200, "2.0 Preview"},
+};
+
+static const DevCfgChoice kSoundBoardBaseChoices[] = {
+	{0xD280, "$D280"}, {0xD2C0, "$D2C0"}, {0xD600, "$D600"}, {0xD700, "$D700"},
+};
+
+static const DevCfgChoice kCovoxBaseChoices[] = {
+	{0xD100, "$D100"}, {0xD280, "$D280"}, {0xD500, "$D500"},
+	{0xD600, "$D600"}, {0xD700, "$D700"},
+};
+
+static const DevCfgChoice kCovoxSizeChoices[] = {
+	{0x40, "$40 (64 bytes)"}, {0x80, "$80 (128 bytes)"}, {0x100, "$100 (256 bytes)"},
+};
+
+static const DevCfgChoice kCovoxChannelChoices[] = {
+	{1, "Mono"}, {4, "Stereo"},
+};
+
+static const DevCfgChoice k850EmuLevelChoices[] = {
+	{0, "None (emulated R: handler only)"},
+	{1, "Minimal (stub loader only)"},
+	{2, "Full (SIO protocol + 6502 R: handler)"},
+};
+
+static const DevCfgChoice k850BaudChoices[] = {
+	{0, "Auto"}, {1, "300"}, {2, "45.5"}, {3, "50"}, {4, "56.875"},
+	{5, "75"}, {6, "110"}, {7, "134.5"}, {8, "150"},
+	{10, "600"}, {11, "1200"}, {12, "1800"}, {13, "2400"},
+	{14, "4800"}, {15, "9600"},
+};
+
+static const DevCfgChoice kMultiplexerIDChoices[] = {
+	{-1, "Host"}, {0, "Client (ID 1)"}, {1, "Client (ID 2)"}, {2, "Client (ID 3)"},
+	{3, "Client (ID 4)"}, {4, "Client (ID 5)"}, {5, "Client (ID 6)"},
+	{6, "Client (ID 7)"}, {7, "Client (ID 8)"},
+};
+
 static const DevCfgControl kCfgModem[] = {
 	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
@@ -337,6 +377,60 @@ static const DevCfgControl kCfgDiskDrive815[] = {
 	{ DevCfgType::Checkbox, "accurate_invert", "Accurate Invert", nullptr, 0, false, nullptr },
 };
 
+static const DevCfgControl kCfgSoundBoard[] = {
+	{ DevCfgType::IntDropdown, "version", "Hardware Version", kSoundBoardVersionChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "base", "Base Address", kSoundBoardBaseChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgCovox[] = {
+	{ DevCfgType::IntDropdown, "base", "Base Address", kCovoxBaseChoices, 5, false, nullptr },
+	{ DevCfgType::IntDropdown, "size", "Address Size", kCovoxSizeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "channels", "Channels", kCovoxChannelChoices, 2, false, nullptr },
+};
+
+static const DevCfgControl kCfg850[] = {
+	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "baudex", "Extended Baud Rates", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "emulevel", "Emulation Level", k850EmuLevelChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfg850Full[] = {
+	{ DevCfgType::IntDropdown, "serbaud1", "Port 1 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud2", "Port 2 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud3", "Port 3 Baud Rate", k850BaudChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "serbaud4", "Port 4 Baud Rate", k850BaudChoices, 15, false, nullptr },
+};
+
+static const DevCfgControl kCfg1400XL[] = {
+	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "telnet", "Telnet Emulation", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "telnetlf", "Telnet LF Mode", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "ipv6", "Listen IPv6", nullptr, 0, true, nullptr },
+	{ DevCfgType::Checkbox, "unthrottled", "Unthrottled", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialaddr", "Dial Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "dialsvc", "Dial Service", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgNetSerial[] = {
+	{ DevCfgType::StringEdit, "connect_addr", "Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "port", "TCP Port", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "baud_rate", "Baud Rate", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "listen", "Listen Mode", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgMultiplexer[] = {
+	{ DevCfgType::IntDropdown, "device_id", "Device ID", kMultiplexerIDChoices, 9, false, nullptr },
+	{ DevCfgType::StringEdit, "host_address", "Host Address", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "port", "TCP Port", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "allow_external", "Allow External Connections", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgPipeSerial[] = {
+	{ DevCfgType::StringEdit, "pipe_name", "Pipe Name", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntInput, "baud_rate", "Baud Rate", nullptr, 0, false, nullptr },
+};
+
 // --- Tag → descriptor lookup ---
 
 struct DevCfgTagMapping {
@@ -403,6 +497,14 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("diskdrivespeedyxf", "Speedy XF", kCfgDiskDriveFull),
 	DEVCFG_ENTRY("diskdrivehappy810", "Happy 810", kCfgDiskDriveHappy810),
 	DEVCFG_ENTRY("diskdrive815", "815 Dual Disk Drive", kCfgDiskDrive815),
+	DEVCFG_ENTRY("soundboard", "SoundBoard", kCfgSoundBoard),
+	DEVCFG_ENTRY("covox", "Covox", kCfgCovox),
+	DEVCFG_ENTRY("850", "850 Interface", kCfg850),
+	DEVCFG_ENTRY("850full", "850 Interface (Full)", kCfg850Full),
+	DEVCFG_ENTRY("1400xl", "1400XL Modem", kCfg1400XL),
+	DEVCFG_ENTRY("netserial", "Network Serial", kCfgNetSerial),
+	DEVCFG_ENTRY("multiplexer", "Multiplexer", kCfgMultiplexer),
+	DEVCFG_ENTRY("pipeserial", "Pipe Serial", kCfgPipeSerial),
 };
 
 #undef DEVCFG_ENTRY
