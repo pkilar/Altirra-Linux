@@ -17,6 +17,7 @@ configuration and debugger overlay.
 | CMake      | 3.20            | Ninja generator recommended                    |
 | SDL2       | 2.0.20+         | `libsdl2-dev` on Debian/Ubuntu, `sdl2` on Arch |
 | OpenGL     | 2.1             | `libgl-dev` / `mesa-libGL-devel`               |
+| FFmpeg     | 5.0+ (optional) | Enables H.264+AAC video recording to MP4       |
 
 Dear ImGui v1.91.8 is fetched automatically via CMake `FetchContent` — no
 manual download needed.
@@ -26,16 +27,25 @@ manual download needed.
 **Debian / Ubuntu:**
 ```sh
 sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev
+
+# Optional: H.264 video recording
+sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
 ```
 
 **Arch Linux:**
 ```sh
 sudo pacman -S base-devel cmake ninja sdl2 mesa
+
+# Optional: H.264 video recording
+sudo pacman -S ffmpeg
 ```
 
 **Fedora:**
 ```sh
 sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel
+
+# Optional: H.264 video recording
+sudo dnf install ffmpeg-free-devel
 ```
 
 ## Building
@@ -180,6 +190,23 @@ The View > Display Filter menu controls texture filtering:
 - **Bilinear** — linear interpolation (smooth)
 - Bicubic / Sharp Bilinear / Any Suitable all map to bilinear in the current
   OpenGL 2.1 fixed-function renderer
+
+## Video recording
+
+Record emulator video and audio via **File > Record Video**. Available codecs:
+
+| Codec                  | Container | Notes                                       |
+| ---------------------- | --------- | ------------------------------------------- |
+| ZMBV (Lossless)        | AVI       | Best quality, large files                   |
+| Raw (Uncompressed)     | AVI       | Largest files                               |
+| RLE (Palette only)     | AVI       | 8-bit palette modes only                    |
+| H.264+AAC (MP4)        | MP4       | Requires FFmpeg dev libraries at build time |
+
+The H.264 option only appears if FFmpeg was detected during the CMake configure
+step. CMake prints `FFmpeg found - H.264 recording enabled` when detection
+succeeds. The H.264 encoder uses `preset=medium` and `tune=animation` (good for
+retro pixel art). Video bitrate is adjustable from 500 to 8000 kbps in the
+recording dialog.
 
 ## Known limitations
 

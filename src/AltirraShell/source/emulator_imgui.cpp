@@ -600,11 +600,12 @@ static const char *kAviFilters =
 // ============= Video recording config dialog state =============
 
 static bool s_showVideoRecordDialog = false;
-static int s_videoCodecIndex = 0;       // 0=ZMBV, 1=Raw, 2=RLE
+static int s_videoCodecIndex = 0;       // 0=ZMBV, 1=Raw, 2=RLE [, 3=H.264+AAC if FFmpeg]
 static int s_videoScalingIndex = 0;     // 0=None, 1=480p Narrow, 2=480p Wide, 3=720p Narrow, 4=720p Wide
 static int s_videoResamplingIndex = 0;  // 0=Nearest, 1=Sharp Bilinear, 2=Bilinear
 static bool s_videoHalfRate = false;
 static bool s_videoEncodeAll = false;
+static int s_videoBitRateKbps = 2000;   // 500-8000 kbps for H.264
 
 static void StartVideoRecording(const wchar_t *path) {
 	try {
@@ -625,7 +626,11 @@ static void StartVideoRecording(const wchar_t *path) {
 		double samplingRate = hz50 ? 1773447.0 / 28.0 : 3579545.0 / 56.0;
 		double par = gtia.GetPixelAspectRatio();
 
+#ifdef AT_HAVE_FFMPEG
+		static const ATVideoEncoding kCodecs[] = { kATVideoEncoding_ZMBV, kATVideoEncoding_Raw, kATVideoEncoding_RLE, kATVideoEncoding_H264_AAC };
+#else
 		static const ATVideoEncoding kCodecs[] = { kATVideoEncoding_ZMBV, kATVideoEncoding_Raw, kATVideoEncoding_RLE };
+#endif
 		ATVideoEncoding encoding = kCodecs[s_videoCodecIndex];
 
 		static const ATVideoRecordingScalingMode kScaling[] = {
@@ -646,7 +651,13 @@ static void StartVideoRecording(const wchar_t *path) {
 
 		double timestampRate = hz50 ? 1773447.0 : 1789772.5;
 
-		s_pVideoWriter->Init(path, encoding, 0, 0,
+		uint32 videoBitRate = 0, audioBitRate = 0;
+		if (encoding == kATVideoEncoding_H264_AAC) {
+			videoBitRate = s_videoBitRateKbps * 1000;
+			audioBitRate = 128000;
+		}
+
+		s_pVideoWriter->Init(path, encoding, videoBitRate, audioBitRate,
 			w, h, frameRate, par, resamplingMode, scalingMode,
 			rgb32 ? nullptr : palette,
 			samplingRate, g_sim.IsDualPokeysEnabled(),
@@ -5450,14 +5461,28 @@ static void DrawVideoRecordDialog() {
 		return;
 
 	ImGui::SetNextWindowSize(ImVec2(380, 0), ImGuiCond_FirstUseEver);
-	if (!ImGui::Begin("Record Video (AVI)", &s_showVideoRecordDialog, ImGuiWindowFlags_AlwaysAutoResize)) {
+	if (!ImGui::Begin("Record Video", &s_showVideoRecordDialog, ImGuiWindowFlags_AlwaysAutoResize)) {
 		ImGui::End();
 		return;
 	}
 
 	ImGui::Text("Codec:");
+#ifdef AT_HAVE_FFMPEG
+	static const char *kCodecNames[] = { "ZMBV (Lossless)", "Raw (Uncompressed)", "RLE (Palette only)", "H.264+AAC (MP4)" };
+	const int codecCount = 4;
+#else
 	static const char *kCodecNames[] = { "ZMBV (Lossless)", "Raw (Uncompressed)", "RLE (Palette only)" };
-	ImGui::Combo("##codec", &s_videoCodecIndex, kCodecNames, 3);
+	const int codecCount = 3;
+#endif
+	ImGui::Combo("##codec", &s_videoCodecIndex, kCodecNames, codecCount);
+
+#ifdef AT_HAVE_FFMPEG
+	if (s_videoCodecIndex == 3) {
+		ImGui::Spacing();
+		ImGui::Text("Video Bitrate:");
+		ImGui::SliderInt("##vbitrate", &s_videoBitRateKbps, 500, 8000, "%d kbps");
+	}
+#endif
 
 	ImGui::Spacing();
 	ImGui::Text("Scaling:");
@@ -5480,10 +5505,19 @@ static void DrawVideoRecordDialog() {
 	ImGui::Spacing();
 
 	if (ImGui::Button("Record...", ImVec2(120, 0))) {
-		VDStringW path = ATLinuxSaveFileDialog("Record Video", kAviFilters);
+#ifdef AT_HAVE_FFMPEG
+		static const ATVideoEncoding kDialogCodecs[] = { kATVideoEncoding_ZMBV, kATVideoEncoding_Raw, kATVideoEncoding_RLE, kATVideoEncoding_H264_AAC };
+		bool isMP4 = (kDialogCodecs[s_videoCodecIndex] == kATVideoEncoding_H264_AAC);
+#else
+		bool isMP4 = false;
+#endif
+		const char *filter = isMP4
+			? "MP4 Video|*.mp4|All Files|*"
+			: "AVI Video|*.avi|All Files|*";
+		VDStringW path = ATLinuxSaveFileDialog("Record Video", filter);
 		if (!path.empty()) {
 			if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
-				path += L".avi";
+				path += isMP4 ? L".mp4" : L".avi";
 			StartVideoRecording(path.c_str());
 			s_showVideoRecordDialog = false;
 		}

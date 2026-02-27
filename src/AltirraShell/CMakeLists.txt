@@ -38,3 +38,7 @@ target_link_libraries(altirrashell
 		OpenGL::GL
 		imgui
 )
+
+if(AT_HAVE_FFMPEG)
+	target_compile_definitions(altirrashell PRIVATE AT_HAVE_FFMPEG)
+endif()

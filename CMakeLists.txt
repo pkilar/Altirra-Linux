@@ -4,6 +4,25 @@ project(Altirra VERSION 4.40 LANGUAGES CXX)
 # Include shared compiler flags
 include(cmake/AltirraCompilerFlags.cmake)
 
+# Optional FFmpeg detection for H.264 video recording on Linux
+if(NOT WIN32)
+	find_package(PkgConfig QUIET)
+	if(PkgConfig_FOUND)
+		pkg_check_modules(LIBAVCODEC libavcodec)
+		pkg_check_modules(LIBAVFORMAT libavformat)
+		pkg_check_modules(LIBAVUTIL libavutil)
+		pkg_check_modules(LIBSWSCALE libswscale)
+		pkg_check_modules(LIBSWRESAMPLE libswresample)
+		if(LIBAVCODEC_FOUND AND LIBAVFORMAT_FOUND AND LIBAVUTIL_FOUND AND LIBSWSCALE_FOUND AND LIBSWRESAMPLE_FOUND)
+			set(AT_HAVE_FFMPEG TRUE)
+			message(STATUS "FFmpeg found - H.264 recording enabled")
+		else()
+			set(AT_HAVE_FFMPEG FALSE)
+			message(STATUS "FFmpeg not found - H.264 recording disabled")
+		endif()
+	endif()
+endif()
+
 # Global include paths (mirrors VS solution include dirs)
 include_directories(${CMAKE_SOURCE_DIR}/src/h)
 
