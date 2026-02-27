@@ -420,10 +420,13 @@ void ATUIUpdateSpeedTiming() {
 
 	const double cyclesPerSecond = kMasterClocks[tableIndex] * kPeriods[0][tableIndex] / rawSecondsPerFrame;
 
+	// Linux UI stores s_speedModifier as a direct multiplier (1.0 = 100%,
+	// 0.5 = 50%, 2.0 = 200%). Windows uses an offset convention where
+	// rate = g_speedModifier + 1.0, but our UI already provides the rate.
 	double rate = 1.0;
 
 	if (!g_sim.IsTurboModeEnabled())
-		rate = std::max<double>(0, s_speedModifier + 1.0);
+		rate = (double)s_speedModifier;
 
 	rate = std::clamp<double>(rate, 0.01, 100.0);
 
