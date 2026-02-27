@@ -1729,6 +1729,7 @@ static void DrawMenuBar() {
 		bool basicEnabled = g_sim.IsBASICEnabled();
 		if (ImGui::MenuItem("BASIC", nullptr, &basicEnabled)) {
 			g_sim.SetBASICEnabled(basicEnabled);
+			g_sim.ColdReset();
 		}
 
 		ImGui::Separator();
@@ -2680,8 +2681,10 @@ static void DrawSystemConfig() {
 	bool basicEnabled = g_sim.IsBASICEnabled();
 	ImGui::Text("BASIC:");
 	ImGui::SameLine(100);
-	if (ImGui::Checkbox("##basic", &basicEnabled))
+	if (ImGui::Checkbox("##basic", &basicEnabled)) {
 		g_sim.SetBASICEnabled(basicEnabled);
+		g_sim.ColdReset();
+	}
 
 	ImGui::Separator();
 
