@@ -282,6 +282,50 @@ static const DevCfgChoice kMultiplexerIDChoices[] = {
 	{6, "Client (ID 7)"}, {7, "Client (ID 8)"},
 };
 
+static const DevCfgChoice kBlkSizeChoices[] = {
+	{256, "256 bytes"}, {512, "512 bytes"},
+};
+
+static const DevCfgChoice kBBRamSizeChoices[] = {
+	{8, "8K"}, {32, "32K"}, {64, "64K"},
+};
+
+static const DevCfgChoice kBBFloppySlotChoices[] = {
+	{0, "Not Connected"}, {1, "D1:"}, {2, "D2:"}, {3, "D3:"}, {4, "D4:"},
+	{5, "D5:"}, {6, "D6:"}, {7, "D7:"}, {8, "D8:"}, {9, "D9:"},
+	{10, "D10:"}, {11, "D11:"}, {12, "D12:"}, {13, "D13:"}, {14, "D14:"},
+};
+
+static const DevCfgChoice kBBFloppyTypeChoices[] = {
+	{0, "180K 5.25\" 40-track SS"},
+	{1, "360K 5.25\" 40-track DS"},
+	{2, "1.2M 5.25\" 80-track DS HD"},
+	{3, "360K 3.5\" 80-track SS"},
+	{4, "720K 3.5\" 80-track DS"},
+	{5, "1.4M 3.5\" 80-track DS HD"},
+	{6, "1M 8\" 77-track DS HD"},
+};
+
+static const DevCfgChoice kBBFloppyMappingChoices[] = {
+	{0, "XF551"}, {1, "ATR8000"}, {2, "PERCOM"},
+};
+
+static const DevCfgChoice kATR8000DriveTypeChoices[] = {
+	{0, "None"}, {1, "5.25\""}, {2, "8\""},
+};
+
+static const DevCfgChoice kPercomDriveTypeChoices[] = {
+	{0, "None"}, {1, "5.25\" (40 track)"}, {2, "5.25\" (80 track)"},
+};
+
+static const DevCfgChoice kAMDCDriveTypeChoices[] = {
+	{0, "None"}, {1, "3\"/5.25\" (40 track)"}, {2, "3\"/5.25\" (80 track)"},
+};
+
+static const DevCfgChoice k1020ColorChoices[] = {
+	{0x000000, "Black"}, {0x181FF0, "Blue"}, {0x0B9C2F, "Green"}, {0xC91B12, "Red"},
+};
+
 static const DevCfgControl kCfgModem[] = {
 	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
@@ -431,6 +475,75 @@ static const DevCfgControl kCfgPipeSerial[] = {
 	{ DevCfgType::IntInput, "baud_rate", "Baud Rate", nullptr, 0, false, nullptr },
 };
 
+static const DevCfgControl kCfgBlackBox[] = {
+	{ DevCfgType::IntInput, "dipsw", "DIP Switches (0-255)", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "blksize", "Sector Size", kBlkSizeChoices, 2, false, nullptr },
+	{ DevCfgType::IntDropdown, "ramsize", "RAM Size", kBBRamSizeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgBlackBoxFloppy[] = {
+	{ DevCfgType::IntDropdown, "driveslot0", "Slot 1 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Slot 1 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping0", "Slot 1 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot1", "Slot 2 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Slot 2 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping1", "Slot 2 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot2", "Slot 3 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Slot 3 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping2", "Slot 3 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "driveslot3", "Slot 4 Drive", kBBFloppySlotChoices, 15, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Slot 4 Type", kBBFloppyTypeChoices, 7, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivemapping3", "Slot 4 Mapping", kBBFloppyMappingChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveATR8000[] = {
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kATR8000DriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::StringEdit, "signal1", "Signal 1 (rts/dtr)", nullptr, 0, false, nullptr },
+	{ DevCfgType::StringEdit, "signal2", "Signal 2 (cts/dsr/cd/srts)", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercom[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kIDChoices, 8, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercomAT[] = {
+	{ DevCfgType::Checkbox, "use1795", "Use 1795 FDC (Side Compare Always On)", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "ddcapable", "Double Density Capable", nullptr, 0, true, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrivePercomATSPD[] = {
+	{ DevCfgType::Checkbox, "use1795", "Use 1795 FDC (Side Compare Always On)", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype0", "Drive 1 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype1", "Drive 2 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype2", "Drive 3 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "drivetype3", "Drive 4 Type", kPercomDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveAMDC[] = {
+	{ DevCfgType::IntInput, "switches", "DIP Switches", nullptr, 0, false, nullptr },
+	{ DevCfgType::Checkbox, "drive2", "Second External Drive", nullptr, 0, false, nullptr },
+	{ DevCfgType::IntDropdown, "extdrive0", "External Drive 1 Type", kAMDCDriveTypeChoices, 3, false, nullptr },
+	{ DevCfgType::IntDropdown, "extdrive1", "External Drive 2 Type", kAMDCDriveTypeChoices, 3, false, nullptr },
+};
+
+static const DevCfgControl kCfg1020[] = {
+	{ DevCfgType::IntDropdown, "pencolor0", "Pen 1 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor1", "Pen 2 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor2", "Pen 3 Color", k1020ColorChoices, 4, false, nullptr },
+	{ DevCfgType::IntDropdown, "pencolor3", "Pen 4 Color", k1020ColorChoices, 4, false, nullptr },
+};
+
 // --- Tag → descriptor lookup ---
 
 struct DevCfgTagMapping {
@@ -505,6 +618,14 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("netserial", "Network Serial", kCfgNetSerial),
 	DEVCFG_ENTRY("multiplexer", "Multiplexer", kCfgMultiplexer),
 	DEVCFG_ENTRY("pipeserial", "Pipe Serial", kCfgPipeSerial),
+	DEVCFG_ENTRY("blackbox", "Black Box", kCfgBlackBox),
+	DEVCFG_ENTRY("blackboxfloppy", "Black Box Floppy", kCfgBlackBoxFloppy),
+	DEVCFG_ENTRY("diskdriveatr8000", "ATR8000", kCfgDiskDriveATR8000),
+	DEVCFG_ENTRY("diskdrivepercom", "Percom RFD", kCfgDiskDrivePercom),
+	DEVCFG_ENTRY("diskdrivepercomat", "Percom AT", kCfgDiskDrivePercomAT),
+	DEVCFG_ENTRY("diskdrivepercomatspd", "Percom AT-SPD", kCfgDiskDrivePercomATSPD),
+	DEVCFG_ENTRY("diskdriveamdc", "AM&DC", kCfgDiskDriveAMDC),
+	DEVCFG_ENTRY("1020", "1020 Color Printer", kCfg1020),
 };
 
 #undef DEVCFG_ENTRY
