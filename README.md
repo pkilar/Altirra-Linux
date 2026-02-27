@@ -190,6 +190,7 @@ The Linux port is approximately **99.9% complete** relative to the Windows versi
 - Network emulation (modem TCP via POSIX sockets, socket layer with epoll)
 - Firmware discovery and management
 - Embedded kernel ROMs (10 firmware images assembled from 6502 source at build time)
+- Embedded resources (audio samples, debugger help, diskloader128)
 - Source-level debugging with symbol file support
 - Precision frame pacing with speed control
 - inotify-based directory watcher with polling fallback
