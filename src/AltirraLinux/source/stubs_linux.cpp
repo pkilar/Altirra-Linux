@@ -820,6 +820,7 @@ public:
 	void SetCartridgeActivity(sint32, sint32) override {
 		s_indicatorState.mCartridgeActivityCounter = 20;
 	}
+	// Cassette indicator — status bar reads g_sim.GetCassette() directly.
 	void SetCassetteIndicatorVisible(bool) override {}
 	void SetCassettePosition(float, float, bool, bool) override {}
 	void SetRecordingPosition() override {
@@ -862,34 +863,95 @@ public:
 		}
 	}
 
-	// IATUIRenderer — non-indicator methods remain no-ops
+	// IATUIRenderer — non-indicator methods
+
+	// Not applicable on Linux — Windows overlay visibility management.
 	bool IsVisible() const override { return false; }
 	void SetVisible(bool) override {}
+
 	void SetCyclesPerSecond(double rate) override {
 		ATImGuiGetIndicatorState().mCyclesPerSecond = rate;
 	}
 	void SetLedStatus(uint8 mask) override {
 		ATImGuiGetIndicatorState().mLedStatus = mask;
 	}
-	void SetHeldButtonStatus(uint8) override {}
-	void SetPendingHoldMode(bool) override {}
-	void SetPendingHeldKey(int) override {}
-	void SetPendingHeldButtons(uint8) override {}
-	void ClearWatchedValue(int) override {}
-	void SetWatchedValue(int, uint32, WatchFormat) override {}
-	void SetTracingSize(sint64) override {}
+
+	// Group A — Store to indicator state for status bar rendering
+	void SetHeldButtonStatus(uint8 consolMask) override {
+		ATImGuiGetIndicatorState().mHeldButtonMask = consolMask;
+	}
+	void SetPendingHoldMode(bool enabled) override {
+		ATImGuiGetIndicatorState().mbPendingHoldMode = enabled;
+	}
+	void SetPendingHeldKey(int key) override {
+		ATImGuiGetIndicatorState().mPendingHeldKey = key;
+	}
+	void SetPendingHeldButtons(uint8 consolMask) override {
+		ATImGuiGetIndicatorState().mPendingHeldButtons = consolMask;
+	}
+	void SetTracingSize(sint64 size) override {
+		ATImGuiGetIndicatorState().mTracingSize = size;
+	}
+	void SetMessage(StatusPriority priority, const wchar_t *msg) override {
+		auto& ind = ATImGuiGetIndicatorState();
+		int idx = (int)priority;
+		if ((unsigned)idx > (unsigned)StatusPriority::Max)
+			return;
+		if (msg && *msg) {
+			VDStringA u8 = VDTextWToU8(VDStringW(msg));
+			strncpy(ind.mStatusMessages[idx], u8.c_str(), sizeof(ind.mStatusMessages[idx]) - 1);
+			ind.mStatusMessages[idx][sizeof(ind.mStatusMessages[idx]) - 1] = 0;
+		} else {
+			ind.mStatusMessages[idx][0] = 0;
+		}
+		if (idx == 0)
+			ind.mStatusMessageTimestamp = SDL_GetTicks();
+	}
+	void ClearMessage(StatusPriority priority) override {
+		int idx = (int)priority;
+		if ((unsigned)idx <= (unsigned)StatusPriority::Max)
+			ATImGuiGetIndicatorState().mStatusMessages[idx][0] = 0;
+	}
+
+	// Group B — Watched values
+	void SetWatchedValue(int index, uint32 value, WatchFormat format) override {
+		if ((unsigned)index >= 8)
+			return;
+		auto& slot = ATImGuiGetIndicatorState().mWatchSlots[index];
+		slot.active = true;
+		slot.value = value;
+		slot.format = (int)format;
+	}
+	void ClearWatchedValue(int index) override {
+		if ((unsigned)index >= 8)
+			return;
+		ATImGuiGetIndicatorState().mWatchSlots[index].active = false;
+	}
+
+	// Group C — Intentional no-ops with documentation
+
+	// Audio waveform/scope visualization — would need full ImGui custom renderer;
+	// audio config dialog already queries audioOut->GetAudioStatus() directly.
 	void SetAudioStatus(const ATUIAudioStatus *) override {}
 	void SetAudioMonitor(bool, ATAudioMonitor *) override {}
 	void SetAudioDisplayEnabled(bool, bool) override {}
 	void SetAudioScopeEnabled(bool) override {}
 	void SetSlightSID(ATSlightSIDEmulator *) override {}
+
+	// Pad input — callers in uivideodisplaywindow.cpp are excluded from the Linux build.
 	vdrect32 GetPadArea() const override { return vdrect32(0, 0, 0, 0); }
 	void SetPadInputEnabled(bool) override {}
+
+	// FPS — status bar calculates FPS independently; caller (main.cpp) excluded.
 	void SetFpsIndicator(float) override {}
-	void SetMessage(StatusPriority, const wchar_t *) override {}
-	void ClearMessage(StatusPriority) override {}
+
+	// Hover tip — callers excluded from Linux build.
 	void SetHoverTip(int, int, const wchar_t *) override {}
+
+	// Paused state — status bar checks g_sim.IsPaused() directly.
 	void SetPaused(bool) override {}
+
+	// Windows UI management — not applicable on Linux.
 	void SetUIManager(ATUIManager *) override {}
 	void Relayout(int, int) override {}
 	void Update() override {}

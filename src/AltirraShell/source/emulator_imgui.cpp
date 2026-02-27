@@ -2570,6 +2570,110 @@ static void DrawStatusBar() {
 			ImGui::SameLine(0, 16);
 			ImGui::TextColored(ImVec4(0.2f, 1.0f, 0.2f, 1.0f), "%.1f fps", s_currentFps);
 		}
+
+		// Held console buttons (Start/Select/Option held during boot)
+		{
+			uint8 held = ind.mHeldButtonMask;
+			if (held) {
+				ImVec4 heldColor(1.0f, 1.0f, 0.3f, 1.0f);
+				if (held & 1) { ImGui::SameLine(0, 16); ImGui::TextColored(heldColor, "Start"); }
+				if (held & 2) { ImGui::SameLine(0, 4);  ImGui::TextColored(heldColor, "Select"); }
+				if (held & 4) { ImGui::SameLine(0, 4);  ImGui::TextColored(heldColor, "Option"); }
+			}
+		}
+
+		// Pending hold mode (keys to hold on next reset)
+		if (ind.mbPendingHoldMode || ind.mPendingHeldButtons || ind.mPendingHeldKey >= 0) {
+			ImGui::SameLine(0, 16);
+			ImVec4 holdColor(0.6f, 1.0f, 0.6f, 1.0f);
+			char holdBuf[128];
+			int pos = 0;
+			if (ind.mbPendingHoldMode)
+				pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "Hold: ");
+			if (ind.mPendingHeldButtons & 1)
+				pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "Start+");
+			if (ind.mPendingHeldButtons & 2)
+				pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "Select+");
+			if (ind.mPendingHeldButtons & 4)
+				pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "Option+");
+			if (ind.mPendingHeldKey >= 0) {
+				const wchar_t *label = ATUIGetNameForKeyCode((uint8)ind.mPendingHeldKey);
+				if (label) {
+					VDStringA u8 = VDTextWToU8(VDStringW(label));
+					pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "%s", u8.c_str());
+				} else {
+					pos += snprintf(holdBuf + pos, sizeof(holdBuf) - pos, "[$%02X]", ind.mPendingHeldKey);
+				}
+			}
+			// Trim trailing '+'
+			if (pos > 0 && holdBuf[pos - 1] == '+')
+				holdBuf[pos - 1] = 0;
+			ImGui::TextColored(holdColor, "%s", holdBuf);
+		}
+
+		// Tracing indicator
+		if (ind.mTracingSize >= 0) {
+			ImGui::SameLine(0, 16);
+			ImGui::TextColored(ImVec4(0.5f, 0.8f, 1.0f, 1.0f), "Tracing %.1fM",
+				(double)ind.mTracingSize / 1048576.0);
+		}
+
+		// Status messages (highest priority non-empty; auto-expire Status after 1500ms)
+		{
+			const char *msg = nullptr;
+			for (int i = 2; i >= 0; --i) {
+				if (ind.mStatusMessages[i][0]) {
+					if (i == 0) {
+						uint32 age = SDL_GetTicks() - ind.mStatusMessageTimestamp;
+						if (age > 1500) {
+							ind.mStatusMessages[0][0] = 0;
+							continue;
+						}
+					}
+					msg = ind.mStatusMessages[i];
+					break;
+				}
+			}
+			if (msg) {
+				ImGui::SameLine(0, 16);
+				ImGui::TextColored(ImVec4(1.0f, 1.0f, 0.8f, 1.0f), "%s", msg);
+			}
+		}
+
+		// Watched values
+		{
+			bool anyWatch = false;
+			for (int i = 0; i < 8; ++i) {
+				if (ind.mWatchSlots[i].active) {
+					anyWatch = true;
+					break;
+				}
+			}
+			if (anyWatch) {
+				for (int i = 0; i < 8; ++i) {
+					auto& slot = ind.mWatchSlots[i];
+					if (!slot.active)
+						continue;
+					ImGui::SameLine(0, i == 0 ? 16 : 8);
+					switch (slot.format) {
+						case 1: // Dec
+							ImGui::TextColored(ImVec4(0.8f, 1.0f, 0.8f, 1.0f), "%d", (int)slot.value);
+							break;
+						case 2: // Hex8
+							ImGui::TextColored(ImVec4(0.8f, 1.0f, 0.8f, 1.0f), "%02X", slot.value);
+							break;
+						case 3: // Hex16
+							ImGui::TextColored(ImVec4(0.8f, 1.0f, 0.8f, 1.0f), "%04X", slot.value);
+							break;
+						case 4: // Hex32
+							ImGui::TextColored(ImVec4(0.8f, 1.0f, 0.8f, 1.0f), "%08X", slot.value);
+							break;
+						default:
+							break;
+					}
+				}
+			}
+		}
 	}
 	ImGui::End();
 
