@@ -28,6 +28,9 @@ bool& ATImGuiDebuggerShowPerformance();
 // Navigate source code window to a specific address (opens window if needed)
 void ATImGuiDebuggerNavigateSource(uint32 addr);
 
+// Navigate source code window to a specific file path + line number
+void ATImGuiDebuggerNavigateSourceLine(const wchar_t *path, int line);
+
 // Returns true (once) when the debugger transitions from running to stopped.
 // Resets the flag on read so it fires only once per break event.
 bool ATImGuiDebuggerDidBreak();

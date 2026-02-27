@@ -9,6 +9,7 @@
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/vdstl.h>
 #include <vd2/system/VDString.h>
+#include <vd2/system/filesys.h>
 #include <vd2/system/text.h>
 #include <vd2/system/time.h>
 #include <at/atcore/address.h>
@@ -2380,6 +2381,28 @@ void ATImGuiDebuggerNavigateSource(uint32 addr) {
 				s_showSourceCode = true;
 				return;
 			}
+		}
+	}
+}
+
+// Navigate source code window to a specific file path + line number
+void ATImGuiDebuggerNavigateSourceLine(const wchar_t *path, int line) {
+	if (s_sourceNeedsFileList)
+		RefreshSourceFileList();
+
+	const wchar_t *pathName = VDFileSplitPath(path);
+
+	for (int i = 0; i < (int)s_sourceFiles.size(); i++) {
+		const wchar_t *entryName = VDFileSplitPath(s_sourceFiles[i].mPath.c_str());
+		if (VDFileIsPathEqual(pathName, entryName)) {
+			if (s_sourceSelectedFile != i) {
+				s_sourceSelectedFile = i;
+				LoadSourceFile(i);
+			}
+			s_sourcePCLine = line;
+			s_sourceScrollToPC = true;
+			s_showSourceCode = true;
+			return;
 		}
 	}
 }
