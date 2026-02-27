@@ -9,5 +9,8 @@ lib/
 localconfig/active/
 *code-workspace
 
+# Assembler listing files (MADS build artifacts)
+*.lst
+
 # Memory audit backups
 memory-audit/
