@@ -23,12 +23,14 @@
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/vdstl.h>
+#include <vd2/system/math.h>
 #include <vd2/system/refcount.h>
 #include <vd2/system/function.h>
 #include <vd2/system/vectors.h>
 #include <vd2/system/atomic.h>
 #include <vd2/system/thread.h>
 #include <vd2/system/text.h>
+#include <vd2/system/time.h>
 #include <vd2/system/file.h>
 #include <vd2/system/fileasync.h>
 #include <vd2/system/filewatcher.h>
@@ -386,6 +388,12 @@ void ATSetWindowSize(int w, int h) {
 	if (s_pfnSetWindowSize)
 		s_pfnSetWindowSize(w, h);
 }
+// Frame timing variables — computed by ATUIUpdateSpeedTiming(), consumed by main loop
+sint64	g_frameTicks;
+uint32	g_frameSubTicks;
+sint64	g_frameErrorBound;
+sint64	g_frameTimeout;
+
 void ATUIUpdateSpeedTiming() {
 	extern ATSimulator g_sim;
 
@@ -412,16 +420,29 @@ void ATUIUpdateSpeedTiming() {
 
 	const double cyclesPerSecond = kMasterClocks[tableIndex] * kPeriods[0][tableIndex] / rawSecondsPerFrame;
 
+	// Linux UI stores s_speedModifier as a direct multiplier (1.0 = 100%,
+	// 0.5 = 50%, 2.0 = 200%). Windows uses an offset convention where
+	// rate = g_speedModifier + 1.0, but our UI already provides the rate.
 	double rate = 1.0;
 
 	if (!g_sim.IsTurboModeEnabled())
-		rate = std::max<double>(0, s_speedModifier + 1.0);
+		rate = (double)s_speedModifier;
 
 	rate = std::clamp<double>(rate, 0.01, 100.0);
 
 	IATAudioOutput *audioOutput = g_sim.GetAudioOutput();
 	if (audioOutput)
 		audioOutput->SetCyclesPerSecond(cyclesPerSecond, 1.0 / rate);
+
+	// Compute frame timing for main loop pacing (matches Windows main.cpp logic)
+	double secondsPerFrame = rawSecondsPerFrame / rate;
+	double secondTime = VDGetPreciseTicksPerSecond();
+	double frameTimeF = secondTime * secondsPerFrame;
+
+	g_frameTicks = VDFloorToInt64(frameTimeF);
+	g_frameSubTicks = VDRoundToInt32((frameTimeF - g_frameTicks) * 65536.0);
+	g_frameErrorBound = std::max<sint64>(2 * g_frameTicks, VDRoundToInt64(secondTime * 0.1f));
+	g_frameTimeout = std::max<sint64>(5 * g_frameTicks, VDGetPreciseTicksPerSecondI());
 }
 void ATSyncCPUHistoryState() {
 	extern ATSimulator g_sim;
@@ -888,23 +909,32 @@ void ATCreateUIRenderer(IATUIRenderer **r) {
 ///////////////////////////////////////////////////////////////////////////
 
 ///////////////////////////////////////////////////////////////////////////
-// 13. ATDirectoryWatcher — Linux polling implementation
-//     Uses eventfd for exit signaling, polls directory checksums every 1s.
-//     The void* mhExitEvent member stores an eventfd (via intptr_t cast).
+// 13. ATDirectoryWatcher — Linux inotify implementation
+//     Uses inotify for filesystem change notification with recursive
+//     subdirectory watching.  Falls back to polling if inotify_init fails.
+//     Member reuse: mhDir = inotify fd (intptr_t cast, -1 = invalid),
+//     mhExitEvent = eventfd for thread exit signaling.
 ///////////////////////////////////////////////////////////////////////////
 
 #include <poll.h>
 #include <sys/eventfd.h>
+#include <sys/inotify.h>
+#include <dirent.h>
 #include <vd2/system/binary.h>
 #include <vd2/system/filesys.h>
+#include <vd2/system/text.h>
 #include <at/atcore/checksum.h>
+#include <map>
 
-bool ATDirectoryWatcher::sbShouldUsePolling = true;
+// Watch descriptor → relative path mapping (thread-local to watcher thread)
+static thread_local std::map<int, VDStringW> s_wdToRelPath;
+
+bool ATDirectoryWatcher::sbShouldUsePolling = false;
 
 ATDirectoryWatcher::ATDirectoryWatcher()
 	: VDThread("Altirra directory watcher")
-	, mhDir(nullptr)
-	, mhExitEvent(nullptr)
+	, mhDir(reinterpret_cast<void *>(static_cast<intptr_t>(-1)))
+	, mhExitEvent(reinterpret_cast<void *>(static_cast<intptr_t>(-1)))
 	, mhDirChangeEvent(nullptr)
 	, mpChangeBuffer(nullptr)
 	, mChangeBufferSize(0)
@@ -940,6 +970,13 @@ void ATDirectoryWatcher::Shutdown() {
 			[[maybe_unused]] auto r = ::write(efd, &val, sizeof(val));
 		}
 		ThreadWait();
+	}
+
+	// Close inotify fd
+	int ifd = static_cast<int>(reinterpret_cast<intptr_t>(mhDir));
+	if (ifd >= 0) {
+		::close(ifd);
+		mhDir = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
 	}
 
 	int efd = static_cast<int>(reinterpret_cast<intptr_t>(mhExitEvent));
@@ -988,9 +1025,61 @@ bool ATDirectoryWatcher::CheckForChanges(vdfastvector<wchar_t>& strheap) {
 	return allChanged;
 }
 
+// Add an inotify watch for a directory and record its relative path.
+// Returns the watch descriptor, or -1 on failure.
+static int AddInotifyWatch(int ifd, const char *absPath, const VDStringW& relPath) {
+	int wd = inotify_add_watch(ifd, absPath,
+		IN_CREATE | IN_DELETE | IN_MODIFY | IN_MOVED_FROM | IN_MOVED_TO
+		| IN_ATTRIB | IN_DONT_FOLLOW);
+
+	if (wd >= 0)
+		s_wdToRelPath[wd] = relPath;
+
+	return wd;
+}
+
+// Recursively add inotify watches for a directory tree.
+static void AddWatchesRecursive(int ifd, const VDStringA& absDir, const VDStringW& relDir, int depth) {
+	if (depth > 8)
+		return;
+
+	AddInotifyWatch(ifd, absDir.c_str(), relDir);
+
+	DIR *d = opendir(absDir.c_str());
+	if (!d)
+		return;
+
+	struct dirent *ent;
+	while ((ent = readdir(d)) != nullptr) {
+		if (ent->d_name[0] == '.' && (ent->d_name[1] == '\0' ||
+			(ent->d_name[1] == '.' && ent->d_name[2] == '\0')))
+			continue;
+
+		if (ent->d_type != DT_DIR)
+			continue;
+
+		VDStringA childAbs(absDir);
+		if (!childAbs.empty() && childAbs.back() != '/')
+			childAbs += '/';
+		childAbs += ent->d_name;
+
+		VDStringW childRel(relDir);
+		if (!childRel.empty())
+			childRel += L'/';
+		childRel += VDTextU8ToW(VDStringA(ent->d_name));
+
+		AddWatchesRecursive(ifd, childAbs, childRel, depth + 1);
+	}
+
+	closedir(d);
+}
+
 void ATDirectoryWatcher::ThreadRun() {
-	// Always use polling on Linux (inotify support could be added later)
-	RunPollThread();
+	if (sbShouldUsePolling) {
+		RunPollThread();
+	} else {
+		RunNotifyThread();
+	}
 }
 
 void ATDirectoryWatcher::RunPollThread() {
@@ -1012,14 +1101,13 @@ void ATDirectoryWatcher::RunPollThread() {
 				NotifyAllChanged();
 		}
 
-		// Wait for exit signal or timeout
 		struct pollfd pfd {};
 		pfd.fd = efd;
 		pfd.events = POLLIN;
 
 		int ret = ::poll(&pfd, 1, delay);
 		if (ret > 0)
-			break;  // exit signaled
+			break;
 	}
 }
 
@@ -1065,8 +1153,93 @@ void ATDirectoryWatcher::PollDirectory(uint32 *orderIndependentChecksum, const V
 }
 
 void ATDirectoryWatcher::RunNotifyThread() {
-	// Not implemented on Linux — use polling mode
-	RunPollThread();
+	int efd = static_cast<int>(reinterpret_cast<intptr_t>(mhExitEvent));
+
+	int ifd = inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+	if (ifd < 0) {
+		// inotify unavailable — fall back to polling
+		RunPollThread();
+		return;
+	}
+
+	mhDir = reinterpret_cast<void *>(static_cast<intptr_t>(ifd));
+	s_wdToRelPath.clear();
+
+	// Set up initial watches
+	VDStringA u8base = VDTextWToU8(mBasePath);
+	if (mbRecursive) {
+		AddWatchesRecursive(ifd, u8base, VDStringW(), 0);
+	} else {
+		AddInotifyWatch(ifd, u8base.c_str(), VDStringW());
+	}
+
+	// Event read buffer
+	char buf[8192] __attribute__((aligned(__alignof__(struct inotify_event))));
+
+	for (;;) {
+		struct pollfd pfds[2] {};
+		pfds[0].fd = efd;
+		pfds[0].events = POLLIN;
+		pfds[1].fd = ifd;
+		pfds[1].events = POLLIN;
+
+		int ret = ::poll(pfds, 2, -1);
+		if (ret < 0)
+			continue;
+
+		// Exit signal
+		if (pfds[0].revents & POLLIN)
+			break;
+
+		// inotify events
+		if (pfds[1].revents & POLLIN) {
+			for (;;) {
+				ssize_t len = ::read(ifd, buf, sizeof(buf));
+				if (len <= 0)
+					break;
+
+				const char *ptr = buf;
+				while (ptr < buf + len) {
+					const struct inotify_event *ev =
+						reinterpret_cast<const struct inotify_event *>(ptr);
+
+					if (ev->mask & IN_Q_OVERFLOW) {
+						// Kernel event queue overflow — report everything changed
+						NotifyAllChanged();
+					} else if (ev->len > 0) {
+						// Find the relative directory path for this watch
+						auto it = s_wdToRelPath.find(ev->wd);
+						VDStringW relDir = (it != s_wdToRelPath.end()) ? it->second : VDStringW();
+
+						// Build relative path of changed item
+						VDStringW relPath(relDir);
+						if (!relPath.empty())
+							relPath += L'/';
+						relPath += VDTextU8ToW(VDStringA(ev->name));
+
+						// If a new subdirectory was created, add a watch for it
+						if (mbRecursive && (ev->mask & (IN_CREATE | IN_MOVED_TO)) && (ev->mask & IN_ISDIR)) {
+							VDStringA absChild = VDTextWToU8(
+								VDMakePath(VDStringSpanW(mBasePath), VDStringSpanW(relPath)));
+							AddWatchesRecursive(ifd, absChild, relPath, 0);
+						}
+
+						// Record the containing directory as changed
+						vdsynchronized(mMutex) {
+							mChangedDirs.insert(relDir.empty() ? VDStringW(L".") : relDir);
+						}
+					}
+
+					ptr += sizeof(struct inotify_event) + ev->len;
+				}
+			}
+		}
+	}
+
+	// Cleanup: close inotify fd (auto-removes all watches)
+	s_wdToRelPath.clear();
+	::close(ifd);
+	mhDir = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
 }
 
 void ATDirectoryWatcher::NotifyAllChanged() {

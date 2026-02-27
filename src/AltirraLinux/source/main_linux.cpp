@@ -67,6 +67,8 @@
 #include <SDL.h>
 #include <GL/gl.h>
 
+#include <vd2/system/time.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -76,6 +78,7 @@
 #include <getopt.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <time.h>
 #include <unistd.h>
 
 // Forward declarations from debugger.cpp
@@ -1287,6 +1290,16 @@ int main(int argc, char *argv[]) {
 	g_sim.Resume();
 	fprintf(stderr, "Emulation started\n");
 
+	// Frame pacing state — error accumulation feedback loop (matches Windows main.cpp)
+	extern sint64 g_frameTicks;
+	extern uint32 g_frameSubTicks;
+	extern sint64 g_frameErrorBound;
+	extern sint64 g_frameTimeout;
+
+	sint64 frameError = 0;
+	uint32 frameTimeErrorAccum = 0;
+	uint64 lastFrameTime = VDGetPreciseTick();
+
 	// Main loop
 	while (g_running) {
 		ATProfileBeginRegion(kATProfileRegion_NativeEvents);
@@ -1357,9 +1370,13 @@ int main(int argc, char *argv[]) {
 		}
 		ATProfileEndRegion(kATProfileRegion_Simulation);
 
+		// Determine if a frame was rendered this iteration
+		bool frameRendered = false;
+
 		if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
 			ATProfileMarkEvent(kATProfileEvent_BeginFrame);
 			RenderAndSwap(window);
+			frameRendered = true;
 			g_debuggerAutoShowed = false;
 		} else if (result == ATSimulator::kAdvanceResult_Stopped) {
 			// Emulation stopped — still render but at reduced rate.
@@ -1377,6 +1394,11 @@ int main(int argc, char *argv[]) {
 			ATProfileBeginRegion(kATProfileRegion_IdleFrameDelay);
 			SDL_Delay(16);
 			ATProfileEndRegion(kATProfileRegion_IdleFrameDelay);
+
+			// Reset pacing state while stopped
+			lastFrameTime = VDGetPreciseTick();
+			frameError = 0;
+			frameTimeErrorAccum = 0;
 		} else if (result == ATSimulator::kAdvanceResult_Running) {
 			// Our display copies frame data in PostBuffer and immediately
 			// releases the frame, so the GTIA frame tracker never fills up
@@ -1385,8 +1407,50 @@ int main(int argc, char *argv[]) {
 			if (g_pDisplay && g_pDisplay->IsFramePending()) {
 				ATProfileMarkEvent(kATProfileEvent_BeginFrame);
 				RenderAndSwap(window);
+				frameRendered = true;
 			}
 			g_debuggerAutoShowed = false;
+		}
+
+		// Frame pacing — error accumulation feedback loop
+		// Matches the Windows main.cpp precision timing algorithm.
+		if (frameRendered) {
+			uint64 curTime = VDGetPreciseTick();
+			sint64 lastFrameDuration = curTime - lastFrameTime;
+			lastFrameTime = curTime;
+
+			// Accumulate timing error (actual - target)
+			frameError += lastFrameDuration - g_frameTicks;
+			frameTimeErrorAccum += g_frameSubTicks;
+
+			if (frameTimeErrorAccum >= 0x10000) {
+				frameTimeErrorAccum &= 0xFFFF;
+				--frameError;
+			}
+
+			// Reset if error is too large (catch-up/behind scenarios)
+			if (frameError > g_frameErrorBound || frameError < -g_frameErrorBound)
+				frameError = -g_frameTicks;
+
+			// In turbo mode, don't pace
+			if (g_sim.IsTurboModeEnabled()) {
+				frameError = 0;
+			} else if (frameError < 0) {
+				// We're ahead of schedule — sleep to maintain target frame rate.
+				// Convert ticks-ahead to nanoseconds and use clock_nanosleep
+				// for sub-millisecond precision.
+				sint64 nsToSleep = -frameError;  // ticks are nanoseconds on Linux
+
+				if (nsToSleep > 0 && nsToSleep < (sint64)g_frameTimeout) {
+					struct timespec ts;
+					ts.tv_sec = nsToSleep / 1000000000LL;
+					ts.tv_nsec = nsToSleep % 1000000000LL;
+
+					ATProfileBeginRegion(kATProfileRegion_Idle);
+					clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+					ATProfileEndRegion(kATProfileRegion_Idle);
+				}
+			}
 		}
 	}
 

@@ -17,11 +17,15 @@
 
 #include <stdafx.h>
 #include "console.h"
+#include "debugger.h"
 #include <vd2/system/file.h>
+#include <vd2/system/filesys.h>
+#include <vd2/system/text.h>
 #include <imgui_manager.h>
 #include <debugger_imgui.h>
 #include <cstdio>
 #include <cstdarg>
+#include <vector>
 
 // External reference to ImGui manager (owned by main_linux.cpp)
 extern ATImGuiManager *g_pImGui;
@@ -120,20 +124,169 @@ bool ATIsDebugConsoleActive() {
 	return g_pImGui && g_pImGui->IsVisible();
 }
 
-// Source windows — stub
+// Source window implementation — bridges IATSourceWindow to ImGui source view
+class ATImGuiSourceWindow final : public IATSourceWindow {
+public:
+	ATImGuiSourceWindow(const wchar_t *path, const wchar_t *fullPath)
+		: mPath(path), mFullPath(fullPath) {}
+
+	bool Load() {
+		mLines.clear();
+
+		VDStringA u8path = VDTextWToU8(mFullPath);
+		FILE *f = fopen(u8path.c_str(), "r");
+		if (!f)
+			return false;
+
+		char buf[4096];
+		VDStringA line;
+		while (fgets(buf, sizeof(buf), f)) {
+			line += buf;
+			// Check if we got a complete line
+			if (!line.empty() && line.back() == '\n') {
+				line.pop_back();
+				if (!line.empty() && line.back() == '\r')
+					line.pop_back();
+				mLines.push_back(VDTextU8ToW(line));
+				line.clear();
+			}
+		}
+		// Handle last line without newline
+		if (!line.empty())
+			mLines.push_back(VDTextU8ToW(line));
+
+		fclose(f);
+		return true;
+	}
+
+	const wchar_t *GetFullPath() const override { return mFullPath.c_str(); }
+	const wchar_t *GetPath() const override { return mPath.c_str(); }
+	const wchar_t *GetPathAlias() const override { return mPathAlias.empty() ? nullptr : mPathAlias.c_str(); }
+
+	void SetPathAlias(const wchar_t *alias) { mPathAlias = alias; }
+
+	void FocusOnLine(int line) override {
+		// Navigate the ImGui source window to this line
+		ATImGuiDebuggerNavigateSourceLine(mPath.c_str(), line);
+	}
+
+	void ActivateLine(int line) override {
+		FocusOnLine(line);
+	}
+
+	VDStringW ReadLine(int lineIndex) override {
+		if (lineIndex < 0 || lineIndex >= (int)mLines.size())
+			return VDStringW();
+		return mLines[lineIndex] + L"\n";
+	}
+
+private:
+	VDStringW mPath;
+	VDStringW mFullPath;
+	VDStringW mPathAlias;
+	std::vector<VDStringW> mLines;
+};
+
+static std::vector<ATImGuiSourceWindow *> g_sourceWindows;
+
 IATSourceWindow *ATGetSourceWindow(const wchar_t *s) {
+	// Exact path match
+	for (ATImGuiSourceWindow *w : g_sourceWindows) {
+		if (!w) continue;
+		if (VDFileIsPathEqual(s, w->GetPath()))
+			return w;
+		const wchar_t *alias = w->GetPathAlias();
+		if (alias && VDFileIsPathEqual(s, alias))
+			return w;
+	}
+
+	// Loose match on filename only
+	const wchar_t *sName = VDFileSplitPath(s);
+	for (ATImGuiSourceWindow *w : g_sourceWindows) {
+		if (!w) continue;
+		if (VDFileIsPathEqual(sName, VDFileSplitPath(w->GetPath())))
+			return w;
+		const wchar_t *alias = w->GetPathAlias();
+		if (alias && VDFileIsPathEqual(sName, VDFileSplitPath(alias)))
+			return w;
+	}
+
 	return nullptr;
 }
 
 IATSourceWindow *ATOpenSourceWindow(const wchar_t *path) {
-	return nullptr;
+	ATDebuggerSourceFileInfo info;
+	info.mSourcePath = path;
+	return ATOpenSourceWindow(info, true);
 }
 
 IATSourceWindow *ATOpenSourceWindow(const ATDebuggerSourceFileInfo& sourceFileInfo, bool searchPaths) {
-	return nullptr;
+	// Return existing window if already open
+	IATSourceWindow *existing = ATGetSourceWindow(sourceFileInfo.mSourcePath.c_str());
+	if (existing)
+		return existing;
+
+	VDStringW fullPath;
+	bool found = false;
+
+	if (searchPaths) {
+		// Try module-relative path
+		if (!found && !sourceFileInfo.mModulePath.empty()) {
+			VDStringW moduleDir = VDFileSplitPathLeft(sourceFileInfo.mModulePath);
+			if (!moduleDir.empty()) {
+				fullPath = VDMakePath(
+					VDStringSpanW(moduleDir),
+					VDStringSpanW(VDFileSplitPath(sourceFileInfo.mSourcePath.c_str()))
+				);
+				found = VDDoesPathExist(fullPath.c_str());
+			}
+		}
+
+		// Try paths from other open source windows
+		if (!found) {
+			for (ATImGuiSourceWindow *sw : g_sourceWindows) {
+				if (!sw) continue;
+				VDStringW dir = VDFileSplitPathLeft(VDStringW(sw->GetFullPath()));
+				if (dir.empty()) continue;
+				fullPath = VDMakePath(
+					VDStringSpanW(dir),
+					VDStringSpanW(VDFileSplitPath(sourceFileInfo.mSourcePath.c_str()))
+				);
+				if (VDDoesPathExist(fullPath.c_str())) {
+					found = true;
+					break;
+				}
+			}
+		}
+
+		// Try the path as-is (for absolute paths or paths relative to CWD)
+		if (!found) {
+			fullPath = sourceFileInfo.mSourcePath;
+			found = VDDoesPathExist(fullPath.c_str());
+		}
+	} else {
+		fullPath = sourceFileInfo.mSourcePath;
+		found = VDDoesPathExist(fullPath.c_str());
+	}
+
+	if (!found)
+		return nullptr;
+
+	ATImGuiSourceWindow *w = new ATImGuiSourceWindow(
+		sourceFileInfo.mSourcePath.c_str(), fullPath.c_str());
+
+	if (!w->Load()) {
+		delete w;
+		return nullptr;
+	}
+
+	g_sourceWindows.push_back(w);
+	return w;
 }
 
 void ATUIShowSourceListDialog() {
+	// Toggle the ImGui source code window visibility
+	ATImGuiDebuggerShowSourceCode() = true;
 }
 
 // UI pane management — stub
