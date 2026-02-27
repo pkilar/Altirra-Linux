@@ -212,11 +212,8 @@ recording dialog.
 
 - No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
 - No physical disk access (intentionally disabled for security)
-- Speed modifier adjusts audio rate but does not implement precision frame
-  pacing (full timing match with the Windows build is future work)
 - Save states work for in-memory quick save/load and file-based `.atstate2`;
   not all device types may serialize correctly yet
-- No source-level debugging windows (hex/disasm debugging available)
 
 ## Running the test suite
 
