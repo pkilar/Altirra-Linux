@@ -94,6 +94,7 @@ static void OnCmdSystemToggleForcedSelfTest() {
 
 static void OnCmdSystemToggleBASIC() {
 	g_sim.SetBASICEnabled(!g_sim.IsBASICEnabled());
+	g_sim.ColdReset();
 }
 
 static void OnCmdSystemToggleFastBoot() {
