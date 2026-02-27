@@ -5,15 +5,14 @@ cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL2 for
 display, audio, and input, OpenGL 2.1 for rendering, and Dear ImGui for the
 configuration and debugger overlay.
 
-> **Status**: Functional but incomplete. Core emulation runs correctly. The UI
-> covers the most common operations (load images, configure hardware, debug).
-> Many advanced features from the Windows build are stubbed out.
+> **Status**: ~99.5% feature-complete. Core emulation, UI, debugger, recording,
+> disk explorer, and all configuration dialogs are fully functional.
 
 ## Prerequisites
 
 | Dependency | Minimum version | Notes                                          |
 | ---------- | --------------- | ---------------------------------------------- |
-| GCC        | 14+             | Must support C++23 (`if consteval`, etc.)      |
+| GCC        | 13+             | Must support C++23 (`if consteval`, etc.)      |
 | CMake      | 3.20            | Ninja generator recommended                    |
 | SDL2       | 2.0.20+         | `libsdl2-dev` on Debian/Ubuntu, `sdl2` on Arch |
 | OpenGL     | 2.1             | `libgl-dev` / `mesa-libGL-devel`               |
@@ -63,7 +62,7 @@ cmake --build build
 #   build/src/AltirraLinux/altirra
 ```
 
-Available build types: `Debug`, `Release`, `Profile`.
+Available build types: `Debug`, `Release`.
 
 To install system-wide:
 
@@ -144,17 +143,21 @@ Press **F12** to toggle the ImGui overlay. When visible, the overlay provides:
 
 | Menu       | Contents                                                                                                                                 |
 | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **System** | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, system settings dialog, cold/warm reset |
-| **File**   | Open image, quick save/load state, file-based save/load state, disk drive mount/unmount (D1-D4), exit                                    |
-| **View**   | Show FPS, display filter (Point/Bilinear), fullscreen toggle                                                                             |
-| **Speed**  | Turbo mode, speed presets (50%/100%/200%/400%)                                                                                           |
-| **Debug**  | Break/Run, step into/over/out, debugger window visibility (registers, disassembly, memory, console, breakpoints)                         |
-| **Help**   | About dialog                                                                                                                             |
+| **System** | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, cold/warm reset |
+| **File**   | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, disk explorer, screenshots, video/audio recording |
+| **Edit**   | Paste text to emulator |
+| **View**   | FPS, display filter (Point/Bilinear), stretch mode, window size, fullscreen, status bar toggle, cursor |
+| **Speed**  | Pause, turbo, speed slider (50-800%), mute, pause-when-inactive |
+| **Debug**  | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading |
+| **Help**   | Keyboard shortcuts, config directory, about |
 
 ### Status bar
 
-The bottom bar shows: hardware mode, video standard, disk drive status
-(D1-D4), turbo indicator, FPS counter, and emulation state (RUNNING/STOPPED).
+The bottom bar shows: hardware mode, video standard, disk drive activity (D1-D8
+with track/sector numbers, SIO transfer, dirty indicator), H:/PCLink/IDE/Flash
+indicators, cartridge, cassette position, pause/turbo/speed, recording, mute,
+FPS, held console buttons, LED status, tracing size, debugger watch values,
+and auto-expiring status messages.
 
 ### File dialogs
 
@@ -167,11 +170,16 @@ The emulator tries to use native file dialogs:
 
 These shortcuts work regardless of overlay visibility:
 
-| Key     | Action                       |
-| ------- | ---------------------------- |
-| **F7**  | Quick save state (in-memory) |
-| **F8**  | Quick load state             |
-| **F12** | Toggle ImGui overlay         |
+| Key            | Action                       |
+| -------------- | ---------------------------- |
+| **F7**         | Quick save state             |
+| **F8**         | Quick load state             |
+| **F12**        | Toggle ImGui overlay         |
+| **Escape**     | Close overlay                |
+| **Alt+Return** | Toggle fullscreen            |
+| **F1 (hold)**  | Warp speed while held        |
+| **Ctrl+S**     | Save settings                |
+| **Ctrl+V**     | Paste text to emulator       |
 
 When the overlay is visible, debug shortcuts are also active:
 
@@ -182,14 +190,16 @@ When the overlay is visible, debug shortcuts are also active:
 | **F11**       | Step into                |
 | **Shift+F11** | Step out                 |
 
-## Display filters
+## Display
 
-The View > Display Filter menu controls texture filtering:
-
-- **Point** — nearest-neighbor sampling (sharp, pixelated)
-- **Bilinear** — linear interpolation (smooth)
-- Bicubic / Sharp Bilinear / Any Suitable all map to bilinear in the current
-  OpenGL 2.1 fixed-function renderer
+- **Filters**: Point (nearest-neighbor) and Bilinear (linear interpolation)
+- **Stretch modes**: Unconstrained, preserve aspect ratio, square pixels, integral scaling
+- **Overscan**: Normal, extended, full, OS screen, widescreen
+- **Video**: Artifact modes (NTSC/PAL/Auto), monitor modes (Color/Peritel/Mono variants), scanlines, interlace, deinterlace
+- **Color**: Brightness, contrast, hue, saturation, gamma sliders
+- **HiDPI**: Automatic high-DPI scaling via SDL2
+- **PAR correction**: Pixel aspect ratio correction each frame
+- **Adaptive vsync**: Tries adaptive (-1), falls back to standard (1)
 
 ## Video recording
 
@@ -204,16 +214,31 @@ Record emulator video and audio via **File > Record Video**. Available codecs:
 
 The H.264 option only appears if FFmpeg was detected during the CMake configure
 step. CMake prints `FFmpeg found - H.264 recording enabled` when detection
-succeeds. The H.264 encoder uses `preset=medium` and `tune=animation` (good for
-retro pixel art). Video bitrate is adjustable from 500 to 8000 kbps in the
-recording dialog.
+succeeds.
+
+## Debugger
+
+13 tool windows accessible via Debug > View menu:
+
+- **Registers** — CPU state with double-click editing, stack peek, hardware registers (ANTIC/POKEY/PIA/GTIA)
+- **Disassembly** — Symbol labels, follow operand, Run to Cursor, Set PC, copy address
+- **Memory** — Hex editing, break on access, follow pointer, quick-nav, byte search
+- **Console** — Command input with search/filter, copy/clear, auto-scroll
+- **Breakpoints** — PC/Read/Write types with symbol names, conditions, click-to-navigate
+- **Watch** — Expression evaluator with symbol names, values shown in status bar
+- **Call Stack** — Frame navigation with symbol names
+- **History** — 256-entry instruction history with optional register columns
+- **Source Code** — Source-level debugging with file search
+- **Printer Output** — Captured printer text
+- **Profiler** — Performance overlay with timeline, call graph, function detail
+- **Trace Viewer** — CPU/Video/BASIC trace recording with timeline visualization
+- **Debug Display** — Auxiliary display output
 
 ## Known limitations
 
 - No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
 - No physical disk access (intentionally disabled for security)
-- Save states work for in-memory quick save/load and file-based `.atstate2`;
-  not all device types may serialize correctly yet
+- Some device-specific configuration dialogs have fewer fields than Windows version (generic config system covers most devices)
 
 ## Running the test suite
 
@@ -238,7 +263,7 @@ src/AltirraLinux/
     main_linux.cpp         SDL2+OpenGL main loop, settings, CLI, event handling
     stubs_linux.cpp        Stub/shim implementations for ~120 Win32-only symbols
     oshelper_linux.cpp     xdg-open, clipboard, process helpers
-    console_linux.cpp      Debugger console integration
+    console_linux.cpp      Debugger console and source window integration
 
 src/AltirraShell/
   CMakeLists.txt          SDL2/OpenGL frontend library
@@ -246,18 +271,19 @@ src/AltirraShell/
     display_sdl2.h        IVDVideoDisplay SDL2+GL implementation
     input_sdl2.h          Keyboard/mouse/controller input
     imgui_manager.h       ImGui lifecycle management
-    debugger_imgui.h      Debugger windows (registers, disasm, memory, console, breakpoints)
+    debugger_imgui.h      Debugger windows (13 windows + toolbar)
     emulator_imgui.h      Emulator config UI (menus, dialogs, status bar)
     filedialog_linux.h    Native file dialog (zenity/kdialog/fallback)
     error_imgui.h         Thread-safe error queue for ImGui popups
   source/
     display_sdl2.cpp      Double-buffered staging, GL texture upload, aspect-correct rendering
-    input_sdl2.cpp        SDL scancode → ATInputCode mapping
+    input_sdl2.cpp        SDL scancode -> ATInputCode mapping
     joystick_sdl2.cpp     IATJoystickManager SDL2 implementation
     imgui_manager.cpp     ImGui frame management
-    debugger_imgui.cpp    5 debugger windows + IATDebuggerClient
-    emulator_imgui.cpp    Menu bar, system config, status bar, save states, FPS, errors
+    debugger_imgui.cpp    13 debugger windows + IATDebuggerClient
+    emulator_imgui.cpp    Menu bar, all config dialogs, disk explorer, status bar
     filedialog_linux.cpp  Fork+exec zenity/kdialog, ImGui fallback
+    commands_linux.cpp    67 UI command handlers + ATUICommandManager
 ```
 
 ## License
