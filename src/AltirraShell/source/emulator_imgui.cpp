@@ -4645,15 +4645,25 @@ static void DrawDeviceManager() {
 		const auto& defs = devMgr->GetDeviceDefinitions();
 
 		ImGui::Text("Select device type:");
-		if (ImGui::BeginListBox("##devlist", ImVec2(400, 250))) {
-			for (int i = 0; i < (int)defs.size(); ++i) {
-				const ATDeviceDefinition *def = defs[i];
-				if (def->mFlags & (kATDeviceDefFlag_Internal | kATDeviceDefFlag_Hidden))
-					continue;
 
+		// Build sorted index of visible devices
+		vdfastvector<int> sortedIndices;
+		for (int i = 0; i < (int)defs.size(); ++i) {
+			const ATDeviceDefinition *def = defs[i];
+			if (def->mFlags & (kATDeviceDefFlag_Internal | kATDeviceDefFlag_Hidden))
+				continue;
+			sortedIndices.push_back(i);
+		}
+		std::sort(sortedIndices.begin(), sortedIndices.end(), [&defs](int a, int b) {
+			return wcscmp(defs[a]->mpName, defs[b]->mpName) < 0;
+		});
+
+		if (ImGui::BeginListBox("##devlist", ImVec2(400, 250))) {
+			for (int idx : sortedIndices) {
+				const ATDeviceDefinition *def = defs[idx];
 				VDStringA u8name = VDTextWToU8(VDStringW(def->mpName));
-				if (ImGui::Selectable(u8name.c_str(), s_devAddSelectedIdx == i))
-					s_devAddSelectedIdx = i;
+				if (ImGui::Selectable(u8name.c_str(), s_devAddSelectedIdx == idx))
+					s_devAddSelectedIdx = idx;
 			}
 			ImGui::EndListBox();
 		}
