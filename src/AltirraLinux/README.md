@@ -222,10 +222,7 @@ recording dialog.
 build/src/ATTest/attest all
 ```
 
-Most tests pass. Known failures:
-- `System_Exception` — 1 assertion (platform-specific formatting difference)
-- `Core_FFT` — pre-existing AVX2 alignment bug (segfault on N=32)
-- Several tests require Windows paths or test data files not present on Linux
+All 25 tests pass (0 failures).
 
 ## Project structure
 

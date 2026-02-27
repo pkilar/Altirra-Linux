@@ -41,7 +41,10 @@
 
 // Resource loading — on Linux, kernel ROMs are not embedded as Win32 resources.
 // The firmware manager handles loading from external files.
-// These functions return false to indicate no embedded resources.
+// STUFF and PNG resources are embedded at build time via EmbedResources.cmake.
+
+extern bool ATEmbeddedLoadMiscResource(int id, vdfastvector<uint8>& data);
+extern bool ATEmbeddedLoadImageResource(uint32 id, const void *& pData, size_t& size);
 
 const void *ATLockResource(uint32 id, size_t& size) {
 	size = 0;
@@ -61,11 +64,21 @@ bool ATLoadKernelResourceLZPacked(int id, vdfastvector<uint8>& data) {
 }
 
 bool ATLoadMiscResource(int id, vdfastvector<uint8>& data) {
-	return false;
+	return ATEmbeddedLoadMiscResource(id, data);
 }
 
 bool ATLoadImageResource(uint32 id, VDPixmapBuffer& buf) {
-	return false;
+	const void *pngData;
+	size_t pngSize;
+	if (!ATEmbeddedLoadImageResource(id, pngData, pngSize))
+		return false;
+
+	vdautoptr<IVDImageDecoderPNG> decoder(VDCreateImageDecoderPNG());
+	if (decoder->Decode(pngData, (uint32)pngSize))
+		return false;
+
+	buf.assign(decoder->GetFrameBuffer());
+	return true;
 }
 
 // File attributes
