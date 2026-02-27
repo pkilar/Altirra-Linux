@@ -84,6 +84,7 @@
 #include "debugger.h"
 #include "constants.h"
 #include "firmwaremanager.h"
+#include "settings.h"
 #include <at/atdebugger/target.h>
 #include "devicemanager.h"
 #include "directorywatcher.h"
@@ -582,47 +583,78 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 	}
 }
 
-// Stock default memory mode for each hardware type.
-// Matches real hardware RAM configurations.
-static ATMemoryMode GetDefaultMemoryMode(ATHardwareMode mode) {
-	switch (mode) {
-		case kATHardwareMode_800:      return kATMemoryMode_48K;
-		case kATHardwareMode_800XL:    return kATMemoryMode_64K;
-		case kATHardwareMode_5200:     return kATMemoryMode_16K;
-		case kATHardwareMode_XEGS:    return kATMemoryMode_64K;
-		case kATHardwareMode_1200XL:   return kATMemoryMode_64K;
-		case kATHardwareMode_130XE:    return kATMemoryMode_128K;
-		case kATHardwareMode_1400XL:   return kATMemoryMode_64K;
-		default:                       return kATMemoryMode_64K;
-	}
-}
-
-bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
+bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool switchProfiles) {
 	extern ATSimulator g_sim;
 
 	ATHardwareMode prevMode = g_sim.GetHardwareMode();
 	if (prevMode == mode)
 		return true;
 
-	// Check if we are switching to or from 5200 mode
-	const bool switching5200 = (mode == kATHardwareMode_5200 || prevMode == kATHardwareMode_5200);
-
-	if (switching5200)
-		g_sim.UnloadAll();
-
-	// Set hardware mode first so kernel/memory validation works against the new mode
-	g_sim.SetHardwareMode(mode);
-
-	// Apply stock defaults for the target hardware
-	g_sim.SetMemoryMode(GetDefaultMemoryMode(mode));
-	g_sim.SetKernel(0);
-
-	if (mode == kATHardwareMode_5200) {
-		g_sim.LoadCartridge5200Default();
-		g_sim.SetVideoStandard(kATVideoStandard_NTSC);
+	// Map hardware mode to default profile
+	ATDefaultProfile defaultProfile;
+	switch (mode) {
+		case kATHardwareMode_800:
+			defaultProfile = kATDefaultProfile_800;
+			break;
+		case kATHardwareMode_5200:
+			defaultProfile = kATDefaultProfile_5200;
+			break;
+		case kATHardwareMode_XEGS:
+			defaultProfile = kATDefaultProfile_XEGS;
+			break;
+		case kATHardwareMode_1200XL:
+			defaultProfile = kATDefaultProfile_1200XL;
+			break;
+		default:
+			defaultProfile = kATDefaultProfile_XL;
+			break;
 	}
 
-	ATUIUpdateSpeedTiming();
+	const uint32 oldProfileId = ATSettingsGetCurrentProfileId();
+	const uint32 newProfileId = ATGetDefaultProfileId(defaultProfile);
+	const bool switchingProfile = switchProfiles
+		&& (newProfileId != kATProfileId_Invalid && newProfileId != oldProfileId);
+
+	const bool switching5200 = (mode == kATHardwareMode_5200 || prevMode == kATHardwareMode_5200);
+
+	// Switch profile if needed (loads all settings for that hardware)
+	if (switchingProfile)
+		ATSettingsSwitchProfile(newProfileId);
+
+	if (switching5200) {
+		g_sim.UnloadAll();
+
+		if (mode == kATHardwareMode_5200) {
+			g_sim.LoadCartridge5200Default();
+			g_sim.SetMemoryMode(kATMemoryMode_16K);
+		}
+	}
+
+	g_sim.SetHardwareMode(mode);
+
+	// Check for incompatible kernel
+	switch (g_sim.GetKernelMode()) {
+		case kATKernelMode_Default:
+			break;
+		case kATKernelMode_XL:
+			if (!kATHardwareModeTraits[mode].mbRunsXLOS)
+				g_sim.SetKernel(0);
+			break;
+		case kATKernelMode_5200:
+			if (mode != kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+		default:
+			if (mode == kATHardwareMode_5200)
+				g_sim.SetKernel(0);
+			break;
+	}
+
+	if (mode == kATHardwareMode_5200 && g_sim.GetVideoStandard() != kATVideoStandard_NTSC) {
+		g_sim.SetVideoStandard(kATVideoStandard_NTSC);
+		ATUIUpdateSpeedTiming();
+	}
+
 	g_sim.ColdReset();
 	return true;
 }

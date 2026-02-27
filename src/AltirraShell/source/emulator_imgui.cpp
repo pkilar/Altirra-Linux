@@ -67,6 +67,7 @@ class ATIRQController;
 #include "inputmap.h"
 #include "joystick.h"
 #include "autosavemanager.h"
+#include "settings.h"
 
 #include <SDL.h>
 
@@ -118,6 +119,7 @@ static bool s_showCPUOptions = false;
 static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
 static bool s_showCheater = false;
+static bool s_showProfileManager = false;
 
 // Cheat engine state
 static bool s_cheaterInitialized = false;
@@ -1658,7 +1660,7 @@ static void DrawMenuBar() {
 			ATHardwareMode curHW = g_sim.GetHardwareMode();
 			for (uint32 i = 0; i < kATHardwareModeCount; ++i) {
 				if (ImGui::MenuItem(kHardwareModeNames[i], nullptr, curHW == (ATHardwareMode)i)) {
-					ATUISwitchHardwareMode(nullptr, (ATHardwareMode)i, false);
+					ATUISwitchHardwareMode(nullptr, (ATHardwareMode)i, true);
 				}
 			}
 			ImGui::EndMenu();
@@ -1876,6 +1878,28 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Quit", "Ctrl+Q")) {
 			ATImGuiRequestQuit();
 		}
+
+		ImGui::EndMenu();
+	}
+
+	// --- Profiles menu ---
+	if (ImGui::BeginMenu("Profiles")) {
+		vdfastvector<uint32> profileIds;
+		ATSettingsProfileEnum(profileIds);
+		uint32 currentId = ATSettingsGetCurrentProfileId();
+
+		for (uint32 id : profileIds) {
+			if (!ATSettingsProfileGetVisible(id))
+				continue;
+			VDStringW name = ATSettingsProfileGetName(id);
+			VDStringA u8name = VDTextWToU8(name);
+			if (ImGui::MenuItem(u8name.c_str(), nullptr, id == currentId))
+				ATSettingsSwitchProfile(id);
+		}
+
+		ImGui::Separator();
+		if (ImGui::MenuItem("Profile Manager..."))
+			s_showProfileManager = true;
 
 		ImGui::EndMenu();
 	}
@@ -3594,6 +3618,135 @@ static void DrawCartridgeBrowser() {
 			s_cartDetectedModes.clear();
 			s_cartDisplayModes.clear();
 		}
+	}
+
+	ImGui::End();
+}
+
+// ============= Profile Manager Window =============
+
+static void DrawProfileManager() {
+	if (!s_showProfileManager)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(450, 350), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Profile Manager", &s_showProfileManager)) {
+		ImGui::End();
+		return;
+	}
+
+	vdfastvector<uint32> profileIds;
+	ATSettingsProfileEnum(profileIds);
+	uint32 currentId = ATSettingsGetCurrentProfileId();
+	static uint32 s_selectedProfileId = 0;
+	static char s_nameBuf[128] = "";
+	static bool s_renamePrefill = false;
+
+	// Profile list
+	if (ImGui::BeginChild("ProfileList", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2), ImGuiChildFlags_Borders)) {
+		for (uint32 id : profileIds) {
+			if (!ATSettingsProfileGetVisible(id))
+				continue;
+			VDStringW name = ATSettingsProfileGetName(id);
+			VDStringA u8name = VDTextWToU8(name);
+			if (id == currentId)
+				u8name += " (active)";
+
+			if (ImGui::Selectable(u8name.c_str(), s_selectedProfileId == id))
+				s_selectedProfileId = id;
+		}
+	}
+	ImGui::EndChild();
+
+	// Determine if selection is valid and whether it's a built-in default profile
+	bool hasSelection = ATSettingsIsValidProfile(s_selectedProfileId);
+	bool isDefault = false;
+	if (hasSelection) {
+		for (int i = 0; i < kATDefaultProfileCount; ++i) {
+			if (ATGetDefaultProfileId((ATDefaultProfile)i) == s_selectedProfileId) {
+				isDefault = true;
+				break;
+			}
+		}
+	}
+
+	// Action buttons
+	if (ImGui::Button("Switch To") && hasSelection && s_selectedProfileId != currentId)
+		ATSettingsSwitchProfile(s_selectedProfileId);
+
+	ImGui::SameLine();
+	if (ImGui::Button("New...")) {
+		s_nameBuf[0] = 0;
+		ImGui::OpenPopup("NewProfile");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Rename...") && hasSelection && !isDefault) {
+		VDStringW curName = ATSettingsProfileGetName(s_selectedProfileId);
+		VDStringA u8cur = VDTextWToU8(curName);
+		vdstrlcpy(s_nameBuf, u8cur.c_str(), sizeof(s_nameBuf));
+		s_renamePrefill = true;
+		ImGui::OpenPopup("RenameProfile");
+	}
+
+	ImGui::SameLine();
+	if (ImGui::Button("Delete") && hasSelection && !isDefault)
+		ImGui::OpenPopup("ConfirmDelete");
+
+	// New profile popup
+	if (ImGui::BeginPopup("NewProfile")) {
+		ImGui::Text("Profile name:");
+		ImGui::InputText("##newname", s_nameBuf, sizeof(s_nameBuf));
+		if (ImGui::Button("Create") && s_nameBuf[0]) {
+			uint32 newId = ATSettingsGenerateProfileId();
+			ATSettingsProfileSetName(newId, VDTextU8ToW(VDStringA(s_nameBuf)).c_str());
+			ATSettingsProfileSetVisible(newId, true);
+			ATSettingsProfileSetCategoryMask(newId, kATSettingsCategory_AllCategories);
+			ATSettingsSwitchProfile(newId);
+			s_selectedProfileId = newId;
+			s_nameBuf[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	// Rename popup
+	if (ImGui::BeginPopup("RenameProfile")) {
+		ImGui::Text("New name:");
+		if (s_renamePrefill) {
+			ImGui::SetKeyboardFocusHere();
+			s_renamePrefill = false;
+		}
+		ImGui::InputText("##rename", s_nameBuf, sizeof(s_nameBuf));
+		if (ImGui::Button("OK") && s_nameBuf[0]) {
+			ATSettingsProfileSetName(s_selectedProfileId,
+				VDTextU8ToW(VDStringA(s_nameBuf)).c_str());
+			s_nameBuf[0] = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
+	}
+
+	// Delete confirmation popup
+	if (ImGui::BeginPopup("ConfirmDelete")) {
+		VDStringW dname = ATSettingsProfileGetName(s_selectedProfileId);
+		VDStringA u8dname = VDTextWToU8(dname);
+		ImGui::Text("Delete profile \"%s\"?", u8dname.c_str());
+		if (ImGui::Button("Delete")) {
+			ATSettingsProfileDelete(s_selectedProfileId);
+			s_selectedProfileId = 0;
+			ImGui::CloseCurrentPopup();
+		}
+		ImGui::SameLine();
+		if (ImGui::Button("Cancel"))
+			ImGui::CloseCurrentPopup();
+		ImGui::EndPopup();
 	}
 
 	ImGui::End();
@@ -6667,6 +6820,7 @@ void ATImGuiEmulatorDraw() {
 	DrawBootOptions();
 	DrawCassetteControl();
 	DrawCartridgeBrowser();
+	DrawProfileManager();
 	DrawFirmwareManager();
 	DrawAudioOptions();
 	DrawVideoConfig();
