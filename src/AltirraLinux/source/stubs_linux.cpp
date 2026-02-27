@@ -23,12 +23,14 @@
 #include <vd2/system/vdtypes.h>
 #include <vd2/system/VDString.h>
 #include <vd2/system/vdstl.h>
+#include <vd2/system/math.h>
 #include <vd2/system/refcount.h>
 #include <vd2/system/function.h>
 #include <vd2/system/vectors.h>
 #include <vd2/system/atomic.h>
 #include <vd2/system/thread.h>
 #include <vd2/system/text.h>
+#include <vd2/system/time.h>
 #include <vd2/system/file.h>
 #include <vd2/system/fileasync.h>
 #include <vd2/system/filewatcher.h>
@@ -386,6 +388,12 @@ void ATSetWindowSize(int w, int h) {
 	if (s_pfnSetWindowSize)
 		s_pfnSetWindowSize(w, h);
 }
+// Frame timing variables — computed by ATUIUpdateSpeedTiming(), consumed by main loop
+sint64	g_frameTicks;
+uint32	g_frameSubTicks;
+sint64	g_frameErrorBound;
+sint64	g_frameTimeout;
+
 void ATUIUpdateSpeedTiming() {
 	extern ATSimulator g_sim;
 
@@ -422,6 +430,16 @@ void ATUIUpdateSpeedTiming() {
 	IATAudioOutput *audioOutput = g_sim.GetAudioOutput();
 	if (audioOutput)
 		audioOutput->SetCyclesPerSecond(cyclesPerSecond, 1.0 / rate);
+
+	// Compute frame timing for main loop pacing (matches Windows main.cpp logic)
+	double secondsPerFrame = rawSecondsPerFrame / rate;
+	double secondTime = VDGetPreciseTicksPerSecond();
+	double frameTimeF = secondTime * secondsPerFrame;
+
+	g_frameTicks = VDFloorToInt64(frameTimeF);
+	g_frameSubTicks = VDRoundToInt32((frameTimeF - g_frameTicks) * 65536.0);
+	g_frameErrorBound = std::max<sint64>(2 * g_frameTicks, VDRoundToInt64(secondTime * 0.1f));
+	g_frameTimeout = std::max<sint64>(5 * g_frameTicks, VDGetPreciseTicksPerSecondI());
 }
 void ATSyncCPUHistoryState() {
 	extern ATSimulator g_sim;
