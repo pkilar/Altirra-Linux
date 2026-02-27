@@ -3239,7 +3239,7 @@ static void DrawAbout() {
 	ImGui::Separator();
 	ImGui::TextWrapped(
 		"Atari 800/800XL/5200 emulator by Avery Lee.\n"
-		"Linux port using SDL2, OpenGL, and Dear ImGui.\n"
+		"Linux port by Paul Kilar using SDL2, OpenGL, and Dear ImGui.\n"
 		"\n"
 		"This program is free software under the GNU General "
 		"Public License v2 or later."

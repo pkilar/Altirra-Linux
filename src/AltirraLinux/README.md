@@ -5,9 +5,10 @@ cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL2 for
 display, audio, and input, OpenGL 2.1 for rendering, and Dear ImGui for the
 configuration and debugger overlay.
 
-> **Status**: ~99.8% feature-complete. Core emulation, UI, debugger, recording,
-> disk explorer, and all configuration dialogs are fully functional. The generic
-> device config system covers 66 of 67 Windows device tags.
+> **Status**: ~99.9% feature-complete. Core emulation, UI, debugger, recording,
+> disk explorer, profiles, compatibility database, and all configuration dialogs
+> are fully functional. All 8 device config types and 72 device tag mappings
+> implemented.
 
 ## Prerequisites
 
@@ -142,15 +143,16 @@ Press **F12** to toggle the ImGui overlay. When visible, the overlay provides:
 
 ### Menu bar
 
-| Menu       | Contents                                                                                                                                 |
-| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| **System** | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, cold/warm reset |
-| **File**   | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, disk explorer, screenshots, video/audio recording |
-| **Edit**   | Paste text to emulator |
-| **View**   | FPS, display filter (Point/Bilinear), stretch mode, window size, fullscreen, status bar toggle, cursor |
-| **Speed**  | Pause, turbo, speed slider (50-800%), mute, pause-when-inactive |
-| **Debug**  | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading |
-| **Help**   | Keyboard shortcuts, config directory, about |
+| Menu         | Contents                                                                                                                                                                               |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **System**   | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, cold/warm reset               |
+| **Profiles** | Switch between hardware profiles (800/1200XL/XL/XEGS/5200), profile manager (create/rename/delete)                                                                                     |
+| **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, disk explorer, screenshots, video/audio recording |
+| **Edit**     | Paste text to emulator                                                                                                                                                                 |
+| **View**     | FPS, display filter (Point/Bilinear), stretch mode, window size, fullscreen, status bar toggle, cursor                                                                                 |
+| **Speed**    | Pause, turbo, slow motion, speed slider (50-800%), mute, pause-when-inactive                                                                                                           |
+| **Debug**    | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading                                                                                                 |
+| **Help**     | Keyboard shortcuts, config directory, about                                                                                                                                            |
 
 ### Status bar
 
@@ -171,16 +173,16 @@ The emulator tries to use native file dialogs:
 
 These shortcuts work regardless of overlay visibility:
 
-| Key            | Action                       |
-| -------------- | ---------------------------- |
-| **F7**         | Quick save state             |
-| **F8**         | Quick load state             |
-| **F12**        | Toggle ImGui overlay         |
-| **Escape**     | Close overlay                |
-| **Alt+Return** | Toggle fullscreen            |
-| **F1 (hold)**  | Warp speed while held        |
-| **Ctrl+S**     | Save settings                |
-| **Ctrl+V**     | Paste text to emulator       |
+| Key            | Action                 |
+| -------------- | ---------------------- |
+| **F7**         | Quick save state       |
+| **F8**         | Quick load state       |
+| **F12**        | Toggle ImGui overlay   |
+| **Escape**     | Close overlay          |
+| **Alt+Return** | Toggle fullscreen      |
+| **F1 (hold)**  | Warp speed while held  |
+| **Ctrl+S**     | Save settings          |
+| **Ctrl+V**     | Paste text to emulator |
 
 When the overlay is visible, debug shortcuts are also active:
 
@@ -206,12 +208,12 @@ When the overlay is visible, debug shortcuts are also active:
 
 Record emulator video and audio via **File > Record Video**. Available codecs:
 
-| Codec                  | Container | Notes                                       |
-| ---------------------- | --------- | ------------------------------------------- |
-| ZMBV (Lossless)        | AVI       | Best quality, large files                   |
-| Raw (Uncompressed)     | AVI       | Largest files                               |
-| RLE (Palette only)     | AVI       | 8-bit palette modes only                    |
-| H.264+AAC (MP4)        | MP4       | Requires FFmpeg dev libraries at build time |
+| Codec              | Container | Notes                                       |
+| ------------------ | --------- | ------------------------------------------- |
+| ZMBV (Lossless)    | AVI       | Best quality, large files                   |
+| Raw (Uncompressed) | AVI       | Largest files                               |
+| RLE (Palette only) | AVI       | 8-bit palette modes only                    |
+| H.264+AAC (MP4)    | MP4       | Requires FFmpeg dev libraries at build time |
 
 The H.264 option only appears if FFmpeg was detected during the CMake configure
 step. CMake prints `FFmpeg found - H.264 recording enabled` when detection
@@ -239,7 +241,6 @@ succeeds.
 
 - No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
 - No physical disk access (intentionally disabled for security)
-- A few complex device dialogs use simplified controls (e.g., DIP switches as integer input, compound dropdowns as separate controls)
 
 ## Running the test suite
 
@@ -284,7 +285,7 @@ src/AltirraShell/
     debugger_imgui.cpp    13 debugger windows + IATDebuggerClient
     emulator_imgui.cpp    Menu bar, all config dialogs, disk explorer, status bar
     filedialog_linux.cpp  Fork+exec zenity/kdialog, ImGui fallback
-    commands_linux.cpp    67 UI command handlers + ATUICommandManager
+    commands_linux.cpp    68 UI command handlers + ATUICommandManager
 ```
 
 ## License

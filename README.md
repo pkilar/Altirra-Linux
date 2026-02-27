@@ -28,13 +28,14 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, source-level debugging, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
 - **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
 - **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
+- **Profiles**: Hardware profile system with 5 built-in profiles (800, 1200XL, XL/XE, XEGS, 5200), profile manager dialog, and automatic profile switching when changing hardware modes
 - **Settings**: Portable INI-based configuration at `~/.config/altirra/Altirra.ini`
 - **File dialogs**: Native dialogs via zenity (GTK) or kdialog (KDE) with ImGui fallback
 - **Firmware discovery**: Automatic ROM scanning from multiple paths
 - **Screenshots**: PNG screenshot capture
 - **Video recording**: AVI (ZMBV lossless, Raw, RLE) and H.264+AAC MP4 (requires optional FFmpeg libraries)
 - **Audio recording**: WAV, raw PCM, SAP, VGM
-- **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode
+- **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode, slow motion
 
 ### Keyboard Shortcuts
 
@@ -173,12 +174,14 @@ Settings are stored in `~/.config/altirra/Altirra.ini` by default. All emulator 
 
 ## Port Status
 
-The Linux port is approximately **99.8% complete** relative to the Windows version.
+The Linux port is approximately **99.9% complete** relative to the Windows version.
 
 ### Fully Functional
 
 - Complete emulation core (all CPUs, chips, peripherals, disk/cassette/cartridge)
 - Full ImGui UI with all configuration dialogs
+- Hardware profile system (5 built-in profiles, profile manager with create/rename/delete)
+- Compatibility database for auto-suggesting configuration adjustments
 - Integrated debugger with 13 tool windows (registers, disassembly, memory, console, breakpoints, watch, call stack, history, source code, printer output, profiler, trace viewer, debug display)
 - Disk explorer with filesystem operations (browse, extract, import, rename, delete, drag-and-drop)
 - Input mapping with binding editor and key/button capture
@@ -186,9 +189,9 @@ The Linux port is approximately **99.8% complete** relative to the Windows versi
 - Audio recording (WAV/PCM/SAP/VGM) and video recording (AVI + H.264/MP4)
 - Network emulation (modem TCP via POSIX sockets, socket layer with epoll)
 - Firmware discovery and management
+- Embedded kernel ROMs (10 firmware images assembled from 6502 source at build time)
 - Source-level debugging with symbol file support
 - Precision frame pacing with speed control
-- Embedded resources (audio samples, debugger help, diskloader128)
 - inotify-based directory watcher with polling fallback
 - HiDPI display, PAR correction, adaptive vsync
 
