@@ -222,31 +222,62 @@ foreach(src ${ALTIRRA_ALL_SOURCES})
 	endif()
 endforeach()
 
+# Build ATDiskLoader128 with MADS at configure time (IDR_DISKLOADER128 = resource ID 150)
+set(DISKLOADER128_BIN "")
+find_program(MADS_EXECUTABLE mads)
+if(MADS_EXECUTABLE)
+	set(DISKLOADER128_BIN "${CMAKE_CURRENT_BINARY_DIR}/atdiskloader128.bin")
+	execute_process(
+		COMMAND ${MADS_EXECUTABLE} -d:MEMORY=128 -s -p -b:$0700
+				-o:${DISKLOADER128_BIN}
+				${CMAKE_SOURCE_DIR}/src/Kernel/source/ATDiskLoader/main.s
+		RESULT_VARIABLE MADS_RESULT
+		OUTPUT_VARIABLE MADS_OUTPUT
+		ERROR_VARIABLE MADS_ERROR
+	)
+	if(NOT MADS_RESULT EQUAL 0)
+		message(WARNING "MADS failed to assemble ATDiskLoader128: ${MADS_ERROR}")
+		set(DISKLOADER128_BIN "")
+	else()
+		message(STATUS "Assembled ATDiskLoader128 -> ${DISKLOADER128_BIN}")
+	endif()
+else()
+	message(STATUS "MADS not found — ATDiskLoader128 (IDR_DISKLOADER128) will not be embedded")
+endif()
+
 # Embed resource files from Altirra/res at configure time
 include(${CMAKE_SOURCE_DIR}/cmake/EmbedResources.cmake)
+
+# Build STUFF resource list (conditionally include diskloader128)
+set(STUFF_RESOURCES
+	112 changes.txt
+	143 dbghelp.txt
+	164 about.txt
+	166 trackstep.pcm
+	167 DiskSpin.pcm
+	168 TrackStep2.pcm
+	169 menu_default.txt
+	201 TrackStep3.pcm
+	223 compatdb.atcpengine
+	225 romset.html
+	235 cmdhelp.txt
+	253 speaker-click.pcm
+	260 dbghelp-template.html
+	261 1030relay.pcm
+	264 printer-1029-pin.pcm
+	265 printer-1029-platen.pcm
+	266 printer-1029-retract.pcm
+	267 printer-1029-home.pcm
+	268 printer-1025-feed.pcm
+)
+if(DISKLOADER128_BIN)
+	list(APPEND STUFF_RESOURCES 150 ${DISKLOADER128_BIN})
+endif()
+
 embed_resources(
 	OUTPUT_FILE ${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.cpp
 	RESOURCE_DIR ${CMAKE_SOURCE_DIR}/src/Altirra/res
-	STUFF
-		112 changes.txt
-		143 dbghelp.txt
-		164 about.txt
-		166 trackstep.pcm
-		167 DiskSpin.pcm
-		168 TrackStep2.pcm
-		169 menu_default.txt
-		201 TrackStep3.pcm
-		223 compatdb.atcpengine
-		225 romset.html
-		235 cmdhelp.txt
-		253 speaker-click.pcm
-		260 dbghelp-template.html
-		261 1030relay.pcm
-		264 printer-1029-pin.pcm
-		265 printer-1029-platen.pcm
-		266 printer-1029-retract.pcm
-		267 printer-1029-home.pcm
-		268 printer-1025-feed.pcm
+	STUFF ${STUFF_RESOURCES}
 	PNG
 		231 traceViewerToolbar.png
 		233 profilerToolbar.png

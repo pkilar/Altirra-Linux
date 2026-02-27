@@ -66,6 +66,27 @@ struct ATImGuiIndicatorState {
 	bool mbRecordingPaused = false;    // Video recording paused state
 	uint8 mLedStatus = 0;             // LED mask (bit 0 = L1, bit 1 = L2) — 1200XL only
 	double mCyclesPerSecond = 0.0;    // CPU master clock rate
+
+	// Held console switches (bit 0=Start, 1=Select, 2=Option; 1=held)
+	uint8 mHeldButtonMask = 0;
+	bool mbPendingHoldMode = false;
+	int mPendingHeldKey = -1;
+	uint8 mPendingHeldButtons = 0;
+
+	// Tracing
+	sint64 mTracingSize = -1;       // -1 = not tracing
+
+	// Priority messages (0=Status, 1=Modem, 2=Prompt)
+	char mStatusMessages[3][128] = {};
+	uint32 mStatusMessageTimestamp = 0;  // SDL_GetTicks() for auto-expire
+
+	// Watched values (debugger)
+	struct WatchSlot {
+		bool active = false;
+		uint32 value = 0;
+		int format = 0;  // IATUIRenderer::WatchFormat enum
+	};
+	WatchSlot mWatchSlots[8] = {};
 };
 
 ATImGuiIndicatorState& ATImGuiGetIndicatorState();
