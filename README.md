@@ -173,28 +173,31 @@ Settings are stored in `~/.config/altirra/Altirra.ini` by default. All emulator 
 
 ## Port Status
 
-The Linux port is approximately **99% complete** relative to the Windows version.
+The Linux port is approximately **99.5% complete** relative to the Windows version.
 
 ### Fully Functional
 
 - Complete emulation core (all CPUs, chips, peripherals, disk/cassette/cartridge)
 - Full ImGui UI with all configuration dialogs
-- Integrated debugger with 12+ tool windows
-- Disk explorer with filesystem operations
-- Input mapping with binding editor
+- Integrated debugger with 13 tool windows (registers, disassembly, memory, console, breakpoints, watch, call stack, history, source code, printer output, profiler, trace viewer, debug display)
+- Disk explorer with filesystem operations (browse, extract, import, rename, delete, drag-and-drop)
+- Input mapping with binding editor and key/button capture
 - Save states (quick save/load and file-based)
 - Audio recording (WAV/PCM/SAP/VGM) and video recording (AVI + H.264/MP4)
 - Network emulation (modem TCP via POSIX sockets, socket layer with epoll)
 - Firmware discovery and management
 - Source-level debugging with symbol file support
 - Precision frame pacing with speed control
+- Embedded resources (audio samples, debugger help, diskloader128)
+- inotify-based directory watcher with polling fallback
+- HiDPI display, PAR correction, adaptive vsync
 
-### Intentionally Disabled
+### Intentionally Not Ported
 
-- **DragonCart Ethernet** — stubbed (modem TCP works)
+- **DragonCart Ethernet** — niche Atari networking device, stubbed (modem TCP works via POSIX sockets)
 - **Raw disk access** (ATIDEPhysicalDisk) — disabled for security
-- **ETW tracing** (ATCreateNativeTracer) — Windows-specific tracing infrastructure
-- **Win32 resource loading** — not applicable on Linux
+- **ETW tracing** (ATCreateNativeTracer) — Windows-specific; Linux has ImGui trace viewer instead
+- **Named Pipe Serial / MidiMate / Browser** — Windows-specific peripherals with no Linux equivalent
 
 ## Project Structure
 
