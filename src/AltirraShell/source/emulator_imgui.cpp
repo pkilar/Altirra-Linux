@@ -2762,51 +2762,13 @@ static void DrawSystemConfig() {
 		auto newHW = (ATHardwareMode)s_pendingHwMode;
 		auto newMem = kSortedMemoryModes[s_pendingMemMode].mode;
 		auto newVid = (ATVideoStandard)s_pendingVideoStd;
-		ATHardwareMode prevHW = g_sim.GetHardwareMode();
 
-		// Handle 5200 transitions
-		bool switching5200 = (newHW == kATHardwareMode_5200 || prevHW == kATHardwareMode_5200)
-			&& newHW != prevHW;
-		if (switching5200) {
-			g_sim.UnloadAll();
-			if (newHW == kATHardwareMode_5200) {
-				g_sim.LoadCartridge5200Default();
-				newMem = kATMemoryMode_16K;
-			}
-		}
+		// Switch hardware mode (sets stock defaults for memory/kernel)
+		ATUISwitchHardwareMode(nullptr, newHW, false);
 
-		// Apply hardware mode
-		if (newHW != prevHW) {
-			g_sim.SetHardwareMode(newHW);
-
-			// Check for incompatible kernel
-			switch (g_sim.GetKernelMode()) {
-				case kATKernelMode_Default:
-					break;
-				case kATKernelMode_XL:
-					if (!kATHardwareModeTraits[newHW].mbRunsXLOS)
-						g_sim.SetKernel(0);
-					break;
-				case kATKernelMode_5200:
-					if (newHW != kATHardwareMode_5200)
-						g_sim.SetKernel(0);
-					break;
-				default:
-					if (newHW == kATHardwareMode_5200)
-						g_sim.SetKernel(0);
-					break;
-			}
-		}
-
-		// Apply video standard (5200 must be NTSC)
-		if (newHW == kATHardwareMode_5200)
-			newVid = kATVideoStandard_NTSC;
+		// Apply user's explicit overrides from the dialog
+		ATUISwitchMemoryMode(nullptr, newMem);
 		g_sim.SetVideoStandard(newVid);
-
-		// Apply memory mode with validation
-		g_sim.SetMemoryMode(newMem);
-
-		// Apply BASIC
 		g_sim.SetBASICEnabled(s_pendingBasic);
 
 		ATUIUpdateSpeedTiming();

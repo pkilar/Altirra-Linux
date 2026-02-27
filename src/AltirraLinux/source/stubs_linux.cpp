@@ -582,6 +582,21 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 	}
 }
 
+// Stock default memory mode for each hardware type.
+// Matches real hardware RAM configurations.
+static ATMemoryMode GetDefaultMemoryMode(ATHardwareMode mode) {
+	switch (mode) {
+		case kATHardwareMode_800:      return kATMemoryMode_48K;
+		case kATHardwareMode_800XL:    return kATMemoryMode_64K;
+		case kATHardwareMode_5200:     return kATMemoryMode_16K;
+		case kATHardwareMode_XEGS:    return kATMemoryMode_64K;
+		case kATHardwareMode_1200XL:   return kATMemoryMode_64K;
+		case kATHardwareMode_130XE:    return kATMemoryMode_128K;
+		case kATHardwareMode_1400XL:   return kATMemoryMode_64K;
+		default:                       return kATMemoryMode_64K;
+	}
+}
+
 bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
 	extern ATSimulator g_sim;
 
@@ -592,45 +607,22 @@ bool ATUISwitchHardwareMode(VDGUIHandle, ATHardwareMode mode, bool) {
 	// Check if we are switching to or from 5200 mode
 	const bool switching5200 = (mode == kATHardwareMode_5200 || prevMode == kATHardwareMode_5200);
 
-	if (switching5200) {
+	if (switching5200)
 		g_sim.UnloadAll();
 
-		// 5200 mode needs the default cart and 16K memory
-		if (mode == kATHardwareMode_5200) {
-			g_sim.LoadCartridge5200Default();
-			g_sim.SetMemoryMode(kATMemoryMode_16K);
-		}
-	}
-
+	// Set hardware mode first so kernel/memory validation works against the new mode
 	g_sim.SetHardwareMode(mode);
 
-	// Check for incompatible kernel
-	switch (g_sim.GetKernelMode()) {
-		case kATKernelMode_Default:
-			break;
+	// Apply stock defaults for the target hardware
+	g_sim.SetMemoryMode(GetDefaultMemoryMode(mode));
+	g_sim.SetKernel(0);
 
-		case kATKernelMode_XL:
-			if (!kATHardwareModeTraits[mode].mbRunsXLOS)
-				g_sim.SetKernel(0);
-			break;
-
-		case kATKernelMode_5200:
-			if (mode != kATHardwareMode_5200)
-				g_sim.SetKernel(0);
-			break;
-
-		default:
-			if (mode == kATHardwareMode_5200)
-				g_sim.SetKernel(0);
-			break;
-	}
-
-	// If we are in 5200 mode, we must be in NTSC
-	if (mode == kATHardwareMode_5200 && g_sim.GetVideoStandard() != kATVideoStandard_NTSC) {
+	if (mode == kATHardwareMode_5200) {
+		g_sim.LoadCartridge5200Default();
 		g_sim.SetVideoStandard(kATVideoStandard_NTSC);
-		ATUIUpdateSpeedTiming();
 	}
 
+	ATUIUpdateSpeedTiming();
 	g_sim.ColdReset();
 	return true;
 }
