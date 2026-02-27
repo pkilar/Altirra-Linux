@@ -233,6 +233,15 @@ static const DevCfgChoice kPrinterTranslationChoices[] = {
 	{0, "Translate EOL"}, {1, "Raw"}, {2, "ATASCII to UTF-8"},
 };
 
+static const DevCfgChoice kDriveIDChoices[] = {
+	{0, "Drive 1 (D1:)"}, {1, "Drive 2 (D2:)"}, {2, "Drive 3 (D3:)"}, {3, "Drive 4 (D4:)"},
+};
+
+static const DevCfgChoice k815IDChoices[] = {
+	{0, "Drives 1-2 (D1:-D2:)"}, {2, "Drives 3-4 (D3:-D4:)"},
+	{4, "Drives 5-6 (D5:-D6:)"}, {6, "Drives 7-8 (D7:-D8:)"},
+};
+
 static const DevCfgControl kCfgModem[] = {
 	{ DevCfgType::IntInput, "port", "Listen Port (0=disabled)", nullptr, 0, false, nullptr },
 	{ DevCfgType::Checkbox, "outbound", "Allow Outbound", nullptr, 0, true, nullptr },
@@ -314,6 +323,20 @@ static const DevCfgControl kCfgPrinterHLE[] = {
 	{ DevCfgType::IntDropdown, "translation_mode", "Translation Mode", kPrinterTranslationChoices, 3, false, nullptr },
 };
 
+static const DevCfgControl kCfgDiskDriveFull[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kDriveIDChoices, 4, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDriveHappy810[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive ID", kDriveIDChoices, 4, false, nullptr },
+	{ DevCfgType::Checkbox, "autospeed", "Auto-Speed", nullptr, 0, false, nullptr },
+};
+
+static const DevCfgControl kCfgDiskDrive815[] = {
+	{ DevCfgType::IntDropdown, "id", "Drive Pair", k815IDChoices, 4, false, nullptr },
+	{ DevCfgType::Checkbox, "accurate_invert", "Accurate Invert", nullptr, 0, false, nullptr },
+};
+
 // --- Tag → descriptor lookup ---
 
 struct DevCfgTagMapping {
@@ -360,6 +383,26 @@ static const DevCfgTagMapping kDevCfgMappings[] = {
 	DEVCFG_ENTRY("videostillimage", "Video Still Image", kCfgVideoStillImage),
 	DEVCFG_ENTRY("dongle", "Dongle", kCfgDongle),
 	DEVCFG_ENTRY("printer", "Printer (P:)", kCfgPrinterHLE),
+	DEVCFG_ENTRY("diskdrive810", "810 Disk Drive", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive810archiver", "810 Archiver", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050", "1050 Disk Drive", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveusdoubler", "US Doubler", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivespeedy1050", "Speedy 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivehappy1050", "Happy 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivesuperarchiver", "Super Archiver", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivesuperarchiverbw", "Super Archiver (B&W)", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivetoms1050", "Toms 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050duplicator", "1050 Duplicator", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivetygrys1050", "Tygrys 1050", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050turbo", "1050 Turbo", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive1050turboii", "1050 Turbo II", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveisplate", "IS-Plate", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdriveindusgt", "Indus GT", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivexf551", "XF551", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrive810turbo", "810 Turbo", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivespeedyxf", "Speedy XF", kCfgDiskDriveFull),
+	DEVCFG_ENTRY("diskdrivehappy810", "Happy 810", kCfgDiskDriveHappy810),
+	DEVCFG_ENTRY("diskdrive815", "815 Dual Disk Drive", kCfgDiskDrive815),
 };
 
 #undef DEVCFG_ENTRY
