@@ -94,6 +94,7 @@
 #include "trace.h"
 #include <at/atcore/cio.h>
 #include <at/atcore/constants.h>
+#include "uienhancedtext.h"
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -307,18 +308,77 @@ void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
 void ATUISetDrawPadPointersEnabled(bool v) { s_drawPadPointers = v; }
+// Enhanced text engine instance — accessible from emulator_imgui.cpp and main_linux.cpp
+static IATUIEnhancedTextEngine *g_pEnhancedTextEngine = nullptr;
+
+IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine() {
+	return g_pEnhancedTextEngine;
+}
+
+// Output callback that triggers display refresh
+class ATLinuxEnhancedTextOutput : public IATUIEnhancedTextOutput {
+public:
+	void InvalidateTextOutput() override {
+		// The display update is driven by the per-frame Update() call in
+		// RenderAndSwap(), so we don't need to do anything special here.
+	}
+};
+
+static ATLinuxEnhancedTextOutput g_enhancedTextOutput;
+
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
-	s_enhancedTextMode = v;
 	extern ATSimulator g_sim;
+	extern ATDisplaySDL2 *ATGetLinuxDisplay();
+
+	ATUIEnhancedTextMode oldMode = s_enhancedTextMode;
+	s_enhancedTextMode = v;
+
+	// Destroy old engine if switching away from enhanced text
+	if (oldMode != kATUIEnhancedTextMode_None && v == kATUIEnhancedTextMode_None) {
+		if (g_pEnhancedTextEngine) {
+			g_pEnhancedTextEngine->Shutdown();
+			delete g_pEnhancedTextEngine;
+			g_pEnhancedTextEngine = nullptr;
+		}
+
+		g_sim.SetVirtualScreenEnabled(false);
+		return;
+	}
+
 	switch (v) {
 		case kATUIEnhancedTextMode_None:
+			g_sim.SetVirtualScreenEnabled(false);
+			break;
+
 		case kATUIEnhancedTextMode_Hardware:
 			g_sim.SetVirtualScreenEnabled(false);
 			break;
+
 		case kATUIEnhancedTextMode_Software:
 			g_sim.SetVirtualScreenEnabled(true);
 			g_sim.GetPokey().PushBreak();
 			break;
+	}
+
+	if (v != kATUIEnhancedTextMode_None) {
+		// Keep GTIA connected to the display so frame timing continues
+		// to work normally. The enhanced text engine's framebuffer is
+		// set as persistent source in RenderAndSwap(), overwriting
+		// GTIA's output before the display renders.
+
+		if (!g_pEnhancedTextEngine) {
+			g_pEnhancedTextEngine = ATUICreateEnhancedTextEngine();
+			g_pEnhancedTextEngine->Init(&g_enhancedTextOutput, &g_sim);
+
+			// Initialize with current window size
+			ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+			if (disp) {
+				int w = 0, h = 0;
+				disp->GetWindowSize(w, h);
+				if (w > 0 && h > 0)
+					g_pEnhancedTextEngine->OnSize(w, h);
+			}
+		}
 	}
 }
 void ATUISetFrameRateMode(ATFrameRateMode v) { s_frameRateMode = v; ATUIUpdateSpeedTiming(); }
