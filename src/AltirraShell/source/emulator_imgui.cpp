@@ -23,6 +23,8 @@
 #include <at/atio/cartridgeimage.h>
 #include <at/ataudio/audiooutput.h>
 #include <at/ataudio/pokey.h>
+#include <vd2/Kasumi/pixmapops.h>
+#include <vd2/Kasumi/pixmaputils.h>
 
 #include <vd2/system/filesys.h>
 #include <vd2/system/strutil.h>
@@ -42,6 +44,7 @@ class ATIRQController;
 #include "simulator.h"
 #include "constants.h"
 #include "cassette.h"
+#include <at/atio/cassetteimage.h>
 #include "disk.h"
 #include "diskinterface.h"
 #include <at/atio/diskfs.h>
@@ -71,6 +74,8 @@ class ATIRQController;
 #include "audiomonitor.h"
 #include "compatdb.h"
 #include "compatengine.h"
+#include "sapconverter.h"
+#include "options.h"
 #include "resource.h"
 
 #include <SDL.h>
@@ -2187,6 +2192,52 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		{
+			ATCartridgeEmulator *cart = g_sim.GetCartridge(0);
+			bool hasCart = cart && cart->GetMode() != 0 && cart->GetMode() != kATCartridgeMode_SuperCharger3D;
+			if (ImGui::MenuItem("Save Cartridge...", nullptr, false, hasCart)) {
+				VDStringW path = ATLinuxSaveFileDialog("Save Cartridge",
+					"Cartridge Files|*.car;*.bin|All Files|*");
+				if (!path.empty()) {
+					try {
+						cart->Save(path.c_str(), true);
+						ShowToast("Cartridge saved");
+					} catch (const std::exception& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Save failed: %s", e.what());
+						ShowToast(msg);
+					} catch (...) {
+						ShowToast("Cartridge save failed");
+					}
+				}
+			}
+		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Attach Secondary Cartridge...")) {
+			VDStringW path = ATLinuxOpenFileDialog("Load Secondary Cartridge", kCartFilters);
+			if (!path.empty()) {
+				try {
+					g_sim.LoadCartridge(1, path.c_str(), (ATCartLoadContext *)nullptr);
+					g_sim.ColdReset();
+					g_sim.Resume();
+					ShowToast("Secondary cartridge attached");
+				} catch (const std::exception& e) {
+					char msg[512];
+					snprintf(msg, sizeof(msg), "Load failed: %s", e.what());
+					ShowToast(msg);
+				} catch (...) {
+					ShowToast("Failed to attach secondary cartridge");
+				}
+			}
+		}
+		if (ImGui::MenuItem("Detach Secondary Cartridge", nullptr, false, g_sim.IsCartridgeAttached(1))) {
+			g_sim.UnloadCartridge(1);
+			g_sim.ColdReset();
+			g_sim.Resume();
+		}
+
 		ImGui::Separator();
 
 		if (ImGui::BeginMenu("Disk Drives")) {
@@ -2454,6 +2505,36 @@ static void DrawMenuBar() {
 			}
 		}
 
+		if (ImGui::MenuItem("Save Screenshot (True Aspect)...")) {
+			VDPixmapBuffer pxbuf;
+			VDPixmap px;
+			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+				// Apply PAR correction: NTSC pixels are ~0.857 aspect, scale width
+				bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL;
+				float par = isPAL ? (1.0f / 1.03f) : (1.0f / 0.857f);
+				int newW = (int)(px.w * par + 0.5f);
+				if (newW > 0 && newW < 4096) {
+					VDPixmapBuffer scaled(newW, px.h, nsVDPixmap::kPixFormat_XRGB8888);
+					VDPixmapStretchBltBilinear(scaled, px);
+					VDStringW path = ATLinuxSaveFileDialog("Save Screenshot (True Aspect)",
+						"PNG Images|*.png|All Files|*");
+					if (!path.empty()) {
+						try {
+							if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+								path += L".png";
+							ATSaveFrame(scaled, path.c_str());
+						} catch (const std::exception& e) {
+							char msg[512];
+							snprintf(msg, sizeof(msg), "Screenshot failed: %s", e.what());
+							ShowToast(msg);
+						} catch (...) {
+							ShowToast("Failed to save screenshot");
+						}
+					}
+				}
+			}
+		}
+
 		if (ImGui::BeginMenu("Record")) {
 			bool recording = IsRecordingActive();
 			bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL;
@@ -2586,6 +2667,13 @@ static void DrawMenuBar() {
 	if (ImGui::BeginMenu("Edit")) {
 		if (ImGui::MenuItem("Paste Text", "Ctrl+V"))
 			PasteTextToEmulator();
+
+		if (ImGui::MenuItem("Copy Frame to Clipboard")) {
+			VDPixmapBuffer pxbuf;
+			VDPixmap px;
+			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px))
+				ATCopyFrameToClipboard(px);
+		}
 
 		ImGui::EndMenu();
 	}
@@ -2865,6 +2953,32 @@ static void DrawMenuBar() {
 				dbg->QueueCommand(".unloadsym", false);
 		}
 
+		ImGui::Separator();
+
+		{
+			bool autoReloadROMs = g_sim.IsROMAutoReloadEnabled();
+			if (ImGui::MenuItem("Auto-Reload ROMs", nullptr, &autoReloadROMs))
+				g_sim.SetROMAutoReloadEnabled(autoReloadROMs);
+
+			bool autoLoadKernelSyms = g_sim.IsAutoLoadKernelSymbolsEnabled();
+			if (ImGui::MenuItem("Auto-Load Kernel Symbols", nullptr, &autoLoadKernelSyms))
+				g_sim.SetAutoLoadKernelSymbolsEnabled(autoLoadKernelSyms);
+
+			if (dbg) {
+				bool autoLoadSysSyms = dbg->IsAutoLoadSystemSymbolsEnabled();
+				if (ImGui::MenuItem("Auto-Load System Symbols", nullptr, &autoLoadSysSyms))
+					dbg->SetAutoLoadSystemSymbols(autoLoadSysSyms);
+
+				bool breakExeRun = dbg->IsBreakOnEXERunAddrEnabled();
+				if (ImGui::MenuItem("Break at EXE Run Address", nullptr, &breakExeRun))
+					dbg->SetBreakOnEXERunAddrEnabled(breakExeRun);
+
+				bool debugLink = dbg->GetDebugLinkEnabled();
+				if (ImGui::MenuItem("Debug Link", nullptr, &debugLink))
+					dbg->SetDebugLinkEnabled(debugLink);
+			}
+		}
+
 		ImGui::EndMenu();
 	}
 
@@ -2945,6 +3059,63 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Tape Editor...", nullptr, false, g_sim.GetCassette().GetLength() > 0))
 			s_showTapeEditor = true;
 
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Convert SAP to EXE...")) {
+			VDStringW srcPath = ATLinuxOpenFileDialog("Select Source SAP File",
+				"SAP Files|*.sap|All Files|*");
+			if (!srcPath.empty()) {
+				VDStringW dstPath = ATLinuxSaveFileDialog("Select Output File",
+					"XEX Files|*.xex;*.obx|All Files|*");
+				if (!dstPath.empty()) {
+					try {
+						if (VDFileSplitExt(dstPath.c_str()) == dstPath.c_str() + dstPath.size())
+							dstPath += L".xex";
+						ATConvertSAPToPlayer(dstPath.c_str(), srcPath.c_str());
+						ShowToast("SAP converted to EXE");
+					} catch (const std::exception& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Conversion failed: %s", e.what());
+						ShowToast(msg);
+					} catch (...) {
+						ShowToast("SAP conversion failed");
+					}
+				}
+			}
+		}
+
+		if (ImGui::MenuItem("Analyze Tape Decoding...")) {
+			VDStringW srcPath = ATLinuxOpenFileDialog("Load Tape Audio to Analyze",
+				"Audio Files|*.wav;*.flac;*.ogg|All Files|*");
+			if (!srcPath.empty()) {
+				VDStringW dstPath = ATLinuxSaveFileDialog("Save Tape Analysis",
+					"Analysis WAV|*.wav|All Files|*");
+				if (!dstPath.empty()) {
+					try {
+						if (VDFileSplitExt(dstPath.c_str()) == dstPath.c_str() + dstPath.size())
+							dstPath += L".wav";
+						if (VDFileIsPathEqual(srcPath.c_str(), dstPath.c_str()))
+							throw MyError("The analysis file needs to be different from the source tape file.");
+						VDFileStream f2(dstPath.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kSequential | nsVDFile::kCreateAlways);
+						ATCassetteLoadContext ctx;
+						g_sim.GetCassette().GetLoadOptions(ctx);
+						(void)ATLoadCassetteImage(srcPath.c_str(), &f2, ctx);
+						ShowToast("Tape analysis complete");
+					} catch (const MyError& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Analysis failed: %s", e.c_str());
+						ShowToast(msg);
+					} catch (const std::exception& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Analysis failed: %s", e.what());
+						ShowToast(msg);
+					} catch (...) {
+						ShowToast("Tape analysis failed");
+					}
+				}
+			}
+		}
+
 		ImGui::EndMenu();
 	}
 
@@ -2973,6 +3144,13 @@ static void DrawMenuBar() {
 				ATShowFileInSystemExplorer(dummy.c_str());
 			}
 		}
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Altirra Home Page"))
+			ATLaunchURL(L"https://virtualdub.org/altirra.html");
+		if (ImGui::MenuItem("Change Log"))
+			ATLaunchURL(L"https://virtualdub.org/doc/altirra/cl/altirra-changes.html");
 
 		ImGui::Separator();
 
@@ -3063,6 +3241,46 @@ static void DrawSystemConfig() {
 	ImGui::Text("BASIC:");
 	ImGui::SameLine(100);
 	ImGui::Checkbox("##basic", &s_pendingBasic);
+
+	// Memory clearing mode (applied immediately)
+	{
+		static const char *kMemClearNames[] = { "Zero", "Random", "DRAM 1", "DRAM 2", "DRAM 3" };
+		static_assert(sizeof(kMemClearNames)/sizeof(kMemClearNames[0]) == kATMemoryClearModeCount);
+		int clearMode = (int)g_sim.GetMemoryClearMode();
+		ImGui::Text("Clear Mode:");
+		ImGui::SameLine(100);
+		ImGui::SetNextItemWidth(180);
+		if (ImGui::Combo("##clearmode", &clearMode, kMemClearNames, kATMemoryClearModeCount))
+			g_sim.SetMemoryClearMode((ATMemoryClearMode)clearMode);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("How memory is initialized on cold reset");
+	}
+
+	// Media write mode (applied immediately)
+	{
+		static const char *kWriteModeNames[] = { "Read Only", "Virtual RW (Safe)", "Virtual RW", "Full Read/Write" };
+		int writeIdx = 0;
+		ATMediaWriteMode wm = g_ATOptions.mDefaultWriteMode;
+		if (wm == kATMediaWriteMode_VRWSafe) writeIdx = 1;
+		else if (wm == kATMediaWriteMode_VRW) writeIdx = 2;
+		else if (wm == kATMediaWriteMode_RW) writeIdx = 3;
+		ImGui::Text("Write Mode:");
+		ImGui::SameLine(100);
+		ImGui::SetNextItemWidth(180);
+		if (ImGui::Combo("##writemode", &writeIdx, kWriteModeNames, 4)) {
+			static const ATMediaWriteMode kWriteModes[] = {
+				kATMediaWriteMode_RO, kATMediaWriteMode_VRWSafe,
+				kATMediaWriteMode_VRW, kATMediaWriteMode_RW
+			};
+			auto prev = g_ATOptions;
+			g_ATOptions.mDefaultWriteMode = kWriteModes[writeIdx];
+			ATOptionsRunUpdateCallbacks(&prev);
+			g_ATOptions.mbDirty = true;
+			ATOptionsSave();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Default write mode for newly mounted media");
+	}
 
 	ImGui::Separator();
 
@@ -4833,6 +5051,33 @@ static void DrawAudioOptions() {
 			pokey.SetSerialNoiseEnabled(serialNoise);
 	}
 
+	// Channel enable/disable
+	if (ImGui::CollapsingHeader("Channel Enables", ImGuiTreeNodeFlags_DefaultOpen)) {
+		ATPokeyEmulator& pokey2 = g_sim.GetPokey();
+
+		ImGui::Text("Primary POKEY:");
+		for (int i = 0; i < 4; i++) {
+			char label[16];
+			snprintf(label, sizeof(label), "Ch %d##pri%d", i + 1, i);
+			bool enabled = pokey2.IsChannelEnabled(i);
+			if (ImGui::Checkbox(label, &enabled))
+				pokey2.SetChannelEnabled(i, enabled);
+			if (i < 3) ImGui::SameLine();
+		}
+
+		if (g_sim.IsDualPokeysEnabled()) {
+			ImGui::Text("Secondary POKEY:");
+			for (int i = 0; i < 4; i++) {
+				char label[16];
+				snprintf(label, sizeof(label), "Ch %d##sec%d", i + 1, i);
+				bool enabled = pokey2.IsSecondaryChannelEnabled(i);
+				if (ImGui::Checkbox(label, &enabled))
+					pokey2.SetSecondaryChannelEnabled(i, enabled);
+				if (i < 3) ImGui::SameLine();
+			}
+		}
+	}
+
 	// Audio status
 	if (ImGui::CollapsingHeader("Audio Status")) {
 		if (audioOut) {
@@ -6061,6 +6306,22 @@ static void DrawCPUOptions() {
 		bool mapRAM = g_sim.IsMapRAMEnabled();
 		if (ImGui::Checkbox("MapRAM", &mapRAM))
 			g_sim.SetMapRAMEnabled(mapRAM);
+
+		bool u1mb = g_sim.IsUltimate1MBEnabled();
+		if (ImGui::Checkbox("Ultimate1MB", &u1mb))
+			g_sim.SetUltimate1MBEnabled(u1mb);
+
+		bool floatIO = g_sim.IsFloatingIoBusEnabled();
+		if (ImGui::Checkbox("Floating I/O bus", &floatIO))
+			g_sim.SetFloatingIoBusEnabled(floatIO);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Bus floats return last data bus value instead of 0xFF");
+
+		bool preserveExt = g_sim.IsPreserveExtRAMEnabled();
+		if (ImGui::Checkbox("Preserve extended RAM", &preserveExt))
+			g_sim.SetPreserveExtRAMEnabled(preserveExt);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Don't clear extended RAM on cold reset");
 	}
 
 	ImGui::End();
@@ -6095,6 +6356,27 @@ static void DrawBootOptions() {
 			g_sim.SetKeyboardPresent(kbdPresent);
 		if (ImGui::IsItemHovered())
 			ImGui::SetTooltip("Force keyboard present line (needed for some 5200 games)");
+
+		bool randomExe = g_sim.IsRandomFillEXEEnabled();
+		if (ImGui::Checkbox("Randomize memory on EXE load", &randomExe))
+			g_sim.SetRandomFillEXEEnabled(randomExe);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Randomize uninitialized memory when loading an EXE file");
+
+		bool randomDelay = g_sim.IsRandomProgramLaunchDelayEnabled();
+		if (ImGui::Checkbox("Random program launch delay", &randomDelay))
+			g_sim.SetRandomProgramLaunchDelayEnabled(randomDelay);
+
+		// Program load mode
+		static const char *kLoadModeNames[] = { "Default", "Type 3 Poll", "Deferred", "Disk Boot" };
+		int loadMode = (int)g_sim.GetHLEProgramLoadMode();
+		ImGui::Text("Load Mode:");
+		ImGui::SameLine(150);
+		ImGui::SetNextItemWidth(170);
+		if (ImGui::Combo("##loadmode", &loadMode, kLoadModeNames, 4))
+			g_sim.SetHLEProgramLoadMode((ATHLEProgramLoadMode)loadMode);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("How EXE files are loaded into memory");
 	}
 
 	// SIO acceleration
@@ -6668,6 +6950,27 @@ static void DrawCassetteControl() {
 		}
 	}
 
+	ImGui::SameLine();
+
+	if (ImGui::Button("Export WAV...") && cas.IsLoaded()) {
+		VDStringW path = ATLinuxSaveFileDialog("Export Tape Audio", kWavFilters);
+		if (!path.empty()) {
+			try {
+				if (VDFileSplitExt(path.c_str()) == path.c_str() + path.size())
+					path += L".wav";
+				VDFileStream f(path.c_str(), nsVDFile::kWrite | nsVDFile::kDenyRead | nsVDFile::kCreateAlways);
+				ATSaveCassetteImageWAV(f, cas.GetImage());
+				ShowToast("Tape audio exported");
+			} catch (const std::exception& e) {
+				char msg[512];
+				snprintf(msg, sizeof(msg), "Export failed: %s", e.what());
+				ShowToast(msg);
+			} catch (...) {
+				ShowToast("Tape audio export failed");
+			}
+		}
+	}
+
 	// Current tape info
 	ImGui::Separator();
 
@@ -6800,6 +7103,38 @@ static void DrawCassetteControl() {
 		if (ImGui::Combo("##turbomode", &turboMode, kCassetteTurboModeNames, kATCassetteTurboMode_Always + 1))
 			cas.SetTurboMode((ATCassetteTurboMode)turboMode);
 
+		// Polarity
+		static const char *kPolarityNames[] = { "Normal", "Inverted" };
+		int polarity = (int)cas.GetPolarityMode();
+		ImGui::Text("Polarity:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("##polarity", &polarity, kPolarityNames, 2))
+			cas.SetPolarityMode((ATCassettePolarityMode)polarity);
+
+		// Direct sense mode
+		static const char *kDirectSenseNames[] = { "Normal", "Low Speed", "High Speed", "Max Speed" };
+		int directSense = (int)cas.GetDirectSenseMode();
+		ImGui::Text("Direct Sense:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("##directsense", &directSense, kDirectSenseNames, 4))
+			cas.SetDirectSenseMode((ATCassetteDirectSenseMode)directSense);
+
+		// Turbo decode algorithm
+		static const char *kDecodeAlgNames[] = {
+			"Slope (No Filter)", "Slope (Filter)", "Peak (Filter)",
+			"Peak (Balance Lo-Hi)", "Peak (Balance Hi-Lo)"
+		};
+		int decodeAlg = (int)cas.GetTurboDecodeAlgorithm();
+		ImGui::Text("Turbo Decoder:");
+		ImGui::SameLine(120);
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("##decodealg", &decodeAlg, kDecodeAlgNames, 5))
+			cas.SetTurboDecodeAlgorithm((ATCassetteTurboDecodeAlgorithm)decodeAlg);
+
+		ImGui::Separator();
+
 		bool autoRewind = cas.IsAutoRewindEnabled();
 		if (ImGui::Checkbox("Auto-rewind on load", &autoRewind))
 			cas.SetAutoRewindEnabled(autoRewind);
@@ -6807,6 +7142,32 @@ static void DrawCassetteControl() {
 		bool loadAsAudio = cas.IsLoadDataAsAudioEnabled();
 		if (ImGui::Checkbox("Load data as audio", &loadAsAudio))
 			cas.SetLoadDataAsAudioEnable(loadAsAudio);
+
+		bool randomStart = g_sim.IsCassetteRandomizedStartEnabled();
+		if (ImGui::Checkbox("Randomized start position", &randomStart))
+			g_sim.SetCassetteRandomizedStartEnabled(randomStart);
+
+		bool vbiAvoid = cas.IsVBIAvoidanceEnabled();
+		if (ImGui::Checkbox("VBI avoidance", &vbiAvoid))
+			cas.SetVBIAvoidanceEnabled(vbiAvoid);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Pause tape during vertical blank to avoid data corruption");
+
+		bool fskComp = cas.GetFSKSpeedCompensationEnabled();
+		if (ImGui::Checkbox("FSK speed compensation", &fskComp))
+			cas.SetFSKSpeedCompensationEnabled(fskComp);
+
+		bool crosstalk = cas.GetCrosstalkReductionEnabled();
+		if (ImGui::Checkbox("Crosstalk reduction", &crosstalk))
+			cas.SetCrosstalkReductionEnabled(crosstalk);
+
+		bool sioPatch = g_sim.IsCassetteSIOPatchEnabled();
+		if (ImGui::Checkbox("Cassette SIO patch", &sioPatch))
+			g_sim.SetCassetteSIOPatchEnabled(sioPatch);
+
+		bool autoBasicBoot = g_sim.IsCassetteAutoBasicBootEnabled();
+		if (ImGui::Checkbox("Auto-boot with BASIC", &autoBasicBoot))
+			g_sim.SetCassetteAutoBasicBootEnabled(autoBasicBoot);
 	}
 
 	ImGui::End();

@@ -26,20 +26,26 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
 - **UI**: Full Dear ImGui interface with menus, dialogs, tools, and configuration
 - **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, source-level debugging, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
-- **Tools**: Export ROM set, compatibility database browser with search/filter, cassette tape editor with waveform display
+- **Tools**: Export ROM set, compatibility database browser with search/filter, cassette tape editor with waveform display, SAP to EXE converter, tape decoding analysis
 - **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
 - **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
 - **Profiles**: Hardware profile system with 5 built-in profiles (800, 1200XL, XL/XE, XEGS, 5200), profile manager dialog, and automatic profile switching when changing hardware modes
 - **Settings**: Portable INI-based configuration at `~/.config/altirra/Altirra.ini`
 - **File dialogs**: Native dialogs via zenity (GTK) or kdialog (KDE) with ImGui fallback
 - **Firmware discovery**: Automatic ROM scanning from multiple paths
-- **Screenshots**: PNG screenshot capture
+- **Screenshots**: PNG screenshot capture with optional true-aspect-ratio mode, copy frame to clipboard
 - **Video recording**: AVI (ZMBV lossless, Raw, RLE) and H.264+AAC MP4 (requires optional FFmpeg libraries)
 - **Audio recording**: WAV, raw PCM, SAP, VGM
 - **Audio visualization**: Audio Monitor (4-channel POKEY waveform display with frequency, mode, and volume) and Audio Scope (oscilloscope with adjustable time base), both supporting dual POKEY (stereo)
 - **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode, slow motion
 - **Video options**: Overscan modes (normal/extended/full/OS screen/widescreen), vertical override, artifacting (NTSC/PAL/auto), VSync toggle, frame blending, screen effects (bloom, distortion), PAL extended overscan
-- **Cartridge management**: Attach special cartridge submenu (19 blank cartridge types including MaxFlash, TheCart, MegaCart, SIC!, BASIC), save firmware
+- **Cartridge management**: Attach special cartridge submenu (19 blank cartridge types including MaxFlash, TheCart, MegaCart, SIC!, BASIC), save cartridge, secondary cartridge attach/detach, save firmware
+- **System options**: Power-on delay, hold keys for reset, cassette auto-boot, device console switches, memory clearing modes, media write mode
+- **Audio options**: Per-channel POKEY enable/disable (primary and secondary), volume control
+- **Boot options**: Memory randomize on EXE load, random launch delay, program load mode (Default/Type 3 Poll/Deferred/Disk Boot)
+- **Cassette options**: Turbo mode, polarity, direct sense, decoder algorithm, randomized start, VBI avoidance, FSK compensation, crosstalk reduction, SIO patch, auto-boot with BASIC, WAV export
+- **CPU options**: CPU type (6502/65C02/65C816), 65C816 speed multiplier (1x-23x), instruction history, code path tracking, illegal instructions, shadow ROM/cartridge, Ultimate1MB, floating I/O bus, preserve extended RAM
+- **Debug options**: Auto-reload ROMs, auto-load kernel/system symbols, break at EXE run address, debug link
 
 ### Keyboard Shortcuts
 
@@ -186,8 +192,12 @@ The Linux port is approximately **99.9% complete** relative to the Windows versi
 - Full ImGui UI with all configuration dialogs and tools
 - Hardware profile system (5 built-in profiles, profile manager with create/rename/delete)
 - Compatibility database for auto-suggesting configuration adjustments, with browsable viewer
-- Tools: Export ROM set, compatibility DB browser, cassette tape editor with waveform display
-- Cartridge management: 19 special cartridge types (MaxFlash, TheCart, MegaCart, SIC!, etc.), firmware save
+- Tools: Export ROM set, compatibility DB browser, cassette tape editor with waveform display, SAP to EXE converter, tape decoding analysis
+- Cartridge management: 19 special cartridge types (MaxFlash, TheCart, MegaCart, SIC!, etc.), save cartridge, secondary cartridge, firmware save
+- System options: Power-on delay, hold keys for reset, memory clearing modes, media write mode, device console switches
+- Audio options: Per-channel POKEY enable/disable, cassette advanced options (polarity, decoder, turbo, VBI avoidance)
+- Boot options: Memory randomize on EXE, program load mode, random launch delay
+- CPU options: 65C816 speed multiplier, Ultimate1MB, floating I/O bus, preserve extended RAM
 - Integrated debugger with 13 tool windows (registers, disassembly, memory, console, breakpoints, watch, call stack, history, source code, printer output, profiler, trace viewer, debug display)
 - Disk explorer with filesystem operations (browse, extract, import, rename, delete, drag-and-drop)
 - Input mapping with binding editor and key/button capture
