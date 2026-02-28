@@ -35,6 +35,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Screenshots**: PNG screenshot capture
 - **Video recording**: AVI (ZMBV lossless, Raw, RLE) and H.264+AAC MP4 (requires optional FFmpeg libraries)
 - **Audio recording**: WAV, raw PCM, SAP, VGM
+- **Audio visualization**: Audio Monitor (4-channel POKEY waveform display with frequency, mode, and volume) and Audio Scope (oscilloscope with adjustable time base), both supporting dual POKEY (stereo)
 - **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode, slow motion
 
 ### Keyboard Shortcuts
@@ -187,6 +188,7 @@ The Linux port is approximately **99.9% complete** relative to the Windows versi
 - Input mapping with binding editor and key/button capture
 - Save states (quick save/load and file-based)
 - Audio recording (WAV/PCM/SAP/VGM) and video recording (AVI + H.264/MP4)
+- Audio visualization (Audio Monitor with per-channel waveforms, Audio Scope oscilloscope)
 - Network emulation (modem TCP via POSIX sockets, socket layer with epoll)
 - Firmware discovery and management
 - Embedded kernel ROMs (10 firmware images assembled from 6502 source at build time)
