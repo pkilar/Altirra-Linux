@@ -149,7 +149,7 @@ Press **F12** to toggle the ImGui overlay. When visible, the overlay provides:
 | **Profiles** | Switch between hardware profiles (800/1200XL/XL/XEGS/5200), profile manager (create/rename/delete)                                                                                     |
 | **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, disk explorer, screenshots, video/audio recording |
 | **Edit**     | Paste text to emulator                                                                                                                                                                 |
-| **View**     | FPS, display filter (Point/Bilinear), stretch mode, window size, fullscreen, status bar toggle, cursor                                                                                 |
+| **View**     | FPS, display filter, stretch mode, window size, enhanced text, audio monitor, audio scope, fullscreen, status bar, cursor                                                              |
 | **Speed**    | Pause, turbo, slow motion, speed slider (50-800%), mute, pause-when-inactive                                                                                                           |
 | **Debug**    | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading                                                                                                 |
 | **Help**     | Keyboard shortcuts, config directory, about                                                                                                                                            |
@@ -218,6 +218,20 @@ Record emulator video and audio via **File > Record Video**. Available codecs:
 The H.264 option only appears if FFmpeg was detected during the CMake configure
 step. CMake prints `FFmpeg found - H.264 recording enabled` when detection
 succeeds.
+
+## Audio visualization
+
+Two real-time audio analysis windows are available under **View**:
+
+- **Audio Monitor** — Per-channel POKEY display showing frequency (Hz), clock
+  rate (1.79MHz/15KHz/64KHz/16-bit linked), high-pass filter, waveform mode
+  indicators (volume-only, poly counter, two-tone, clock divider), volume bars,
+  and live waveform traces. With dual POKEY (stereo), both chips are displayed
+  side by side.
+
+- **Audio Scope** — Oscilloscope with 11 time-base settings (100 us/div to
+  200 ms/div), adaptive downsampling, 10-division grid, and dual waveform
+  traces (red for primary POKEY, green for secondary).
 
 ## Debugger
 
