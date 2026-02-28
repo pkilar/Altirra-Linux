@@ -40,6 +40,8 @@ void ATImGuiDiskExplorerImportFile(const wchar_t *hostPath);
 bool ATImGuiIsCapturingInput();
 void ATImGuiOnCapturedInput(uint32 inputCode);
 
+class ATAudioMonitor;
+
 // Activity indicator state — written by ATImGuiUIRenderer in stubs_linux.cpp,
 // read by DrawStatusBar() in emulator_imgui.cpp each frame.
 struct ATImGuiIndicatorState {
@@ -87,6 +89,11 @@ struct ATImGuiIndicatorState {
 		int format = 0;  // IATUIRenderer::WatchFormat enum
 	};
 	WatchSlot mWatchSlots[8] = {};
+
+	// Audio monitor/scope state — written by ATImGuiUIRenderer in stubs_linux.cpp
+	ATAudioMonitor *mpAudioMonitors[2] = {};  // primary + secondary (dual POKEY)
+	bool mbAudioDisplayEnabled[2] = {};       // per-POKEY display enabled
+	bool mbAudioScopeEnabled = false;
 };
 
 ATImGuiIndicatorState& ATImGuiGetIndicatorState();
