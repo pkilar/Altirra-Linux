@@ -90,6 +90,9 @@ bool ATUISwitchKernel(VDGUIHandle, uint64 kernelId);
 // Speed timing update (defined in stubs_linux.cpp)
 void ATUIUpdateSpeedTiming();
 
+// CPU history state sync (defined in stubs_linux.cpp)
+void ATSyncCPUHistoryState();
+
 extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
 
@@ -1268,6 +1271,15 @@ static const char *kCPUModeNames[] = {
 	"65C816"
 };
 static_assert(sizeof(kCPUModeNames)/sizeof(kCPUModeNames[0]) == kATCPUModeCount);
+
+struct SpeedEntry { uint32 subCycles; const char* label; };
+static const SpeedEntry kC816SpeedEntries[] = {
+	{ 1,  "1x (~1 MHz)" },  { 2,  "2x (~3 MHz)" },
+	{ 4,  "4x (~7 MHz)" },  { 6,  "6x (~10 MHz)" },
+	{ 8,  "8x (~14 MHz)" }, { 10, "10x (~17 MHz)" },
+	{ 12, "12x (~21 MHz)" },{ 23, "23x (~41 MHz)" },
+};
+static const int kC816SpeedEntryCount = (int)(sizeof(kC816SpeedEntries) / sizeof(kC816SpeedEntries[0]));
 
 static const char *ATGetControllerTypeName(ATInputControllerType type) {
 	switch (type) {
@@ -5627,7 +5639,7 @@ static void DrawCPUOptions() {
 	if (!s_showCPUOptions)
 		return;
 
-	ImGui::SetNextWindowSize(ImVec2(380, 340), ImGuiCond_FirstUseEver);
+	ImGui::SetNextWindowSize(ImVec2(400, 520), ImGuiCond_FirstUseEver);
 	if (!ImGui::Begin("CPU & Memory", &s_showCPUOptions)) {
 		ImGui::End();
 		return;
@@ -5635,12 +5647,46 @@ static void DrawCPUOptions() {
 
 	// CPU type
 	if (ImGui::CollapsingHeader("CPU", ImGuiTreeNodeFlags_DefaultOpen)) {
-		int cpuMode = (int)g_sim.GetCPUMode();
+		ATCPUMode currentMode = g_sim.GetCPUMode();
+		int cpuMode = (int)currentMode;
+		uint32 subCycles = g_sim.GetCPUSubCycles();
+
 		ImGui::Text("CPU Type:");
 		ImGui::SameLine(120);
-		ImGui::SetNextItemWidth(180);
-		if (ImGui::Combo("##cpumode", &cpuMode, kCPUModeNames, kATCPUModeCount))
-			g_sim.SetCPUMode((ATCPUMode)cpuMode, 1);
+		ImGui::SetNextItemWidth(200);
+		if (ImGui::Combo("##cpumode", &cpuMode, kCPUModeNames, kATCPUModeCount)) {
+			ATCPUMode newMode = (ATCPUMode)cpuMode;
+			if (newMode != currentMode) {
+				uint32 newSubCycles = (newMode == kATCPUMode_65C816) ? subCycles : 1;
+				g_sim.SetCPUMode(newMode, newSubCycles);
+				g_sim.ColdReset();
+			}
+		}
+
+		// Speed multiplier (only for 65C816)
+		if (g_sim.GetCPUMode() == kATCPUMode_65C816) {
+			int speedIdx = 0;
+			for (int i = 0; i < kC816SpeedEntryCount; ++i) {
+				if (kC816SpeedEntries[i].subCycles == subCycles) {
+					speedIdx = i;
+					break;
+				}
+			}
+
+			ImGui::Text("Speed:");
+			ImGui::SameLine(120);
+			ImGui::SetNextItemWidth(200);
+			if (ImGui::BeginCombo("##cpuspeed", kC816SpeedEntries[speedIdx].label)) {
+				for (int i = 0; i < kC816SpeedEntryCount; ++i) {
+					bool selected = (i == speedIdx);
+					if (ImGui::Selectable(kC816SpeedEntries[i].label, selected))
+						g_sim.SetCPUMode(kATCPUMode_65C816, kC816SpeedEntries[i].subCycles);
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+		}
 
 		// Profiling/verification tools
 		bool profiling = g_sim.IsProfilingEnabled();
@@ -5656,6 +5702,54 @@ static void DrawCPUOptions() {
 		bool heatmap = g_sim.IsHeatMapEnabled();
 		if (ImGui::Checkbox("Heat map", &heatmap))
 			g_sim.SetHeatMapEnabled(heatmap);
+
+		ImGui::Separator();
+
+		ATCPUEmulator& cpu = g_sim.GetCPU();
+
+		bool history = cpu.IsHistoryEnabled();
+		if (ImGui::Checkbox("Record instruction history", &history)) {
+			cpu.SetHistoryEnabled(history);
+			ATSyncCPUHistoryState();
+		}
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Record history of executed instructions for the debugger history window.");
+
+		bool pathfinding = cpu.IsPathfindingEnabled();
+		if (ImGui::Checkbox("Track code paths", &pathfinding))
+			cpu.SetPathfindingEnabled(pathfinding);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Track which instructions have been executed for path analysis.");
+
+		bool illegalInsns = cpu.AreIllegalInsnsEnabled();
+		if (ImGui::Checkbox("Enable illegal instructions", &illegalInsns))
+			cpu.SetIllegalInsnsEnabled(illegalInsns);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Enable emulation of undocumented 6502 instructions (LAX, SAX, DCP, etc.).");
+
+		bool stopBRK = cpu.GetStopOnBRK();
+		if (ImGui::Checkbox("Stop on BRK instruction", &stopBRK))
+			cpu.SetStopOnBRK(stopBRK);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Break into debugger when a BRK instruction is executed.");
+
+		bool nmiBlocking = cpu.IsNMIBlockingEnabled();
+		if (ImGui::Checkbox("Allow BRQ/IRQ to block NMI", &nmiBlocking))
+			cpu.SetNMIBlockingEnabled(nmiBlocking);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Emulate the 6502 bug where a pending IRQ can block an NMI.");
+
+		bool shadowROM = g_sim.GetShadowROMEnabled();
+		if (ImGui::Checkbox("Shadow ROMs in fast RAM", &shadowROM))
+			g_sim.SetShadowROMEnabled(shadowROM);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Copy ROM contents into fast RAM for accelerated 65C816 access.");
+
+		bool shadowCart = g_sim.GetShadowCartridgeEnabled();
+		if (ImGui::Checkbox("Shadow cartridges in fast RAM", &shadowCart))
+			g_sim.SetShadowCartridgeEnabled(shadowCart);
+		if (ImGui::IsItemHovered())
+			ImGui::SetTooltip("Copy cartridge ROM into fast RAM for accelerated 65C816 access.");
 	}
 
 	// Memory options
@@ -5664,13 +5758,12 @@ static void DrawCPUOptions() {
 		int memIdx = MemoryModeToSortedIndex(g_sim.GetMemoryMode());
 		ImGui::Text("Memory:");
 		ImGui::SameLine(120);
-		ImGui::SetNextItemWidth(180);
+		ImGui::SetNextItemWidth(200);
 		if (ImGui::Combo("##memmode", &memIdx, MemoryModeComboGetter, nullptr, kATMemoryModeCount))
 			ATUISwitchMemoryMode(nullptr, kSortedMemoryModes[memIdx].mode);
 
 		// Axlon memory
 		uint8 axlonBits = g_sim.GetAxlonMemoryMode();
-		int axlonKB = axlonBits ? (1 << axlonBits) / 1024 * 16 : 0;
 		const char *axlonNames[] = { "Disabled", "64K", "128K", "256K", "512K", "1024K", "2048K", "4096K" };
 		int axlonIdx = 0;
 		if (axlonBits >= 2 && axlonBits <= 8)
@@ -5678,7 +5771,7 @@ static void DrawCPUOptions() {
 
 		ImGui::Text("Axlon RAM:");
 		ImGui::SameLine(120);
-		ImGui::SetNextItemWidth(180);
+		ImGui::SetNextItemWidth(200);
 		if (ImGui::Combo("##axlon", &axlonIdx, axlonNames, 8))
 			g_sim.SetAxlonMemoryMode(axlonIdx == 0 ? 0 : (uint8)(axlonIdx + 1));
 
@@ -5691,7 +5784,7 @@ static void DrawCPUOptions() {
 		int highIdx = highBanks < 0 ? 0 : (highBanks == 0 ? 1 : 2 + highBanks);
 		ImGui::Text("High RAM:");
 		ImGui::SameLine(120);
-		ImGui::SetNextItemWidth(180);
+		ImGui::SetNextItemWidth(200);
 		const char *highNames[] = { "Auto", "None", "64K", "256K", "1024K", "4096K", "16384K", "65536K" };
 		if (ImGui::Combo("##highmem", &highIdx, highNames, 8)) {
 			sint32 newBanks = highIdx == 0 ? -1 : (highIdx == 1 ? 0 : highIdx - 2);
@@ -5701,10 +5794,6 @@ static void DrawCPUOptions() {
 		bool mapRAM = g_sim.IsMapRAMEnabled();
 		if (ImGui::Checkbox("MapRAM", &mapRAM))
 			g_sim.SetMapRAMEnabled(mapRAM);
-
-		bool shadowROM = g_sim.GetShadowROMEnabled();
-		if (ImGui::Checkbox("Shadow ROM", &shadowROM))
-			g_sim.SetShadowROMEnabled(shadowROM);
 	}
 
 	ImGui::End();
