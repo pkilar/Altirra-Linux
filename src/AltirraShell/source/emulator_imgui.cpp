@@ -4466,12 +4466,12 @@ static void DrawAudioOptions() {
 	// Volume controls
 	if (ImGui::CollapsingHeader("Volume", ImGuiTreeNodeFlags_DefaultOpen)) {
 		if (audioOut) {
-			float masterVol = audioOut->GetVolume();
+			float masterPct = audioOut->GetVolume() * 100.0f;
 			ImGui::Text("Master Volume:");
 			ImGui::SameLine(140);
 			ImGui::SetNextItemWidth(200);
-			if (ImGui::SliderFloat("##mastervol", &masterVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
-				audioOut->SetVolume(masterVol);
+			if (ImGui::SliderFloat("##mastervol", &masterPct, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetVolume(masterPct / 100.0f);
 			}
 
 			bool mute = audioOut->GetMute();
@@ -4479,20 +4479,20 @@ static void DrawAudioOptions() {
 			if (ImGui::Checkbox("Mute", &mute))
 				audioOut->SetMute(mute);
 
-			float driveVol = audioOut->GetMixLevel(kATAudioMix_Drive);
+			float drivePct = audioOut->GetMixLevel(kATAudioMix_Drive) * 100.0f;
 			ImGui::Text("Drive Volume:");
 			ImGui::SameLine(140);
 			ImGui::SetNextItemWidth(200);
-			if (ImGui::SliderFloat("##drivevol", &driveVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
-				audioOut->SetMixLevel(kATAudioMix_Drive, driveVol);
+			if (ImGui::SliderFloat("##drivevol", &drivePct, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetMixLevel(kATAudioMix_Drive, drivePct / 100.0f);
 			}
 
-			float covoxVol = audioOut->GetMixLevel(kATAudioMix_Covox);
+			float covoxPct = audioOut->GetMixLevel(kATAudioMix_Covox) * 100.0f;
 			ImGui::Text("Covox Volume:");
 			ImGui::SameLine(140);
 			ImGui::SetNextItemWidth(200);
-			if (ImGui::SliderFloat("##covoxvol", &covoxVol, 0.0f, 1.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
-				audioOut->SetMixLevel(kATAudioMix_Covox, covoxVol);
+			if (ImGui::SliderFloat("##covoxvol", &covoxPct, 0.0f, 100.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp)) {
+				audioOut->SetMixLevel(kATAudioMix_Covox, covoxPct / 100.0f);
 			}
 		} else {
 			ImGui::TextColored(ImVec4(1.0f, 0.5f, 0.5f, 1.0f), "Audio output not available");
