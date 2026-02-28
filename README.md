@@ -24,8 +24,9 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Display**: SDL2 + OpenGL with bilinear/point filtering, multiple stretch modes (aspect-preserving, square pixels, integral scaling), PAR correction, HiDPI support, adaptive vsync
 - **Audio**: SDL2 audio output with POKEY emulation
 - **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
-- **UI**: Full Dear ImGui interface with menus, dialogs, and configuration
+- **UI**: Full Dear ImGui interface with menus, dialogs, tools, and configuration
 - **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, source-level debugging, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
+- **Tools**: Export ROM set, compatibility database browser with search/filter, cassette tape editor with waveform display
 - **Status bar**: Always-visible status bar showing hardware mode, video standard, disk activity with track/sector numbers, H:/PCLink/IDE/Flash indicators, cartridge, cassette position, speed, recording, and FPS
 - **Disk explorer**: Browse and modify Atari disk images (ATR/XFD/ATX) with extract, import, rename, delete, bulk import, drag-and-drop, and text EOL conversion
 - **Profiles**: Hardware profile system with 5 built-in profiles (800, 1200XL, XL/XE, XEGS, 5200), profile manager dialog, and automatic profile switching when changing hardware modes
@@ -37,6 +38,8 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - **Audio recording**: WAV, raw PCM, SAP, VGM
 - **Audio visualization**: Audio Monitor (4-channel POKEY waveform display with frequency, mode, and volume) and Audio Scope (oscilloscope with adjustable time base), both supporting dual POKEY (stereo)
 - **Speed control**: Precision frame pacing with adjustable speed (50%-800%), turbo mode, slow motion
+- **Video options**: Overscan modes (normal/extended/full/OS screen/widescreen), vertical override, artifacting (NTSC/PAL/auto), VSync toggle, frame blending, screen effects (bloom, distortion), PAL extended overscan
+- **Cartridge management**: Attach special cartridge submenu (19 blank cartridge types including MaxFlash, TheCart, MegaCart, SIC!, BASIC), save firmware
 
 ### Keyboard Shortcuts
 
@@ -180,9 +183,11 @@ The Linux port is approximately **99.9% complete** relative to the Windows versi
 ### Fully Functional
 
 - Complete emulation core (all CPUs, chips, peripherals, disk/cassette/cartridge)
-- Full ImGui UI with all configuration dialogs
+- Full ImGui UI with all configuration dialogs and tools
 - Hardware profile system (5 built-in profiles, profile manager with create/rename/delete)
-- Compatibility database for auto-suggesting configuration adjustments
+- Compatibility database for auto-suggesting configuration adjustments, with browsable viewer
+- Tools: Export ROM set, compatibility DB browser, cassette tape editor with waveform display
+- Cartridge management: 19 special cartridge types (MaxFlash, TheCart, MegaCart, SIC!, etc.), firmware save
 - Integrated debugger with 13 tool windows (registers, disassembly, memory, console, breakpoints, watch, call stack, history, source code, printer output, profiler, trace viewer, debug display)
 - Disk explorer with filesystem operations (browse, extract, import, rename, delete, drag-and-drop)
 - Input mapping with binding editor and key/button capture

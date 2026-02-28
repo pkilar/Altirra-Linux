@@ -69,6 +69,9 @@ class ATIRQController;
 #include "autosavemanager.h"
 #include "settings.h"
 #include "audiomonitor.h"
+#include "compatdb.h"
+#include "compatengine.h"
+#include "resource.h"
 
 #include <SDL.h>
 
@@ -124,6 +127,9 @@ static bool s_showInputSetup = false;
 static bool s_showShortcuts = false;
 static bool s_showCheater = false;
 static bool s_showProfileManager = false;
+static bool s_showCompatBrowser = false;
+static bool s_showTapeEditor = false;
+static char s_compatFilterBuf[128] = "";
 
 // Cheat engine state
 static bool s_cheaterInitialized = false;
@@ -1869,6 +1875,80 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		// Device-specific buttons
+		{
+			auto devButtons = g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false);
+			bool hasAny = devButtons.begin() != devButtons.end();
+			if (hasAny && ImGui::BeginMenu("Device Buttons")) {
+				struct ButtonEntry { ATDeviceButton id; const char *name; };
+				static const ButtonEntry kButtons[] = {
+					{ kATDeviceButton_BlackBoxDumpScreen,   "BlackBox: Dump Screen" },
+					{ kATDeviceButton_BlackBoxMenu,         "BlackBox: Menu" },
+					{ kATDeviceButton_CartridgeResetBank,   "Cart: Reset Bank" },
+					{ kATDeviceButton_CartridgeSwitch,      "Cart: Switch" },
+					{ kATDeviceButton_IDEPlus2SwitchDisks,  "IDE Plus 2.0: Switch Disks" },
+					{ kATDeviceButton_IDEPlus2WriteProtect, "IDE Plus 2.0: Write Protect" },
+					{ kATDeviceButton_IDEPlus2SDX,          "IDE Plus 2.0: SDX" },
+					{ kATDeviceButton_IndusGTError,         "Indus GT: Error" },
+					{ kATDeviceButton_IndusGTTrack,         "Indus GT: Track" },
+					{ kATDeviceButton_IndusGTId,            "Indus GT: ID" },
+					{ kATDeviceButton_IndusGTBootCPM,       "Indus GT: Boot CP/M" },
+					{ kATDeviceButton_IndusGTChangeDensity, "Indus GT: Change Density" },
+					{ kATDeviceButton_HappySlow,            "Happy: Slow" },
+					{ kATDeviceButton_HappyWPEnable,        "Happy: Write Protect" },
+					{ kATDeviceButton_HappyWPDisable,       "Happy: Write Enable" },
+					{ kATDeviceButton_ATR8000Reset,         "ATR8000: Reset" },
+					{ kATDeviceButton_XELCFSwap,            "XEL-CF3: Swap" },
+				};
+
+				for (const auto& btn : kButtons) {
+					bool supported = false;
+					for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false)) {
+						if (p->GetSupportedButtons() & (1u << (uint32)btn.id)) {
+							supported = true;
+							break;
+						}
+					}
+					if (!supported)
+						continue;
+
+					if (ImGui::MenuItem(btn.name)) {
+						for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false)) {
+							if (p->GetSupportedButtons() & (1u << (uint32)btn.id))
+								p->ActivateButton(btn.id, true);
+						}
+					}
+				}
+				ImGui::EndMenu();
+			}
+		}
+
+		if (ImGui::BeginMenu("Power-On Delay")) {
+			int curDelay = g_sim.GetPowerOnDelay();
+			struct DelayEntry { int tenths; const char *name; };
+			static const DelayEntry kDelays[] = {
+				{ -1, "Auto" }, { 0, "None" }, { 10, "1 second" }, { 20, "2 seconds" }, { 30, "3 seconds" }
+			};
+			for (const auto& d : kDelays) {
+				if (ImGui::MenuItem(d.name, nullptr, curDelay == d.tenths))
+					g_sim.SetPowerOnDelay(d.tenths);
+			}
+			ImGui::EndMenu();
+		}
+
+		{
+			uint8 held = g_sim.GetPendingHeldSwitches();
+			bool holdKeys = (held & 0x07) == 0x07;
+			if (ImGui::MenuItem("Hold Keys for Reset", nullptr, &holdKeys))
+				g_sim.SetPendingHeldSwitches(holdKeys ? 0x07 : 0x00);
+		}
+
+		{
+			bool autoBoot = g_sim.IsCassetteAutoBootEnabled();
+			if (ImGui::MenuItem("Auto-Boot Tape (Hold Start)", nullptr, &autoBoot))
+				g_sim.SetCassetteAutoBootEnabled(autoBoot);
+		}
+
 		ImGui::Separator();
 
 		{
@@ -2038,6 +2118,74 @@ static void DrawMenuBar() {
 
 		if (ImGui::MenuItem("Cassette..."))
 			s_showCassetteControl = true;
+
+		if (ImGui::BeginMenu("Attach Special Cartridge")) {
+			struct SpecialCart { ATCartridgeMode mode; const char *name; };
+			static const SpecialCart kSpecialCarts[] = {
+				{ kATCartridgeMode_SuperCharger3D,      "SuperCharger 3D" },
+				{ kATCartridgeMode_MaxFlash_128K,       "MaxFlash 128K" },
+				{ kATCartridgeMode_MaxFlash_128K_MyIDE, "MaxFlash 128K (MyIDE)" },
+				{ kATCartridgeMode_MaxFlash_1024K,      "MaxFlash 1MB" },
+				{ kATCartridgeMode_MaxFlash_1024K_Bank0,"MaxFlash 1MB (Bank 0)" },
+				{ kATCartridgeMode_JAtariCart_128K,     "JAtariCart 128K" },
+				{ kATCartridgeMode_JAtariCart_256K,     "JAtariCart 256K" },
+				{ kATCartridgeMode_JAtariCart_512K,     "JAtariCart 512K" },
+				{ kATCartridgeMode_JAtariCart_1024K,    "JAtariCart 1024K" },
+				{ kATCartridgeMode_DCart,               "DCart" },
+				{ kATCartridgeMode_SIC_128K,            "SIC! 128K" },
+				{ kATCartridgeMode_SIC_256K,            "SIC! 256K" },
+				{ kATCartridgeMode_SIC_512K,            "SIC! 512K" },
+				{ kATCartridgeMode_SICPlus,             "SIC+" },
+				{ kATCartridgeMode_MegaCart_512K,       "MegaCart 512K" },
+				{ kATCartridgeMode_MegaCart_4M_3,       "MegaCart 4MB" },
+				{ kATCartridgeMode_TheCart_32M,         "TheCart 32MB" },
+				{ kATCartridgeMode_TheCart_64M,         "TheCart 64MB" },
+				{ kATCartridgeMode_TheCart_128M,        "TheCart 128MB" },
+			};
+
+			for (const auto& sc : kSpecialCarts) {
+				if (ImGui::MenuItem(sc.name)) {
+					g_sim.LoadNewCartridge((int)sc.mode);
+					g_sim.ColdReset();
+					g_sim.Resume();
+					char msg[128];
+					snprintf(msg, sizeof(msg), "Attached: %s", sc.name);
+					ShowToast(msg);
+				}
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Save Firmware")) {
+			struct FwSaveEntry { ATStorageId id; const char *name; };
+			static const FwSaveEntry kFwEntries[] = {
+				{ (ATStorageId)(kATStorageId_Firmware + 0), "IDE Main Firmware" },
+				{ (ATStorageId)(kATStorageId_Firmware + 1), "IDE SDX Firmware" },
+				{ (ATStorageId)(kATStorageId_Firmware + 2), "Ultimate1MB Firmware" },
+				{ (ATStorageId)(kATStorageId_Firmware + 3), "Rapidus Flash" },
+			};
+
+			for (const auto& fw : kFwEntries) {
+				bool present = g_sim.IsStoragePresent(fw.id);
+				if (ImGui::MenuItem(fw.name, nullptr, false, present)) {
+					VDStringW path = ATLinuxSaveFileDialog("Save Firmware",
+						"ROM Files|*.rom;*.bin|All Files|*");
+					if (!path.empty()) {
+						try {
+							g_sim.SaveStorage(fw.id, path.c_str());
+							ShowToast("Firmware saved");
+						} catch (const std::exception& e) {
+							char msg[512];
+							snprintf(msg, sizeof(msg), "Save failed: %s", e.what());
+							ShowToast(msg);
+						} catch (...) {
+							ShowToast("Firmware save failed");
+						}
+					}
+				}
+			}
+			ImGui::EndMenu();
+		}
 
 		ImGui::Separator();
 
@@ -2477,6 +2625,52 @@ static void DrawMenuBar() {
 			ImGui::EndMenu();
 		}
 
+		if (ImGui::BeginMenu("Overscan Mode")) {
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			int curOS = (int)gtia.GetOverscanMode();
+			for (int i = 0; i < ATGTIAEmulator::kOverscanCount; ++i) {
+				if (ImGui::MenuItem(kOverscanModeNames[i], nullptr, curOS == i))
+					gtia.SetOverscanMode((ATGTIAEmulator::OverscanMode)i);
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Vertical Override")) {
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			int curVOS = (int)gtia.GetVerticalOverscanMode();
+			for (int i = 0; i < ATGTIAEmulator::kVerticalOverscanCount; ++i) {
+				if (ImGui::MenuItem(kVertOverscanModeNames[i], nullptr, curVOS == i))
+					gtia.SetVerticalOverscanMode((ATGTIAEmulator::VerticalOverscanMode)i);
+			}
+			ImGui::EndMenu();
+		}
+
+		if (ImGui::BeginMenu("Artifacting")) {
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			int curArt = (int)gtia.GetArtifactingMode();
+			for (int i = 0; i < (int)ATArtifactMode::Count; ++i) {
+				if (ImGui::MenuItem(kArtifactModeNames[i], nullptr, curArt == i))
+					gtia.SetArtifactingMode((ATArtifactMode)i);
+			}
+			ImGui::EndMenu();
+		}
+
+		{
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			bool vsync = gtia.IsVsyncEnabled();
+			if (ImGui::MenuItem("Vertical Sync", nullptr, &vsync))
+				gtia.SetVsyncEnabled(vsync);
+		}
+
+		{
+			ATGTIAEmulator& gtia = g_sim.GetGTIA();
+			bool blend = gtia.IsBlendModeEnabled();
+			if (ImGui::MenuItem("Frame Blending", nullptr, &blend))
+				gtia.SetBlendModeEnabled(blend);
+		}
+
+		ImGui::Separator();
+
 		if (ImGui::BeginMenu("Window Size")) {
 			// Base resolution depends on video standard
 			bool isPAL = g_sim.GetVideoStandard() == kATVideoStandard_PAL
@@ -2678,6 +2872,79 @@ static void DrawMenuBar() {
 	if (ImGui::BeginMenu("Tools")) {
 		if (ImGui::MenuItem("Cheat Engine...", nullptr, s_showCheater))
 			s_showCheater = !s_showCheater;
+
+		ImGui::Separator();
+
+		if (ImGui::MenuItem("Export ROM Set...")) {
+			// Use save dialog to pick output location; directory is derived from the path
+			VDStringW savePath = ATLinuxSaveFileDialog("Export ROM Set (save to directory)",
+				"HTML Files|*.html|All Files|*");
+			VDStringW dir;
+			if (!savePath.empty()) {
+				const wchar_t *dirEnd = VDFileSplitPath(savePath.c_str());
+				dir.assign(savePath.c_str(), (size_t)(dirEnd - savePath.c_str()));
+				if (dir.empty())
+					dir = L".";
+				// Remove trailing separator
+				if (dir.size() > 1 && (dir.back() == L'/' || dir.back() == L'\\'))
+					dir.pop_back();
+			}
+			if (!dir.empty()) {
+				int exported = 0;
+				int failed = 0;
+				struct RomExport { uint64 fwId; const char *filename; };
+				static const RomExport kExports[] = {
+					{ kATFirmwareId_Kernel_LLE,   "altirraos-800.rom" },
+					{ kATFirmwareId_Kernel_LLEXL,  "altirraos-xl.rom" },
+					{ kATFirmwareId_Kernel_816,    "altirraos-816.rom" },
+					{ kATFirmwareId_5200_LLE,      "altirraos-5200.rom" },
+					{ kATFirmwareId_Basic_ATBasic,  "atbasic.rom" },
+				};
+
+				for (const auto& rom : kExports) {
+					vdfastvector<uint8> buf;
+					if (ATLoadInternalFirmware(rom.fwId, nullptr, 0, 0, nullptr, nullptr, &buf)) {
+						VDStringW filePath(dir);
+						filePath += L'/';
+						filePath += VDTextU8ToW(VDStringA(rom.filename));
+						try {
+							VDFile f(filePath.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kCreateAlways);
+							f.write(buf.data(), (long)buf.size());
+							f.close();
+							++exported;
+						} catch (...) {
+							++failed;
+						}
+					}
+				}
+
+				// Export readme
+				vdfastvector<uint8> readme;
+				if (ATLoadMiscResource(IDR_ROMSETREADME, readme)) {
+					VDStringW readmePath(dir);
+					readmePath += L"/readme.html";
+					try {
+						VDFile f(readmePath.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kCreateAlways);
+						f.write(readme.data(), (long)readme.size());
+						f.close();
+					} catch (...) {}
+				}
+
+				char msg[128];
+				if (failed)
+					snprintf(msg, sizeof(msg), "Exported %d ROM(s), %d failed", exported, failed);
+				else
+					snprintf(msg, sizeof(msg), "Exported %d ROM(s)", exported);
+				ShowToast(msg);
+			}
+		}
+
+		if (ImGui::MenuItem("Compatibility DB Browser..."))
+			s_showCompatBrowser = true;
+
+		if (ImGui::MenuItem("Tape Editor...", nullptr, false, g_sim.GetCassette().GetLength() > 0))
+			s_showTapeEditor = true;
+
 		ImGui::EndMenu();
 	}
 
@@ -6601,6 +6868,10 @@ static void DrawVideoConfig() {
 		ImGui::SetNextItemWidth(220);
 		if (ImGui::Combo("##voverscan", &vosMode, kVertOverscanModeNames, ATGTIAEmulator::kVerticalOverscanCount))
 			gtia.SetVerticalOverscanMode((ATGTIAEmulator::VerticalOverscanMode)vosMode);
+
+		bool palExt = gtia.IsOverscanPALExtended();
+		if (ImGui::Checkbox("PAL extended height", &palExt))
+			gtia.SetOverscanPALExtended(palExt);
 	}
 
 	// Artifacting
@@ -6638,6 +6909,49 @@ static void DrawVideoConfig() {
 			if (ImGui::Combo("##deinterlace", &deinterlace, deinterlaceNames, 2))
 				gtia.SetDeinterlaceMode((ATVideoDeinterlaceMode)deinterlace);
 		}
+	}
+
+	// Frame blending
+	if (ImGui::CollapsingHeader("Frame Blending")) {
+		bool blend = gtia.IsBlendModeEnabled();
+		if (ImGui::Checkbox("Enable frame blending", &blend))
+			gtia.SetBlendModeEnabled(blend);
+
+		bool monoPersist = gtia.IsBlendMonoPersistenceEnabled();
+		if (ImGui::Checkbox("Mono persistence", &monoPersist))
+			gtia.SetBlendMonoPersistenceEnabled(monoPersist);
+
+		bool linearBlend = gtia.IsLinearBlendEnabled();
+		if (ImGui::Checkbox("Linear blend", &linearBlend))
+			gtia.SetLinearBlendEnabled(linearBlend);
+	}
+
+	// Screen effects
+	if (ImGui::CollapsingHeader("Screen Effects")) {
+		ATArtifactingParams artParams = gtia.GetArtifactingParams();
+		bool artChanged = false;
+
+		artChanged |= ImGui::Checkbox("Bloom", &artParams.mbEnableBloom);
+
+		if (artParams.mbEnableBloom) {
+			ImGui::SetNextItemWidth(200);
+			artChanged |= ImGui::SliderFloat("Bloom Radius", &artParams.mBloomRadius, 0.0f, 32.0f, "%.1f");
+			ImGui::SetNextItemWidth(200);
+			artChanged |= ImGui::SliderFloat("Bloom Direct", &artParams.mBloomDirectIntensity, 0.0f, 2.0f, "%.2f");
+			ImGui::SetNextItemWidth(200);
+			artChanged |= ImGui::SliderFloat("Bloom Indirect", &artParams.mBloomIndirectIntensity, 0.0f, 2.0f, "%.2f");
+		}
+
+		ImGui::Separator();
+		ImGui::SetNextItemWidth(200);
+		artChanged |= ImGui::SliderFloat("Distortion Angle", &artParams.mDistortionViewAngleX, 0.0f, 179.0f, "%.0f deg");
+		ImGui::SetNextItemWidth(200);
+		artChanged |= ImGui::SliderFloat("Distortion Y Ratio", &artParams.mDistortionYRatio, 0.0f, 1.0f, "%.2f");
+
+		if (artChanged)
+			gtia.SetArtifactingParams(artParams);
+
+		ImGui::TextDisabled("(Effects require GPU shader support)");
 	}
 
 	// Color adjustment
@@ -6739,6 +7053,236 @@ static void DrawVideoConfig() {
 		if (ImGui::Button("Reset to Defaults")) {
 			ATColorSettings defaults = gtia.GetDefaultColorSettings();
 			gtia.SetColorSettings(defaults);
+		}
+	}
+
+	ImGui::End();
+}
+
+// ============= Compatibility DB Browser =============
+
+static void DrawCompatBrowser() {
+	if (!s_showCompatBrowser)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Compatibility Database", &s_showCompatBrowser)) {
+		ImGui::End();
+		return;
+	}
+
+	// Load the embedded compat DB
+	static const ATCompatDBHeader *s_compatHdr = nullptr;
+	static ATCompatDBView s_compatView;
+	if (!s_compatHdr) {
+		size_t len = 0;
+		const void *data = ATLockResource(IDR_COMPATDB, len);
+		if (data && len >= sizeof(ATCompatDBHeader)) {
+			auto *hdr = (const ATCompatDBHeader *)data;
+			if (hdr->Validate(len)) {
+				s_compatHdr = hdr;
+				s_compatView = ATCompatDBView(hdr);
+			}
+		}
+	}
+
+	if (!s_compatHdr || !s_compatView.IsValid()) {
+		ImGui::Text("Compatibility database not available.");
+		ImGui::End();
+		return;
+	}
+
+	ImGui::Text("Titles: %u  |  Tags: %u",
+		(unsigned)s_compatHdr->mTitleTable.size(),
+		(unsigned)s_compatHdr->mTagTable.size());
+
+	ImGui::SetNextItemWidth(-1);
+	ImGui::InputTextWithHint("##filter", "Filter by title name...", s_compatFilterBuf, sizeof(s_compatFilterBuf));
+
+	ImGui::Separator();
+
+	if (ImGui::BeginChild("##titles", ImVec2(0, 0), ImGuiChildFlags_None)) {
+		ImGuiListClipper clipper;
+		auto& titles = s_compatHdr->mTitleTable;
+		uint32 titleCount = (uint32)titles.size();
+
+		// If filter is active, we need to build a filtered list
+		static vdfastvector<uint32> s_filteredIndices;
+		bool hasFilter = s_compatFilterBuf[0] != '\0';
+
+		if (hasFilter) {
+			s_filteredIndices.clear();
+			VDStringA filterLower(s_compatFilterBuf);
+			for (char& c : filterLower)
+				c = (char)tolower((unsigned char)c);
+
+			for (uint32 i = 0; i < titleCount; ++i) {
+				const char *name = titles[i].mName.c_str();
+				VDStringA nameLower(name);
+				for (char& c : nameLower)
+					c = (char)tolower((unsigned char)c);
+				if (nameLower.find(filterLower.c_str()) != VDStringA::npos)
+					s_filteredIndices.push_back(i);
+			}
+			clipper.Begin((int)s_filteredIndices.size());
+		} else {
+			clipper.Begin((int)titleCount);
+		}
+
+		while (clipper.Step()) {
+			for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; ++row) {
+				uint32 idx = hasFilter ? s_filteredIndices[row] : (uint32)row;
+				const auto& title = titles[idx];
+
+				if (ImGui::TreeNode((void *)(intptr_t)idx, "%s", title.mName.c_str())) {
+					for (uint32 tagId : title.mTagIds) {
+						ATCompatKnownTag knownTag = s_compatView.GetKnownTag(tagId);
+						if (knownTag != kATCompatKnownTag_None) {
+							const char *key = ATCompatGetKeyForKnownTag(knownTag);
+							if (key)
+								ImGui::BulletText("%s", key);
+						} else if (tagId < s_compatHdr->mTagTable.size()) {
+							ImGui::BulletText("%s", s_compatHdr->mTagTable[tagId].mKey.c_str());
+						}
+					}
+					ImGui::TreePop();
+				}
+			}
+		}
+	}
+	ImGui::EndChild();
+
+	ImGui::End();
+}
+
+// ============= Tape Editor Window =============
+
+static float s_tapeViewStart = 0.0f;   // View start in seconds
+static float s_tapeViewLen = 1.0f;     // View duration in seconds
+
+static void DrawTapeEditor() {
+	if (!s_showTapeEditor)
+		return;
+
+	ATCassetteEmulator& cas = g_sim.GetCassette();
+	IATCassetteImage *img = cas.GetImage();
+
+	if (!img) {
+		s_showTapeEditor = false;
+		return;
+	}
+
+	ImGui::SetNextWindowSize(ImVec2(800, 400), ImGuiCond_FirstUseEver);
+	if (!ImGui::Begin("Tape Editor", &s_showTapeEditor)) {
+		ImGui::End();
+		return;
+	}
+
+	float totalLen = cas.GetLength();
+	float curPos = cas.GetPosition();
+
+	// Info bar
+	ImGui::Text("Length: %.1f s  |  Position: %.1f s  |  Samples: %u",
+		totalLen, curPos, cas.GetSampleLen());
+
+	ImGui::SameLine(ImGui::GetWindowWidth() - 200);
+	if (ImGui::Button("Go to Position"))
+		s_tapeViewStart = curPos - s_tapeViewLen * 0.5f;
+
+	// Zoom controls
+	ImGui::Text("View:");
+	ImGui::SameLine();
+	static const float kZoomLevels[] = { 0.01f, 0.05f, 0.1f, 0.5f, 1.0f, 5.0f, 10.0f, 30.0f };
+	static const char *kZoomLabels[] = { "10ms", "50ms", "100ms", "500ms", "1s", "5s", "10s", "30s" };
+	for (int i = 0; i < 8; ++i) {
+		if (i > 0) ImGui::SameLine();
+		if (ImGui::SmallButton(kZoomLabels[i]))
+			s_tapeViewLen = kZoomLevels[i];
+	}
+
+	// Clamp view
+	if (s_tapeViewStart < 0.0f) s_tapeViewStart = 0.0f;
+	if (s_tapeViewStart + s_tapeViewLen > totalLen)
+		s_tapeViewStart = totalLen > s_tapeViewLen ? totalLen - s_tapeViewLen : 0.0f;
+
+	// Navigation slider
+	ImGui::SetNextItemWidth(-1);
+	ImGui::SliderFloat("##nav", &s_tapeViewStart, 0.0f, totalLen > s_tapeViewLen ? totalLen - s_tapeViewLen : 0.0f, "%.3f s");
+
+	// Waveform display
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	float waveH = avail.y > 40.0f ? avail.y : 40.0f;
+	ImVec2 canvasPos = ImGui::GetCursorScreenPos();
+	ImVec2 canvasSize(avail.x, waveH);
+
+	ImGui::InvisibleButton("##wave", canvasSize);
+
+	// Mouse wheel zoom
+	if (ImGui::IsItemHovered()) {
+		float wheel = ImGui::GetIO().MouseWheel;
+		if (wheel != 0.0f) {
+			float factor = wheel > 0 ? 0.8f : 1.25f;
+			float mouseX = (ImGui::GetIO().MousePos.x - canvasPos.x) / canvasSize.x;
+			float center = s_tapeViewStart + s_tapeViewLen * mouseX;
+			s_tapeViewLen *= factor;
+			if (s_tapeViewLen < 0.001f) s_tapeViewLen = 0.001f;
+			if (s_tapeViewLen > totalLen) s_tapeViewLen = totalLen;
+			s_tapeViewStart = center - s_tapeViewLen * mouseX;
+			if (s_tapeViewStart < 0.0f) s_tapeViewStart = 0.0f;
+		}
+	}
+
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+
+	// Background
+	dl->AddRectFilled(canvasPos, ImVec2(canvasPos.x + canvasSize.x, canvasPos.y + canvasSize.y),
+		IM_COL32(20, 20, 30, 255));
+
+	// Center line
+	float centerY = canvasPos.y + canvasSize.y * 0.5f;
+	dl->AddLine(ImVec2(canvasPos.x, centerY),
+		ImVec2(canvasPos.x + canvasSize.x, centerY), IM_COL32(60, 60, 80, 255));
+
+	// Read peak data
+	int sampleCount = (int)canvasSize.x;
+	if (sampleCount > 0 && totalLen > 0) {
+		vdfastvector<float> dataPeaks(sampleCount * 2);
+		vdfastvector<float> audioPeaks(sampleCount * 2);
+		float dt = s_tapeViewLen / (float)sampleCount;
+
+		img->ReadPeakMap(s_tapeViewStart, dt, sampleCount, dataPeaks.data(), audioPeaks.data());
+
+		float halfH = canvasSize.y * 0.45f;
+
+		// Draw data track (green)
+		for (int i = 0; i < sampleCount; ++i) {
+			float minV = dataPeaks[i * 2];
+			float maxV = dataPeaks[i * 2 + 1];
+			float x = canvasPos.x + (float)i;
+			float y0 = centerY - maxV * halfH;
+			float y1 = centerY - minV * halfH;
+			if (y1 - y0 < 1.0f) y1 = y0 + 1.0f;
+			dl->AddLine(ImVec2(x, y0), ImVec2(x, y1), IM_COL32(80, 220, 80, 200));
+		}
+
+		// Draw audio track if present (red, offset slightly)
+		if (img->IsAudioPresent()) {
+			for (int i = 0; i < sampleCount; ++i) {
+				float minV = audioPeaks[i * 2];
+				float maxV = audioPeaks[i * 2 + 1];
+				float x = canvasPos.x + (float)i;
+				float y0 = centerY - maxV * halfH;
+				float y1 = centerY - minV * halfH;
+				if (y1 - y0 < 1.0f) y1 = y0 + 1.0f;
+				dl->AddLine(ImVec2(x, y0), ImVec2(x, y1), IM_COL32(220, 80, 80, 128));
+			}
+		}
+
+		// Draw current position marker
+		if (curPos >= s_tapeViewStart && curPos <= s_tapeViewStart + s_tapeViewLen) {
+			float posX = canvasPos.x + (curPos - s_tapeViewStart) / s_tapeViewLen * canvasSize.x;
+			dl->AddLine(ImVec2(posX, canvasPos.y),
+				ImVec2(posX, canvasPos.y + canvasSize.y), IM_COL32(255, 255, 0, 200), 2.0f);
 		}
 	}
 
@@ -7315,6 +7859,8 @@ void ATImGuiEmulatorDraw() {
 	DrawAbout();
 	DrawShortcuts();
 	DrawCheater();
+	DrawCompatBrowser();
+	DrawTapeEditor();
 	DrawVideoRecordDialog();
 	DrawNewDisk();
 	DrawQuitConfirmation();
