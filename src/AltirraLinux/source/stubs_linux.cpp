@@ -1111,13 +1111,20 @@ public:
 
 	// Group C — Intentional no-ops with documentation
 
-	// Audio waveform/scope visualization — would need full ImGui custom renderer;
-	// audio config dialog already queries audioOut->GetAudioStatus() directly.
+	// Audio status / SlightSID — audio config dialog queries audioOut->GetAudioStatus() directly.
 	void SetAudioStatus(const ATUIAudioStatus *) override {}
-	void SetAudioMonitor(bool, ATAudioMonitor *) override {}
-	void SetAudioDisplayEnabled(bool, bool) override {}
-	void SetAudioScopeEnabled(bool) override {}
 	void SetSlightSID(ATSlightSIDEmulator *) override {}
+
+	// Audio monitor/scope — store state for ImGui rendering in emulator_imgui.cpp.
+	void SetAudioMonitor(bool secondary, ATAudioMonitor *mon) override {
+		ATImGuiGetIndicatorState().mpAudioMonitors[secondary ? 1 : 0] = mon;
+	}
+	void SetAudioDisplayEnabled(bool secondary, bool enable) override {
+		ATImGuiGetIndicatorState().mbAudioDisplayEnabled[secondary ? 1 : 0] = enable;
+	}
+	void SetAudioScopeEnabled(bool enable) override {
+		ATImGuiGetIndicatorState().mbAudioScopeEnabled = enable;
+	}
 
 	// Pad input — callers in uivideodisplaywindow.cpp are excluded from the Linux build.
 	vdrect32 GetPadArea() const override { return vdrect32(0, 0, 0, 0); }

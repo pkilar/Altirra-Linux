@@ -68,6 +68,7 @@ class ATIRQController;
 #include "joystick.h"
 #include "autosavemanager.h"
 #include "settings.h"
+#include "audiomonitor.h"
 
 #include <SDL.h>
 
@@ -2495,6 +2496,19 @@ static void DrawMenuBar() {
 
 		ImGui::Separator();
 
+		{
+			bool monEnabled = g_sim.IsAudioMonitorEnabled();
+			if (ImGui::MenuItem("Audio Monitor", nullptr, &monEnabled))
+				g_sim.SetAudioMonitorEnabled(monEnabled);
+		}
+		{
+			bool scopeEnabled = g_sim.IsAudioScopeEnabled();
+			if (ImGui::MenuItem("Audio Scope", nullptr, &scopeEnabled))
+				g_sim.SetAudioScopeEnabled(scopeEnabled);
+		}
+
+		ImGui::Separator();
+
 		if (ImGui::MenuItem("Video Settings..."))
 			s_showVideoConfig = true;
 
@@ -3221,6 +3235,384 @@ static void DrawStatusBar() {
 
 	ImGui::PopStyleColor();
 	ImGui::PopStyleVar();
+}
+
+// ============= Audio Monitor =============
+
+static void DrawAudioMonitorPokey(int pokey, float columnWidth, float totalHeight) {
+	auto& ind = ATImGuiGetIndicatorState();
+	const double cyclesPerSecond = ind.mCyclesPerSecond > 0.0 ? ind.mCyclesPerSecond : 1789773.0;
+
+	ATPokeyAudioLog *log = nullptr;
+	ATPokeyRegisterState *rstate = nullptr;
+	const uint8 chanMask = ind.mpAudioMonitors[pokey]->Update(&log, &rstate);
+
+	const uint8 audctl = rstate->mReg[8];
+	const uint8 skctl = rstate->mReg[15];
+	const int borrowOffset12 = (skctl & 8) ? 6 : 4;
+	const int slowRate = (audctl & 0x01) ? 114 : 28;
+
+	int divisors[4];
+	divisors[0] = (audctl & 0x40)
+		? (int)rstate->mReg[0] + borrowOffset12
+		: ((int)rstate->mReg[0] + 1) * slowRate;
+	divisors[1] = (audctl & 0x10)
+		? ((audctl & 0x40)
+			? rstate->mReg[0] + ((int)rstate->mReg[2] << 8) + borrowOffset12 + 3
+			: (rstate->mReg[0] + ((int)rstate->mReg[2] << 8) + 1) * slowRate)
+		: ((int)rstate->mReg[2] + 1) * slowRate;
+	divisors[2] = (audctl & 0x20)
+		? (int)rstate->mReg[4] + borrowOffset12
+		: ((int)rstate->mReg[4] + 1) * slowRate;
+	divisors[3] = (audctl & 0x08)
+		? ((audctl & 0x20)
+			? rstate->mReg[4] + ((int)rstate->mReg[6] << 8) + 7
+			: (rstate->mReg[4] + ((int)rstate->mReg[6] << 8) + 1) * slowRate)
+		: ((int)rstate->mReg[6] + 1) * slowRate;
+
+	const float chanHeight = totalHeight / 4.0f;
+
+	for (int ch = 0; ch < 4; ++ch) {
+		ImGui::PushID(pokey * 4 + ch);
+
+		const bool active = (chanMask & (1 << ch)) != 0;
+		const ImU32 textCol = active ? IM_COL32(255, 255, 255, 255) : IM_COL32(128, 128, 128, 255);
+		const ImU32 waveCol = active ? IM_COL32(0, 200, 0, 255) : IM_COL32(0, 80, 0, 255);
+
+		// Frequency
+		float freq = (float)((cyclesPerSecond * 0.5) / divisors[ch]);
+		ImGui::PushStyleColor(ImGuiCol_Text, textCol);
+		ImGui::Text("Ch%d %7.1f Hz", ch + 1, freq);
+
+		// Mode indicators
+		ImGui::SameLine(0.0f, 8.0f);
+
+		// Clock rate
+		if ((ch == 1 && (audctl & 0x10)) || (ch == 3 && (audctl & 0x08)))
+			ImGui::Text("16");
+		else if ((ch == 0 && (audctl & 0x40)) || (ch == 2 && (audctl & 0x20)))
+			ImGui::Text("1.79");
+		else
+			ImGui::Text("%s", (audctl & 1) ? "15K" : "64K");
+
+		ImGui::SameLine(0.0f, 4.0f);
+
+		// High-pass
+		if ((ch == 0 && (audctl & 4)) || (ch == 1 && (audctl & 2)))
+			ImGui::Text("H");
+		else
+			ImGui::Text(" ");
+
+		ImGui::SameLine(0.0f, 4.0f);
+
+		// Mode: volume-only, poly, two-tone, clock divider
+		const uint8 ctl = rstate->mReg[ch * 2 + 1];
+		if (ctl & 0x10) {
+			ImGui::Text("V");
+		} else {
+			char mode[5] = {};
+			mode[0] = (ctl & 0x80) ? 'L' : '5';
+			mode[1] = (ch < 2) ? ((skctl & 0x08) ? '2' : ' ') : ((skctl & 0x10) ? 'A' : ' ');
+			if (ctl & 0x20)
+				mode[2] = 'T';
+			else if (ctl & 0x40)
+				mode[2] = '4';
+			else if (audctl & 0x80)
+				mode[2] = '9';
+			else {
+				mode[2] = '1';
+				mode[3] = '7';
+			}
+			ImGui::Text("%s", mode);
+		}
+
+		ImGui::PopStyleColor();
+
+		// Volume bar + waveform
+		{
+			ImVec2 cursor = ImGui::GetCursorScreenPos();
+			float waveHeight = chanHeight - ImGui::GetTextLineHeightWithSpacing() - 4.0f;
+			if (waveHeight < 8.0f)
+				waveHeight = 8.0f;
+
+			ImDrawList *dl = ImGui::GetWindowDrawList();
+
+			// Volume bar
+			int vol = ctl & 15;
+			float volHeight = waveHeight * vol / 15.0f;
+			dl->AddRectFilled(
+				ImVec2(cursor.x, cursor.y + waveHeight - volHeight),
+				ImVec2(cursor.x + 3.0f, cursor.y + waveHeight),
+				IM_COL32(255, 255, 0, 200));
+
+			// Waveform
+			const uint32 n = log->mLastFrameSampleCount;
+			if (n > 1) {
+				float waveX = cursor.x + 6.0f;
+				float waveW = columnWidth - 6.0f;
+				float hstepf = waveW / (float)n;
+				float waveformScale = -(waveHeight - 2.0f) / (float)log->mFullScaleValue;
+				float baseY = cursor.y + waveHeight - 1.0f;
+
+				ImVector<ImVec2> pts;
+				pts.resize((int)n);
+				float px = waveX;
+				for (uint32 pos = 0; pos < n; ++pos) {
+					float py = log->mpStates[pos].mChannelOutputs[ch] * waveformScale + baseY;
+					pts[pos] = ImVec2(px, py);
+					px += hstepf;
+				}
+				dl->AddPolyline(pts.Data, (int)n, waveCol, ImDrawFlags_None, 1.0f);
+			}
+
+			ImGui::Dummy(ImVec2(columnWidth, waveHeight));
+		}
+
+		ImGui::PopID();
+	}
+}
+
+static void DrawAudioMonitor() {
+	auto& ind = ATImGuiGetIndicatorState();
+
+	if (!ind.mbAudioDisplayEnabled[0] && !ind.mbAudioDisplayEnabled[1])
+		return;
+
+	const bool dualPokey = ind.mbAudioDisplayEnabled[0] && ind.mpAudioMonitors[0]
+		&& ind.mbAudioDisplayEnabled[1] && ind.mpAudioMonitors[1];
+
+	ImGui::SetNextWindowSize(ImVec2(dualPokey ? 720.0f : 480.0f, 240.0f), ImGuiCond_FirstUseEver);
+	bool open = true;
+	if (!ImGui::Begin("Audio Monitor", &open)) {
+		ImGui::End();
+		if (!open)
+			g_sim.SetAudioMonitorEnabled(false);
+		return;
+	}
+
+	if (!open) {
+		ImGui::End();
+		g_sim.SetAudioMonitorEnabled(false);
+		return;
+	}
+
+	const ImVec2 contentAvail = ImGui::GetContentRegionAvail();
+
+	if (dualPokey) {
+		// Side-by-side layout: POKEY 1 (left) | separator | POKEY 2 (right)
+		float colWidth = (contentAvail.x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+
+		if (ImGui::BeginChild("##pokey1", ImVec2(colWidth, contentAvail.y), ImGuiChildFlags_None)) {
+			ImGui::TextDisabled("POKEY 1");
+			float bodyHeight = contentAvail.y - ImGui::GetTextLineHeightWithSpacing();
+			DrawAudioMonitorPokey(0, colWidth, bodyHeight);
+		}
+		ImGui::EndChild();
+
+		ImGui::SameLine();
+
+		if (ImGui::BeginChild("##pokey2", ImVec2(colWidth, contentAvail.y), ImGuiChildFlags_None)) {
+			ImGui::TextDisabled("POKEY 2 (Stereo)");
+			float bodyHeight = contentAvail.y - ImGui::GetTextLineHeightWithSpacing();
+			DrawAudioMonitorPokey(1, colWidth, bodyHeight);
+		}
+		ImGui::EndChild();
+	} else {
+		// Single POKEY — use full width
+		int which = (ind.mbAudioDisplayEnabled[0] && ind.mpAudioMonitors[0]) ? 0 : 1;
+		DrawAudioMonitorPokey(which, contentAvail.x, contentAvail.y);
+	}
+
+	ImGui::End();
+}
+
+// ============= Audio Scope =============
+
+static constexpr float kScopeUsPerDiv[] = {
+	100.0f, 200.0f, 500.0f,
+	1000.0f, 2000.0f, 5000.0f,
+	10000.0f, 20000.0f, 50000.0f,
+	100000.0f, 200000.0f,
+};
+static constexpr int kScopeRateCount = (int)(sizeof(kScopeUsPerDiv) / sizeof(kScopeUsPerDiv[0]));
+
+static int s_scopeRateIndex = 3;
+static std::vector<float> s_scopeWaveforms[2];
+static uint32 s_scopeSampleScale = 1;
+static uint32 s_scopeSamplesRequested = 0;
+static float s_scopeLastWidth = 0;
+
+static void ScopeUpdateSampleCounts() {
+	auto& ind = ATImGuiGetIndicatorState();
+
+	float usPerDiv = kScopeUsPerDiv[s_scopeRateIndex];
+	float usPerView = usPerDiv * 10.0f;
+	float secsPerView = usPerView / 1000000.0f;
+	float samplesPerSec = 63920.8f;
+	float samplesPerViewF = samplesPerSec * secsPerView;
+
+	uint32 n = (uint32)ceilf(samplesPerViewF);
+	s_scopeSamplesRequested = n;
+
+	for (int i = 0; i < 2; ++i) {
+		if (ind.mpAudioMonitors[i])
+			ind.mpAudioMonitors[i]->SetMixedSampleCount(n);
+	}
+}
+
+static void DrawAudioScope() {
+	auto& ind = ATImGuiGetIndicatorState();
+
+	if (!ind.mbAudioScopeEnabled)
+		return;
+
+	ImGui::SetNextWindowSize(ImVec2(512, 180), ImGuiCond_FirstUseEver);
+	bool open = true;
+	if (!ImGui::Begin("Audio Scope", &open)) {
+		ImGui::End();
+		if (!open)
+			g_sim.SetAudioScopeEnabled(false);
+		return;
+	}
+
+	if (!open) {
+		ImGui::End();
+		g_sim.SetAudioScopeEnabled(false);
+		return;
+	}
+
+	// Time-base controls
+	if (ImGui::Button("<")) {
+		if (s_scopeRateIndex > 0) {
+			--s_scopeRateIndex;
+			ScopeUpdateSampleCounts();
+		}
+	}
+	ImGui::SameLine();
+
+	float usPerDiv = kScopeUsPerDiv[s_scopeRateIndex];
+	if (usPerDiv < 1000.0f)
+		ImGui::Text("%.1f us/div", usPerDiv);
+	else
+		ImGui::Text("%.0f ms/div", usPerDiv / 1000.0f);
+
+	ImGui::SameLine();
+	if (ImGui::Button(">")) {
+		if (s_scopeRateIndex < kScopeRateCount - 1) {
+			++s_scopeRateIndex;
+			ScopeUpdateSampleCounts();
+		}
+	}
+
+	// Scope area
+	ImVec2 avail = ImGui::GetContentRegionAvail();
+	if (avail.x < 16.0f || avail.y < 16.0f) {
+		ImGui::End();
+		return;
+	}
+
+	// Update sample counts on window resize
+	if (s_scopeLastWidth != avail.x) {
+		s_scopeLastWidth = avail.x;
+		ScopeUpdateSampleCounts();
+	}
+
+	ImVec2 origin = ImGui::GetCursorScreenPos();
+	float w = avail.x;
+	float h = avail.y;
+	ImDrawList *dl = ImGui::GetWindowDrawList();
+
+	// Background
+	dl->AddRectFilled(origin, ImVec2(origin.x + w, origin.y + h), IM_COL32(0, 0, 0, 200));
+
+	// Grid: 10 vertical divisions + center horizontal line
+	const ImU32 gridCol = IM_COL32(128, 128, 128, 128);
+	for (int i = 1; i < 10; ++i) {
+		float x = origin.x + w * i / 10.0f;
+		dl->AddLine(ImVec2(x, origin.y), ImVec2(x, origin.y + h), gridCol);
+	}
+	float ymid = origin.y + h * 0.5f;
+	dl->AddLine(ImVec2(origin.x, ymid), ImVec2(origin.x + w, ymid), gridCol);
+
+	// Update and draw waveforms
+	float usPerView = usPerDiv * 10.0f;
+	float secsPerView = usPerView / 1000000.0f;
+	float samplesPerSec = 63920.8f;
+	float samplesPerViewF = samplesPerSec * secsPerView;
+
+	// Collect audio data
+	ATPokeyAudioLog *logs[2] = {};
+	bool logsReady = true;
+	for (int i = 0; i < 2; ++i) {
+		ATAudioMonitor *mon = ind.mpAudioMonitors[i];
+		if (!mon)
+			continue;
+		ATPokeyRegisterState *rstate;
+		mon->Update(&logs[i], &rstate);
+		if (logs[i]->mNumMixedSamples < logs[i]->mMaxMixedSamples)
+			logsReady = false;
+	}
+
+	if (logsReady) {
+		sint32 n = (sint32)s_scopeSamplesRequested;
+		s_scopeSampleScale = 1;
+
+		while (s_scopeSampleScale < 64 && n > (sint32)w * 2) {
+			s_scopeSampleScale += s_scopeSampleScale;
+			n >>= 1;
+		}
+
+		for (int i = 0; i < 2; ++i) {
+			ATPokeyAudioLog *log = logs[i];
+			if (!log)
+				continue;
+
+			auto& wf = s_scopeWaveforms[i];
+			wf.resize(n);
+
+			const float *src = log->mpMixedSamples;
+			float *dst = wf.data();
+			uint32 step = s_scopeSampleScale;
+
+			float scale = 1.0f / (float)step;
+			for (sint32 j = 0; j < n; ++j) {
+				float v = 0;
+				for (uint32 k = 0; k < step; ++k)
+					v += src[k];
+				dst[j] = v * scale;
+				src += step;
+			}
+
+			log->mNumMixedSamples = 0;
+		}
+	}
+
+	// Draw stored waveforms
+	for (int i = 0; i < 2; ++i) {
+		const auto& wf = s_scopeWaveforms[i];
+		if (wf.empty())
+			continue;
+
+		size_t n = wf.size();
+		ImU32 color = i ? IM_COL32(0, 180, 0, 255) : IM_COL32(255, 0, 0, 255);
+
+		float yscale = -(h * 0.5f);
+		float yoffset = ymid;
+		float xscale = w / samplesPerViewF * (float)s_scopeSampleScale;
+
+		ImVector<ImVec2> pts;
+		pts.resize((int)n);
+		for (size_t j = 0; j < n; ++j) {
+			pts[(int)j] = ImVec2(
+				origin.x + (float)j * xscale + xscale * 0.5f,
+				wf[j] * yscale + yoffset);
+		}
+		dl->AddPolyline(pts.Data, (int)n, color, ImDrawFlags_None, 1.0f);
+	}
+
+	ImGui::Dummy(avail);
+
+	ImGui::End();
 }
 
 // ============= About Window =============
@@ -6829,6 +7221,8 @@ void ATImGuiEmulatorDraw() {
 	DrawDeviceManager();
 	DrawDiskExplorer();
 	DrawStatusBar();
+	DrawAudioMonitor();
+	DrawAudioScope();
 	DrawAbout();
 	DrawShortcuts();
 	DrawCheater();
