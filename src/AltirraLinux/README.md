@@ -145,13 +145,14 @@ Press **F12** to toggle the ImGui overlay. When visible, the overlay provides:
 
 | Menu         | Contents                                                                                                                                                                               |
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **System**   | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, cold/warm reset               |
+| **System**   | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, power-on delay, hold keys for reset, cassette auto-boot, device buttons, cold/warm reset |
 | **Profiles** | Switch between hardware profiles (800/1200XL/XL/XEGS/5200), profile manager (create/rename/delete)                                                                                     |
-| **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, disk explorer, screenshots, video/audio recording |
+| **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, attach special cartridge (19 types), save firmware, disk explorer, screenshots, video/audio recording |
 | **Edit**     | Paste text to emulator                                                                                                                                                                 |
-| **View**     | FPS, display filter, stretch mode, window size, enhanced text, audio monitor, audio scope, fullscreen, status bar, cursor                                                              |
+| **View**     | FPS, display filter, stretch mode, overscan mode, vertical override, artifacting, VSync, frame blending, window size, enhanced text, audio monitor, audio scope, fullscreen, status bar, cursor |
 | **Speed**    | Pause, turbo, slow motion, speed slider (50-800%), mute, pause-when-inactive                                                                                                           |
 | **Debug**    | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading                                                                                                 |
+| **Tools**    | Export ROM set, compatibility database browser (filterable title list with tags), cassette tape editor (waveform with zoom)                                                             |
 | **Help**     | Keyboard shortcuts, config directory, about                                                                                                                                            |
 
 ### Status bar
@@ -198,8 +199,9 @@ When the overlay is visible, debug shortcuts are also active:
 - **Filters**: Point (nearest-neighbor) and Bilinear (linear interpolation)
 - **Stretch modes**: Unconstrained, preserve aspect ratio, square pixels, integral scaling
 - **Overscan**: Normal, extended, full, OS screen, widescreen
-- **Video**: Artifact modes (NTSC/PAL/Auto), monitor modes (Color/Peritel/Mono variants), scanlines, interlace, deinterlace
+- **Video**: Artifact modes (NTSC/PAL/Auto), monitor modes (Color/Peritel/Mono variants), scanlines, interlace, deinterlace, PAL extended overscan
 - **Color**: Brightness, contrast, hue, saturation, gamma sliders
+- **Effects**: Frame blending (blend/mono persistence/linear), screen effects (bloom enable/radius/intensity, distortion angle/Y ratio)
 - **HiDPI**: Automatic high-DPI scaling via SDL2
 - **PAR correction**: Pixel aspect ratio correction each frame
 - **Adaptive vsync**: Tries adaptive (-1), falls back to standard (1)
