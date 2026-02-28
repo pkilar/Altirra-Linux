@@ -147,13 +147,13 @@ Press **F12** to toggle the ImGui overlay. When visible, the overlay provides:
 | ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **System**   | Hardware mode (800/XL/XE/5200/XEGS), memory size, video standard (NTSC/PAL/SECAM), BASIC toggle, firmware/audio/video/keyboard/input/device/boot config, power-on delay, hold keys for reset, cassette auto-boot, device buttons, cold/warm reset |
 | **Profiles** | Switch between hardware profiles (800/1200XL/XL/XEGS/5200), profile manager (create/rename/delete)                                                                                     |
-| **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, attach special cartridge (19 types), save firmware, disk explorer, screenshots, video/audio recording |
-| **Edit**     | Paste text to emulator                                                                                                                                                                 |
+| **File**     | Open/boot image, recent files, quick/file save/load state, cassette control, disk drives (D1-D8) with mount/unmount/save/rotate/new, attach special cartridge (19 types), save cartridge, secondary cartridge, save firmware, disk explorer, screenshots (normal + true aspect), video/audio recording |
+| **Edit**     | Paste text to emulator, copy frame to clipboard                                                                                                                                        |
 | **View**     | FPS, display filter, stretch mode, overscan mode, vertical override, artifacting, VSync, frame blending, window size, enhanced text, audio monitor, audio scope, fullscreen, status bar, cursor |
 | **Speed**    | Pause, turbo, slow motion, speed slider (50-800%), mute, pause-when-inactive                                                                                                           |
-| **Debug**    | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading                                                                                                 |
-| **Tools**    | Export ROM set, compatibility database browser (filterable title list with tags), cassette tape editor (waveform with zoom)                                                             |
-| **Help**     | Keyboard shortcuts, config directory, about                                                                                                                                            |
+| **Debug**    | Break/Run, step into/over/out, debugger window visibility (13 windows), symbol loading, auto-reload ROMs, auto-load symbols, break at EXE run, debug link                              |
+| **Tools**    | Export ROM set, compatibility database browser (filterable title list with tags), cassette tape editor (waveform with zoom), SAP to EXE converter, tape decoding analysis               |
+| **Help**     | Keyboard shortcuts, config directory, Altirra home page, change log, about                                                                                                             |
 
 ### Status bar
 
