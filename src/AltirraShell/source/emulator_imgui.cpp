@@ -3085,20 +3085,26 @@ static void DrawMenuBar() {
 		}
 
 		if (ImGui::MenuItem("Analyze Tape Decoding...")) {
-			VDStringW srcPath = ATLinuxOpenFileDialog("Load Tape to Analyze",
-				"Tape Files|*.wav;*.cas|All Files|*");
+			VDStringW srcPath = ATLinuxOpenFileDialog("Load Tape Audio to Analyze",
+				"Audio Files|*.wav;*.flac;*.ogg|All Files|*");
 			if (!srcPath.empty()) {
-				VDStringW dstPath = ATLinuxSaveFileDialog("Save Analysis Output",
-					"WAV Files|*.wav|All Files|*");
+				VDStringW dstPath = ATLinuxSaveFileDialog("Save Tape Analysis",
+					"Analysis WAV|*.wav|All Files|*");
 				if (!dstPath.empty()) {
 					try {
 						if (VDFileSplitExt(dstPath.c_str()) == dstPath.c_str() + dstPath.size())
 							dstPath += L".wav";
-						VDFileStream f2(dstPath.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kCreateAlways);
+						if (VDFileIsPathEqual(srcPath.c_str(), dstPath.c_str()))
+							throw MyError("The analysis file needs to be different from the source tape file.");
+						VDFileStream f2(dstPath.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kSequential | nsVDFile::kCreateAlways);
 						ATCassetteLoadContext ctx;
 						g_sim.GetCassette().GetLoadOptions(ctx);
 						(void)ATLoadCassetteImage(srcPath.c_str(), &f2, ctx);
 						ShowToast("Tape analysis complete");
+					} catch (const MyError& e) {
+						char msg[512];
+						snprintf(msg, sizeof(msg), "Analysis failed: %s", e.c_str());
+						ShowToast(msg);
 					} catch (const std::exception& e) {
 						char msg[512];
 						snprintf(msg, sizeof(msg), "Analysis failed: %s", e.what());
