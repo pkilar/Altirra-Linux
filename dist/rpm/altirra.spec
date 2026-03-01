@@ -60,3 +60,7 @@ ATTest/attest all
 %{_docdir}/altirra/LICENSE
 %{_docdir}/altirra/README.md
 %{_docdir}/altirra/html
+
+%changelog
+* Sat Mar 01 2026 pkilar <pkilar@users.noreply.github.com> - 4.40-1
+- Initial Linux port release

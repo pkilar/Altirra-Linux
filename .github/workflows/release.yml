@@ -105,23 +105,22 @@ jobs:
 
       - name: Set up rpmbuild tree
         run: |
-          rpmdev-setuptree
-          mkdir -p /root/rpmbuild/{SOURCES,SPECS}
-          cp "altirra-${VERSION}.tar.gz" "/root/rpmbuild/SOURCES/altirra-${VERSION}.tar.gz"
+          mkdir -p rpmbuild/{SOURCES,SPECS,BUILD,RPMS,SRPMS}
+          cp "altirra-${VERSION}.tar.gz" "rpmbuild/SOURCES/altirra-${VERSION}.tar.gz"
           tar xf "altirra-${VERSION}.tar.gz" \
             "Altirra-Linux-${VERSION}/dist/rpm/altirra.spec" \
             --strip-components=3
           # Remove mads from BuildRequires — already built from source above
           sed -i '/^BuildRequires:.*mads$/d' altirra.spec
-          cp altirra.spec /root/rpmbuild/SPECS/
+          cp altirra.spec rpmbuild/SPECS/
 
       - name: Build RPM
-        run: rpmbuild -ba /root/rpmbuild/SPECS/altirra.spec
+        run: rpmbuild -ba rpmbuild/SPECS/altirra.spec --define "_topdir $(pwd)/rpmbuild"
 
       - uses: actions/upload-artifact@v4
         with:
           name: rpm-package
-          path: /root/rpmbuild/RPMS/**/*.rpm
+          path: rpmbuild/RPMS/**/*.rpm
 
   build-deb:
     needs: create-source-tarball
