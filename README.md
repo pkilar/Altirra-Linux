@@ -49,19 +49,35 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 
 ### Keyboard Shortcuts
 
-| Key        | Action                                                    |
-| ---------- | --------------------------------------------------------- |
-| F12        | Toggle ImGui overlay (menus/dialogs)                      |
-| Escape     | Close overlay                                             |
-| F5         | Continue (debugger)                                       |
-| F10        | Step over (debugger)                                      |
-| F11        | Step into (debugger) / Fullscreen toggle (overlay hidden) |
-| Alt+Return | Toggle fullscreen                                         |
-| F1 (hold)  | Warp speed while held                                     |
-| F7         | Quick save state                                          |
-| F8         | Quick load state                                          |
-| Ctrl+S     | Save settings                                             |
-| Ctrl+V     | Paste text to emulator                                    |
+| Key              | Action                                                    |
+| ---------------- | --------------------------------------------------------- |
+| F1 (hold)        | Warp speed while held                                     |
+| Shift+F1         | Cycle quick input maps                                    |
+| Ctrl+F1          | Cycle display filter mode                                 |
+| F2               | Start key                                                 |
+| F3               | Select key                                                |
+| F4               | Option key                                                |
+| F5               | Warm reset (or Run in debugger)                           |
+| Shift+F5         | Cold reset                                                |
+| F6               | Help key                                                  |
+| F7               | Break key                                                 |
+| F8               | Debugger break/run                                        |
+| F9               | Toggle pause (or Toggle breakpoint in debugger)           |
+| F10              | Step over (debugger)                                      |
+| Alt+F10          | Save screenshot                                           |
+| F11              | Step into (debugger) / Fullscreen toggle (overlay hidden) |
+| Shift+F11        | Step out (debugger)                                       |
+| F12              | Toggle ImGui overlay (menus/dialogs)                      |
+| Escape           | Close overlay                                             |
+| Pause            | Break key                                                 |
+| Alt+Enter        | Toggle fullscreen                                         |
+| Alt+Backspace    | Toggle slow motion                                        |
+| Alt+Shift+V      | Paste text to emulator                                    |
+| Alt+Shift+C      | Copy frame to clipboard                                   |
+| Ctrl+O           | Open image                                                |
+| Ctrl+Shift+O     | Boot image                                                |
+| Ctrl+S           | Save settings                                             |
+| Ctrl+Q           | Quit                                                      |
 
 ## Building
 

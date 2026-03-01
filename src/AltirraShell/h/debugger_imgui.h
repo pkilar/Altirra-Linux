@@ -35,4 +35,10 @@ void ATImGuiDebuggerNavigateSourceLine(const wchar_t *path, int line);
 // Resets the flag on read so it fires only once per break event.
 bool ATImGuiDebuggerDidBreak();
 
+// Returns true if any debugger window is currently visible.
+bool ATImGuiDebuggerIsVisible();
+
+// Returns the current disassembly cursor/context address.
+uint16 ATImGuiDebuggerGetDisasmAddr();
+
 #endif
