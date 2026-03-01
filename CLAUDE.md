@@ -8,7 +8,34 @@ Altirra is an Atari 8-bit computer emulator (800/XL/XE/5200) written in C++ by A
 
 ## Build System
 
-**Primary toolchain**: Visual Studio 2022 (v17.14+), MSVC v143, Windows 11 SDK (10.0.26100.0+)
+### Linux (CMake)
+
+**Toolchain**: CMake 3.20+, Ninja, GCC 13+ (tested with GCC 15.2.1), C++23
+
+**Dependencies**: libsdl2-dev, libgl-dev, zlib1g-dev, xsltproc, MADS 2.1.0+ (6502 assembler)
+
+**Building**:
+```bash
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+**Testing**: `cd build/src && ATTest/attest all` (25 tests, 0 failures)
+
+**MADS**: Not in standard package repos. Build from source:
+```bash
+git clone https://github.com/tebe6502/Mad-Assembler.git
+cd Mad-Assembler && fpc -Mdelphi -vh -O3 mads.pas
+sudo install -m 755 mads /usr/local/bin/mads
+```
+
+**Embedded resources**: `cmake/EmbedResources.cmake` embeds 29 STUFF + 4 PNG resources at configure time. MADS assembles 10 firmware ROMs at configure time. Dear ImGui is fetched via FetchContent.
+
+**Linux packaging**: Specs in `dist/` for Arch (`PKGBUILD`), RPM (`altirra.spec`), and Debian (`debian/`).
+
+### Windows (Visual Studio)
+
+**Toolchain**: Visual Studio 2022 (v17.14+), MSVC v143, Windows 11 SDK (10.0.26100.0+)
 
 **Solutions** (all under `src/`):
 - `Altirra.sln` — Main emulator (32 projects)
@@ -25,7 +52,7 @@ Altirra is an Atari 8-bit computer emulator (800/XL/XE/5200) written in C++ by A
 4. Then build other configurations as needed
 5. Output goes to `/out`, intermediates to `/obj`, libraries to `/lib`
 
-**External tool requirement**: MADS 2.1.0+ (6502 assembler, http://mads.atari8.info/) for Kernel assembly. Configure path via `localconfig/active/Altirra.local.props`:
+**MADS path**: Configure via `localconfig/active/Altirra.local.props`:
 ```xml
 <ATMadsPath>c:\path\to\mads.exe</ATMadsPath>
 ```
@@ -71,17 +98,29 @@ The 32 projects form a layered architecture:
 - `ATBasic` — Built-in BASIC compiler/interpreter
 - `ATCompiler` — Build tool (lzpack, makereloc, mkfsdos2)
 
-**UI layer**:
+**UI layer (Windows)**:
 - `ATUI` — Abstract UI layer
 - `ATUIControls` — Custom controls (buttons, lists, sliders, text editor)
 - `ATNativeUI` — Windows native UI wrapper (dialogs, themes, message loop)
 - `ATAppBase` — Application base (exception filter, CRT hooks)
 
-**Application** (`Altirra`):
+**UI layer (Linux)**:
+- `AltirraShell` — ImGui-based UI: menus, config dialogs, disk explorer, status bar, 13-window debugger
+- `AltirraLinux` — Linux application: SDL2 window management, main loop, settings (INI), stubs for Windows-only symbols
+
+**Application (Windows)** (`Altirra`):
 - `ATSimulator` (simulator.h) — Central orchestrator connecting all emulation components
 - `cmd*.cpp` files — Command handlers organized by domain (audio, cart, cassette, cpu, debug, input, options, system, tools, view, window)
 - `devicemanager.h` — Device tree management
 - `main.cpp` — WinMain entry point, initialization, message pump
+
+**Application (Linux)**:
+- Shares `ATSimulator` and all core emulation with Windows
+- `src/AltirraShell/source/emulator_imgui.cpp` — ImGui UI (menus, dialogs, status bar)
+- `src/AltirraShell/source/debugger_imgui.cpp` — ImGui debugger (13 windows + toolbar)
+- `src/AltirraShell/source/display_sdl2.cpp` — SDL2+OpenGL display backend
+- `src/AltirraShell/source/commands_linux.cpp` — Linux UI command handlers
+- `src/AltirraLinux/source/main_linux.cpp` — Main loop, window management, settings
 
 **Kernel** (`src/Kernel/`):
 - 6502 assembly source for Atari OS ROM replacements
@@ -135,10 +174,18 @@ Copy examples from `localconfig/example/` to `localconfig/active/`:
 - `Altirra.local.props` — MADS path override
 - `PlatformSetup.local.props` — Compiler/toolset override
 
+## CI/CD
+
+**GitHub Actions** (`.github/workflows/`):
+- `ci.yml` — Build and test on every push/PR to `main` (Ubuntu 24.04, g++-14, MADS from source)
+- `release.yml` — On `v*` tag push: build Arch/RPM/DEB packages in native containers, create draft GitHub release
+
 ## Platform Notes
 
-- Windows-only currently (Win32 API, Direct3D, COM throughout)
-- Current git branch is `feature/linux` — Linux porting work in progress
-- No CMake/meson build system exists yet; only Visual Studio .sln/.vcxproj
-- The `vd2/system` library provides platform abstraction (threading, file I/O, registry) but many are Win32-specific
+- **Windows**: Win32 API, Direct3D, COM throughout. VS2022 .sln/.vcxproj build.
+- **Linux**: SDL2+OpenGL display, Dear ImGui UI, POSIX sockets, inotify. CMake/Ninja build. ~99.9% feature-complete.
+- Linux porting uses separate `*_linux.cpp` files and `#ifdef VD_PLATFORM_LINUX` guards to keep platform code isolated
+- The `vd2/system` library provides platform abstraction (threading, file I/O, registry) with Linux implementations in `*_linux.cpp` files
 - SIMD: separate code paths for SSE2 (x86/x64) and NEON (ARM64)
+- Settings: Windows uses registry, Linux uses portable INI at `~/.config/altirra/Altirra.ini`
+- File dialogs on Linux: zenity (GTK) -> kdialog (KDE) -> ImGui fallback
