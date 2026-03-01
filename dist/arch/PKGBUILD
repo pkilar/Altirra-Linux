@@ -9,11 +9,11 @@ license=('GPL-2.0-or-later')
 depends=('sdl2' 'mesa' 'zlib')
 optdepends=('ffmpeg: H.264 video recording')
 makedepends=('cmake' 'ninja' 'mads' 'gcc' 'git' 'pkg-config' 'libxslt')
-source=("$pkgname-$pkgver.tar.gz::https://github.com/pkilar/Altirra-4.40/archive/refs/tags/v$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz::https://github.com/pkilar/Altirra-Linux/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 build() {
-	cd "$srcdir/Altirra-$pkgver"
+	cd "$srcdir/Altirra-Linux-$pkgver"
 	cmake -B build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
 		-DCMAKE_INSTALL_PREFIX=/usr
@@ -21,11 +21,11 @@ build() {
 }
 
 check() {
-	cd "$srcdir/Altirra-$pkgver/build/src"
+	cd "$srcdir/Altirra-Linux-$pkgver/build/src"
 	ATTest/attest all
 }
 
 package() {
-	cd "$srcdir/Altirra-$pkgver"
+	cd "$srcdir/Altirra-Linux-$pkgver"
 	DESTDIR="$pkgdir" cmake --install build
 }

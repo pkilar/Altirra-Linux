@@ -106,7 +106,7 @@ jobs:
       - name: Set up rpmbuild tree
         run: |
           rpmdev-setuptree
-          mkdir -p /root/rpmbuild/SOURCES
+          mkdir -p /root/rpmbuild/{SOURCES,SPECS}
           cp "altirra-${VERSION}.tar.gz" "/root/rpmbuild/SOURCES/altirra-${VERSION}.tar.gz"
           tar xf "altirra-${VERSION}.tar.gz" \
             "Altirra-Linux-${VERSION}/dist/rpm/altirra.spec" \
@@ -141,7 +141,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            debhelper devscripts \
+            build-essential debhelper devscripts \
             cmake ninja-build g++-14 \
             libsdl2-dev libgl-dev zlib1g-dev \
             xsltproc fp-compiler git ca-certificates
