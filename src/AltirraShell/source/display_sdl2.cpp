@@ -232,15 +232,26 @@ bool ATDisplaySDL2::SetSourcePersistent(bool bAutoUpdate, const VDPixmap& src, b
 		mStagingBuffer.init(src.w, src.h, nsVDPixmap::kPixFormat_XRGB8888);
 	}
 
-	// Copy pixel data row by row (handles different pitches)
+	// Copy pixel data row by row, converting P8 (palette indexed) to XRGB8888
+	// when the GTIA outputs 8-bit mode (artifacting=None, no VBXE/blend/scanlines).
 	const uint8 *srcRow = (const uint8 *)src.data;
 	uint8 *dstRow = (uint8 *)mStagingBuffer.data;
-	const int copyBytes = src.w * 4;
 
-	for (int y = 0; y < src.h; ++y) {
-		memcpy(dstRow, srcRow, copyBytes);
-		srcRow += src.pitch;
-		dstRow += mStagingBuffer.pitch;
+	if (src.format == nsVDPixmap::kPixFormat_Pal8 && src.palette) {
+		for (int y = 0; y < src.h; ++y) {
+			uint32 *dst32 = (uint32 *)dstRow;
+			for (int x = 0; x < src.w; ++x)
+				dst32[x] = src.palette[srcRow[x]];
+			srcRow += src.pitch;
+			dstRow += mStagingBuffer.pitch;
+		}
+	} else {
+		const int copyBytes = src.w * 4;
+		for (int y = 0; y < src.h; ++y) {
+			memcpy(dstRow, srcRow, copyBytes);
+			srcRow += src.pitch;
+			dstRow += mStagingBuffer.pitch;
+		}
 	}
 
 	mSourceW = src.w;
@@ -315,12 +326,22 @@ void ATDisplaySDL2::PostBuffer(VDVideoDisplayFrame *frame) {
 
 		const uint8 *srcRow = (const uint8 *)src.data;
 		uint8 *dstRow = (uint8 *)mStagingBuffer.data;
-		const int copyBytes = src.w * 4;
 
-		for (int y = 0; y < src.h; ++y) {
-			memcpy(dstRow, srcRow, copyBytes);
-			srcRow += src.pitch;
-			dstRow += mStagingBuffer.pitch;
+		if (src.format == nsVDPixmap::kPixFormat_Pal8 && src.palette) {
+			for (int y = 0; y < src.h; ++y) {
+				uint32 *dst32 = (uint32 *)dstRow;
+				for (int x = 0; x < src.w; ++x)
+					dst32[x] = src.palette[srcRow[x]];
+				srcRow += src.pitch;
+				dstRow += mStagingBuffer.pitch;
+			}
+		} else {
+			const int copyBytes = src.w * 4;
+			for (int y = 0; y < src.h; ++y) {
+				memcpy(dstRow, srcRow, copyBytes);
+				srcRow += src.pitch;
+				dstRow += mStagingBuffer.pitch;
+			}
 		}
 
 		mSourceW = src.w;
