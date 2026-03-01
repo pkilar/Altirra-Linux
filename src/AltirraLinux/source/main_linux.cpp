@@ -51,6 +51,7 @@
 #include "cartridge.h"
 #include "inputmanager.h"
 #include "uiaccessors.h"
+#include "uitypes.h"
 #include "uicommondialogs.h"
 #include "uikeyboard.h"
 #include "uiqueue.h"
@@ -599,86 +600,14 @@ static void HandleShortcuts(const SDL_Event& event) {
 	if (event.type != SDL_KEYDOWN)
 		return;
 
+	bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
+	bool ctrl  = (event.key.keysym.mod & KMOD_CTRL) != 0;
+	bool alt   = (event.key.keysym.mod & KMOD_ALT) != 0;
+
 	switch (event.key.keysym.scancode) {
-		// F7: quick save state
-		case SDL_SCANCODE_F7: {
-			try {
-				s_pQuickState.clear();
-				vdrefptr<IATSerializable> snapInfo;
-				g_sim.CreateSnapshot(~s_pQuickState, ~snapInfo);
-				ATImGuiShowToast("State saved");
-			} catch (...) {
-				ATImGuiShowToast("Save state failed");
-			}
-			return;
-		}
-
-		// F8: quick load state
-		case SDL_SCANCODE_F8: {
-			if (s_pQuickState) {
-				try {
-					ATStateLoadContext ctx {};
-					g_sim.ApplySnapshot(*s_pQuickState, &ctx);
-					ATImGuiShowToast("State loaded");
-				} catch (...) {
-					ATImGuiShowToast("Load state failed");
-				}
-			}
-			return;
-		}
-
-		// F9: save screenshot (auto-named)
-		case SDL_SCANCODE_F9: {
-			VDPixmapBuffer pxbuf;
-			VDPixmap px;
-			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
-				char fname[256];
-				time_t now = time(nullptr);
-				struct tm tm;
-				localtime_r(&now, &tm);
-				const char *home = getenv("HOME");
-				snprintf(fname, sizeof(fname), "%s/altirra_%04d%02d%02d_%02d%02d%02d.png",
-					home ? home : "/tmp",
-					tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
-					tm.tm_hour, tm.tm_min, tm.tm_sec);
-				try {
-					VDStringW wpath = VDTextU8ToW(VDStringA(fname));
-					ATSaveFrame(px, wpath.c_str());
-					ATImGuiShowToast("Screenshot saved");
-				} catch (...) {
-					ATImGuiShowToast("Screenshot failed");
-				}
-			}
-			return;
-		}
-
-		// F6: warm reset (Shift+F6: cold reset)
-		case SDL_SCANCODE_F6: {
-			bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-			if (shift) {
-				g_sim.ColdReset();
-				ATImGuiShowToast("Cold reset");
-			} else {
-				g_sim.WarmReset();
-				ATImGuiShowToast("Warm reset");
-			}
-			return;
-		}
-
-		// F4: toggle mute
-		case SDL_SCANCODE_F4: {
-			IATAudioOutput *audioOut = g_sim.GetAudioOutput();
-			if (audioOut) {
-				bool mute = !audioOut->GetMute();
-				audioOut->SetMute(mute);
-				ATImGuiShowToast(mute ? "Audio muted" : "Audio unmuted");
-			}
-			return;
-		}
-
 		// Shift+F1: cycle quick maps
 		case SDL_SCANCODE_F1: {
-			if ((event.key.keysym.mod & KMOD_SHIFT) != 0) {
+			if (shift) {
 				ATInputManager *inputMgr = g_sim.GetInputManager();
 				if (inputMgr) {
 					ATInputMap *pMap = inputMgr->CycleQuickMaps();
@@ -691,41 +620,116 @@ static void HandleShortcuts(const SDL_Event& event) {
 						ATImGuiShowToast("Quick maps disabled");
 					}
 				}
+			} else if (ctrl) {
+				// Ctrl+F1: cycle display filter mode
+				ATDisplayFilterMode fm = ATUIGetDisplayFilterMode();
+				fm = (ATDisplayFilterMode)(((int)fm + 1) % kATDisplayFilterModeCount);
+				ATUISetDisplayFilterMode(fm);
+				ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+				if (disp) {
+					disp->SetFilterMode(
+						(fm == kATDisplayFilterMode_Point)
+						? IVDVideoDisplay::kFilterPoint
+						: IVDVideoDisplay::kFilterBilinear);
+				}
 			}
 			return;
 		}
 
-		// Pause key: toggle emulation pause
-		case SDL_SCANCODE_PAUSE: {
-			if (g_sim.IsPaused()) {
-				g_sim.Resume();
-				ATImGuiShowToast("Resumed");
+		// F5: warm reset / Shift+F5: cold reset (non-debugger)
+		// In debugger context: F5 = run
+		case SDL_SCANCODE_F5: {
+			IATDebugger *dbg = ATGetDebugger();
+			if (dbg && g_pImGui && g_pImGui->IsVisible() && ATImGuiDebuggerIsVisible()) {
+				if (dbg->IsRunning())
+					dbg->Break();
+				else
+					dbg->Run(kATDebugSrcMode_Disasm);
+			} else if (shift) {
+				g_sim.ColdReset();
+				ATImGuiShowToast("Cold reset");
 			} else {
-				g_sim.Pause();
-				ATImGuiShowToast("Paused");
+				g_sim.WarmReset();
+				ATImGuiShowToast("Warm reset");
 			}
 			return;
+		}
+
+		// F8: debugger run/stop (global, always available)
+		case SDL_SCANCODE_F8: {
+			IATDebugger *dbg = ATGetDebugger();
+			if (dbg) {
+				if (dbg->IsRunning())
+					dbg->Break();
+				else
+					dbg->Run(kATDebugSrcMode_Disasm);
+			}
+			return;
+		}
+
+		// F9: toggle pause (display) / toggle breakpoint (debugger)
+		case SDL_SCANCODE_F9: {
+			IATDebugger *dbg = ATGetDebugger();
+			if (dbg && g_pImGui && g_pImGui->IsVisible() && ATImGuiDebuggerIsVisible()) {
+				// Toggle breakpoint at current disassembly address
+				uint16 addr = ATImGuiDebuggerGetDisasmAddr();
+				dbg->ToggleBreakpoint(addr);
+			} else {
+				if (g_sim.IsPaused()) {
+					g_sim.Resume();
+					ATImGuiShowToast("Resumed");
+				} else {
+					g_sim.Pause();
+					// Suppress the auto-show overlay that normally activates
+					// when emulation enters stopped state (for debugger
+					// breakpoints).  User-initiated pause via F9 should NOT
+					// pop up the overlay.
+					g_debuggerAutoShowed = true;
+					ATImGuiDebuggerDidBreak();
+					ATImGuiShowToast("Paused");
+				}
+			}
+			return;
+		}
+
+		// Alt+F10: save screenshot
+		case SDL_SCANCODE_F10: {
+			if (alt) {
+				VDPixmapBuffer pxbuf;
+				VDPixmap px;
+				if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+					char fname[256];
+					time_t now = time(nullptr);
+					struct tm tm;
+					localtime_r(&now, &tm);
+					const char *home = getenv("HOME");
+					snprintf(fname, sizeof(fname), "%s/altirra_%04d%02d%02d_%02d%02d%02d.png",
+						home ? home : "/tmp",
+						tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+						tm.tm_hour, tm.tm_min, tm.tm_sec);
+					try {
+						VDStringW wpath = VDTextU8ToW(VDStringA(fname));
+						ATSaveFrame(px, wpath.c_str());
+						ATImGuiShowToast("Screenshot saved");
+					} catch (...) {
+						ATImGuiShowToast("Screenshot failed");
+					}
+				}
+				return;
+			}
+			break;
 		}
 
 		default:
 			break;
 	}
 
-	// Debug shortcuts (only when overlay visible)
+	// Debug shortcuts: F10 step over, F11 step into/out
 	IATDebugger *dbg = ATGetDebugger();
 	if (!dbg)
 		return;
 
-	bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-
 	switch (event.key.keysym.scancode) {
-		case SDL_SCANCODE_F5:
-			if (dbg->IsRunning())
-				dbg->Break();
-			else
-				dbg->Run(kATDebugSrcMode_Disasm);
-			break;
-
 		case SDL_SCANCODE_F10:
 			if (!dbg->IsRunning())
 				dbg->StepOver(kATDebugSrcMode_Disasm);
@@ -846,24 +850,22 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 		}
 
-		// F1/F4/F6/F7/F8/F9/Pause always active (quick maps/mute/reset/save/load/screenshot/pause)
+		// F1/F5/F8/F9 shortcuts always active
 		if (event.type == SDL_KEYDOWN) {
 			if (event.key.keysym.scancode == SDL_SCANCODE_F1
-				|| event.key.keysym.scancode == SDL_SCANCODE_F4
-				|| event.key.keysym.scancode == SDL_SCANCODE_F6
-				|| event.key.keysym.scancode == SDL_SCANCODE_F7
+				|| event.key.keysym.scancode == SDL_SCANCODE_F5
 				|| event.key.keysym.scancode == SDL_SCANCODE_F8
-				|| event.key.keysym.scancode == SDL_SCANCODE_F9
-				|| event.key.keysym.scancode == SDL_SCANCODE_PAUSE) {
+				|| event.key.keysym.scancode == SDL_SCANCODE_F9) {
 				HandleShortcuts(event);
 				continue;
 			}
 
-			// F11 or Alt+Return = fullscreen toggle when overlay is hidden
-			if ((event.key.keysym.scancode == SDL_SCANCODE_F11
-				|| (event.key.keysym.scancode == SDL_SCANCODE_RETURN
-					&& (event.key.keysym.mod & KMOD_ALT)))
-				&& !(g_pImGui && g_pImGui->IsVisible())) {
+			// Alt+Enter = fullscreen toggle (always)
+			// F11 = fullscreen toggle (when overlay hidden)
+			if ((event.key.keysym.scancode == SDL_SCANCODE_RETURN
+					&& (event.key.keysym.mod & KMOD_ALT))
+				|| (event.key.keysym.scancode == SDL_SCANCODE_F11
+					&& !(g_pImGui && g_pImGui->IsVisible()))) {
 				ATSetFullscreen(!ATUIGetFullscreen());
 				continue;
 			}
@@ -886,10 +888,39 @@ static void ProcessEvents(SDL_Window *window) {
 				continue;
 			}
 
-			// Ctrl+V = paste text to emulator
+			// Alt+Shift+V = paste text to emulator
 			if (event.key.keysym.scancode == SDL_SCANCODE_V
-				&& (event.key.keysym.mod & KMOD_CTRL)) {
+				&& (event.key.keysym.mod & KMOD_ALT)
+				&& (event.key.keysym.mod & KMOD_SHIFT)) {
 				ATImGuiPasteText();
+				continue;
+			}
+
+			// Alt+Shift+C = copy frame to clipboard
+			if (event.key.keysym.scancode == SDL_SCANCODE_C
+				&& (event.key.keysym.mod & KMOD_ALT)
+				&& (event.key.keysym.mod & KMOD_SHIFT)) {
+				VDPixmapBuffer pxbuf;
+				VDPixmap px;
+				if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+					ATCopyFrameToClipboard(px);
+					ATImGuiShowToast("Frame copied");
+				}
+				continue;
+			}
+
+			// Alt+F10 = save screenshot
+			if (event.key.keysym.scancode == SDL_SCANCODE_F10
+				&& (event.key.keysym.mod & KMOD_ALT)) {
+				HandleShortcuts(event);
+				continue;
+			}
+
+			// Alt+Backspace = toggle slow motion
+			if (event.key.keysym.scancode == SDL_SCANCODE_BACKSPACE
+				&& (event.key.keysym.mod & KMOD_ALT)) {
+				ATUISetSlowMotion(!ATUIGetSlowMotion());
+				ATImGuiShowToast(ATUIGetSlowMotion() ? "Slow motion" : "Normal speed");
 				continue;
 			}
 

@@ -471,3 +471,96 @@ endif()
 install(TARGETS altirra RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_SOURCE_DIR}/data/altirra.desktop DESTINATION share/applications)
 install(DIRECTORY DESTINATION share/altirra/firmware)
+
+# Icons (freedesktop.org hicolor theme)
+install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/exported/program-16.png
+	DESTINATION share/icons/hicolor/16x16/apps RENAME altirra.png)
+install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/exported/program-32.png
+	DESTINATION share/icons/hicolor/32x32/apps RENAME altirra.png)
+install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/exported/program-48.png
+	DESTINATION share/icons/hicolor/48x48/apps RENAME altirra.png)
+
+# Pixmap fallback for legacy WMs
+install(FILES ${CMAKE_SOURCE_DIR}/assets/icons/exported/program-48.png
+	DESTINATION share/pixmaps RENAME altirra.png)
+
+# AppStream metadata
+install(FILES ${CMAKE_SOURCE_DIR}/data/altirra.metainfo.xml
+	DESTINATION share/metainfo)
+
+# Documentation
+install(FILES ${CMAKE_SOURCE_DIR}/Copying DESTINATION share/doc/altirra RENAME LICENSE)
+install(FILES ${CMAKE_SOURCE_DIR}/README.md DESTINATION share/doc/altirra)
+
+# HTML help documentation (built from XML+XSL sources via xsltproc)
+find_program(XSLTPROC_EXECUTABLE xsltproc)
+if(XSLTPROC_EXECUTABLE)
+	set(HELP_SRC ${CMAKE_SOURCE_DIR}/src/ATHelpFile/source)
+	set(HELP_OUT ${CMAKE_CURRENT_BINARY_DIR}/help)
+	file(MAKE_DIRECTORY ${HELP_OUT})
+
+	# Transform each XML topic through its XSL stylesheet
+	file(GLOB HELP_XML_FILES ${HELP_SRC}/*.xml)
+	foreach(xml_file ${HELP_XML_FILES})
+		get_filename_component(fname ${xml_file} NAME_WE)
+		get_filename_component(fname_full ${xml_file} NAME)
+
+		# Skip toc.xml (handled separately)
+		if(fname_full STREQUAL "toc.xml")
+			continue()
+		endif()
+
+		# Read the file to find the stylesheet reference
+		file(READ ${xml_file} _xml_content)
+		string(REGEX MATCH "xml-stylesheet[^>]*href=\"([^\"]+)\"" _match "${_xml_content}")
+		set(_xsl "${CMAKE_MATCH_1}")
+
+		if(_xsl)
+			set(_html_out "${HELP_OUT}/${fname}.html")
+			execute_process(
+				COMMAND ${XSLTPROC_EXECUTABLE}
+						--nonet
+						-o ${_html_out}
+						${HELP_SRC}/${_xsl}
+						${xml_file}
+				RESULT_VARIABLE _XSLT_RESULT
+			)
+			if(_XSLT_RESULT EQUAL 0)
+				list(APPEND HELP_HTML_FILES ${_html_out})
+			else()
+				message(WARNING "xsltproc failed for ${fname_full}")
+			endif()
+		endif()
+	endforeach()
+
+	# Build HTML table of contents from toc.xml
+	if(EXISTS ${HELP_SRC}/toc.xml AND EXISTS ${HELP_SRC}/toc-html.xsl)
+		set(_toc_out "${HELP_OUT}/toc.html")
+		execute_process(
+			COMMAND ${XSLTPROC_EXECUTABLE}
+					--nonet
+					-o ${_toc_out}
+					${HELP_SRC}/toc-html.xsl
+					${HELP_SRC}/toc.xml
+			RESULT_VARIABLE _XSLT_RESULT
+		)
+		if(_XSLT_RESULT EQUAL 0)
+			list(APPEND HELP_HTML_FILES ${_toc_out})
+		endif()
+	endif()
+
+	# Copy CSS
+	file(COPY ${HELP_SRC}/layout.css DESTINATION ${HELP_OUT})
+	list(APPEND HELP_HTML_FILES ${HELP_OUT}/layout.css)
+
+	# Copy images
+	if(EXISTS ${HELP_SRC}/pics)
+		file(COPY ${HELP_SRC}/pics DESTINATION ${HELP_OUT})
+	endif()
+
+	# Install help files
+	install(DIRECTORY ${HELP_OUT}/ DESTINATION share/doc/altirra/html)
+	message(STATUS "Built ${CMAKE_CURRENT_LIST_DIR}: HTML help documentation (${HELP_OUT})")
+else()
+	message(STATUS "xsltproc not found — HTML help documentation will not be built")
+endif()

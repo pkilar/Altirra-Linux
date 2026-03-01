@@ -3917,6 +3917,18 @@ bool& ATImGuiDebuggerShowTrace() { return s_showTrace; }
 bool& ATImGuiDebuggerShowDebugDisplay() { return s_showDebugDisplay; }
 bool& ATImGuiDebuggerShowPerformance() { return s_showPerformance; }
 
+bool ATImGuiDebuggerIsVisible() {
+	return s_showRegisters || s_showDisassembly || s_showMemory
+		|| s_showConsole || s_showBreakpoints || s_showWatch
+		|| s_showCallStack || s_showHistory || s_showSourceCode
+		|| s_showPrinterOutput || s_showProfiler || s_showTrace
+		|| s_showDebugDisplay;
+}
+
+uint16 ATImGuiDebuggerGetDisasmAddr() {
+	return s_disasmContextAddr;
+}
+
 // ============= Main Draw =============
 
 void ATImGuiDebuggerDrawWindows() {

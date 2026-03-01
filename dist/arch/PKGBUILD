@@ -1,0 +1,31 @@
+# Maintainer: pkilar <pkilar@users.noreply.github.com>
+pkgname=altirra
+pkgver=4.40
+pkgrel=1
+pkgdesc="Atari 8-bit computer emulator (800/XL/XE/5200)"
+arch=('x86_64')
+url="https://www.virtualdub.org/altirra.html"
+license=('GPL-2.0-or-later')
+depends=('sdl2' 'mesa' 'zlib')
+optdepends=('ffmpeg: H.264 video recording')
+makedepends=('cmake' 'ninja' 'mads' 'gcc' 'git' 'pkg-config' 'libxslt')
+source=("$pkgname-$pkgver.tar.gz::https://github.com/pkilar/Altirra-4.40/archive/refs/tags/v$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+	cd "$srcdir/Altirra-$pkgver"
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr
+	cmake --build build
+}
+
+check() {
+	cd "$srcdir/Altirra-$pkgver"
+	build/src/ATTest/attest all
+}
+
+package() {
+	cd "$srcdir/Altirra-$pkgver"
+	DESTDIR="$pkgdir" cmake --install build
+}

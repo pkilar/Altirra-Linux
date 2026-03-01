@@ -49,19 +49,35 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 
 ### Keyboard Shortcuts
 
-| Key        | Action                                                    |
-| ---------- | --------------------------------------------------------- |
-| F12        | Toggle ImGui overlay (menus/dialogs)                      |
-| Escape     | Close overlay                                             |
-| F5         | Continue (debugger)                                       |
-| F10        | Step over (debugger)                                      |
-| F11        | Step into (debugger) / Fullscreen toggle (overlay hidden) |
-| Alt+Return | Toggle fullscreen                                         |
-| F1 (hold)  | Warp speed while held                                     |
-| F7         | Quick save state                                          |
-| F8         | Quick load state                                          |
-| Ctrl+S     | Save settings                                             |
-| Ctrl+V     | Paste text to emulator                                    |
+| Key              | Action                                                    |
+| ---------------- | --------------------------------------------------------- |
+| F1 (hold)        | Warp speed while held                                     |
+| Shift+F1         | Cycle quick input maps                                    |
+| Ctrl+F1          | Cycle display filter mode                                 |
+| F2               | Start key                                                 |
+| F3               | Select key                                                |
+| F4               | Option key                                                |
+| F5               | Warm reset (or Run in debugger)                           |
+| Shift+F5         | Cold reset                                                |
+| F6               | Help key                                                  |
+| F7               | Break key                                                 |
+| F8               | Debugger break/run                                        |
+| F9               | Toggle pause (or Toggle breakpoint in debugger)           |
+| F10              | Step over (debugger)                                      |
+| Alt+F10          | Save screenshot                                           |
+| F11              | Step into (debugger) / Fullscreen toggle (overlay hidden) |
+| Shift+F11        | Step out (debugger)                                       |
+| F12              | Toggle ImGui overlay (menus/dialogs)                      |
+| Escape           | Close overlay                                             |
+| Pause            | Break key                                                 |
+| Alt+Enter        | Toggle fullscreen                                         |
+| Alt+Backspace    | Toggle slow motion                                        |
+| Alt+Shift+V      | Paste text to emulator                                    |
+| Alt+Shift+C      | Copy frame to clipboard                                   |
+| Ctrl+O           | Open image                                                |
+| Ctrl+Shift+O     | Boot image                                                |
+| Ctrl+S           | Save settings                                             |
+| Ctrl+Q           | Quit                                                      |
 
 ## Building
 
@@ -78,7 +94,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 #### Debian/Ubuntu
 
 ```bash
-sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev git
+sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev git xsltproc
 
 # Optional: H.264 video recording
 sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
@@ -87,7 +103,7 @@ sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev lib
 #### Arch Linux
 
 ```bash
-sudo pacman -S base-devel cmake ninja sdl2 mesa git
+sudo pacman -S base-devel cmake ninja sdl2 mesa git libxslt
 
 # Optional: H.264 video recording
 sudo pacman -S ffmpeg
@@ -96,7 +112,7 @@ sudo pacman -S ffmpeg
 #### Fedora
 
 ```bash
-sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel git
+sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel git libxslt
 
 # Optional: H.264 video recording
 sudo dnf install ffmpeg-free-devel
@@ -134,6 +150,115 @@ cmake --build build-asan
 ```bash
 build/src/ATTest/attest CoProc_6502 Emu_PokeyTimers Core_MD5 System_Vector System_CRC
 ```
+
+### Building Packages
+
+Packaging specs are provided in `dist/` for the three major Linux packaging ecosystems. Each produces a package that installs the binary, desktop file, icons, AppStream metadata, HTML help documentation, and license.
+
+#### Arch Linux
+
+Build with `makepkg` (run from the source tree, not as root):
+
+```bash
+cd dist/arch
+
+# Edit PKGBUILD if needed (e.g. to point source= at a local tarball)
+# For building from a local git checkout instead of a release tarball:
+#   1. Create a tarball: git archive --prefix=Altirra-4.40/ -o altirra-4.40.tar.gz HEAD
+#   2. Place it alongside the PKGBUILD
+#   3. Update source=() to point to the local file
+
+makepkg -si
+```
+
+`makepkg -si` will build the package and install it with `pacman`. The `-s` flag auto-installs missing dependencies. To build without installing, use `makepkg` alone — the resulting `.pkg.tar.zst` will be in the same directory.
+
+Prerequisites (installed automatically by `makepkg -s`):
+- Runtime: `sdl2`, `mesa`, `zlib`
+- Build: `cmake`, `ninja`, `mads`, `gcc`, `git`, `pkg-config`, `libxslt`
+- Optional: `ffmpeg` (H.264 video recording)
+
+#### Fedora / RPM-based
+
+Build with `rpmbuild`:
+
+```bash
+# Install build tools
+sudo dnf install rpm-build rpmdevtools
+
+# Set up the rpmbuild tree
+rpmdev-setuptree
+
+# Create source tarball and place it in SOURCES
+git archive --prefix=Altirra-4.40/ -o ~/rpmbuild/SOURCES/altirra-4.40.tar.gz HEAD
+
+# Copy the spec file
+cp dist/rpm/altirra.spec ~/rpmbuild/SPECS/
+
+# Build (--with=check runs the test suite)
+rpmbuild -ba ~/rpmbuild/SPECS/altirra.spec
+```
+
+The built RPM will be at `~/rpmbuild/RPMS/x86_64/altirra-4.40-1.*.x86_64.rpm`. Install with:
+
+```bash
+sudo dnf install ~/rpmbuild/RPMS/x86_64/altirra-4.40-1.*.x86_64.rpm
+```
+
+Prerequisites (installed automatically during rpmbuild via BuildRequires):
+- Runtime: `SDL2`, `mesa-libGL`, `zlib`
+- Build: `cmake >= 3.20`, `gcc-c++ >= 13`, `ninja-build`, `mads`, `pkg-config`, `git`, `SDL2-devel`, `mesa-libGL-devel`, `zlib-devel`, `libxslt`
+- Recommended: `ffmpeg-free` (H.264 video recording)
+
+#### Debian / Ubuntu
+
+Build with `dpkg-buildpackage`:
+
+```bash
+# Install build tools
+sudo apt install build-essential debhelper devscripts
+
+# Copy the debian/ directory into the source root
+cp -r dist/debian .
+
+# Install build dependencies listed in debian/control
+sudo apt build-dep .
+
+# Build the package (from the source root)
+dpkg-buildpackage -us -uc -b
+```
+
+The `-us -uc` flags skip GPG signing (suitable for local builds). The built `.deb` will be in the parent directory. Install with:
+
+```bash
+sudo dpkg -i ../altirra_4.40-1_amd64.deb
+sudo apt install -f  # resolve any missing dependencies
+```
+
+Prerequisites (installed via `apt build-dep`):
+- Runtime: `libsdl2-2.0-0`, `libgl1`, `zlib1g` (pulled in automatically via `${shlibs:Depends}`)
+- Build: `debhelper-compat (= 13)`, `cmake >= 3.20`, `ninja-build`, `g++ >= 13`, `mads`, `pkg-config`, `git`, `libsdl2-dev`, `libgl-dev`, `zlib1g-dev`, `xsltproc`
+- Suggested: `ffmpeg` (H.264 video recording)
+
+#### What the Packages Install
+
+| Path | Contents |
+| ---- | -------- |
+| `/usr/bin/altirra` | Emulator binary |
+| `/usr/share/applications/altirra.desktop` | Desktop entry |
+| `/usr/share/icons/hicolor/{16x16,32x32,48x48}/apps/altirra.png` | Application icons |
+| `/usr/share/pixmaps/altirra.png` | Legacy icon fallback |
+| `/usr/share/metainfo/altirra.metainfo.xml` | AppStream metadata |
+| `/usr/share/doc/altirra/html/` | HTML help documentation (66 pages + images) |
+| `/usr/share/doc/altirra/LICENSE` | GPL-2.0-or-later license |
+| `/usr/share/doc/altirra/README.md` | This file |
+| `/usr/share/altirra/firmware/` | Empty directory for user-supplied ROM files |
+
+#### Note on MADS
+
+All three packaging specs list `mads` (6502/65816 macro assembler) as a build dependency. MADS is required to assemble the built-in AltirraOS kernel ROMs from source. It is available from http://mads.atari8.info/ and may need to be packaged separately or installed manually if not available in your distribution's repositories.
+
+If MADS is not found during the build, the emulator will still compile but will not include the built-in replacement firmware — you would need to provide original Atari ROM files.
 
 ## Usage
 

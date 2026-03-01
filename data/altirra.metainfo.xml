@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.pkilar.altirra</id>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <name>Altirra</name>
+  <summary>Atari 8-bit computer emulator</summary>
+  <description>
+    <p>
+      Altirra is a highly accurate Atari 8-bit computer emulator supporting the
+      Atari 400/800, XL, XE, and 5200 systems. It features cycle-accurate
+      emulation of all major chips (ANTIC, GTIA, POKEY, PIA), multiple CPU cores
+      (6502, 65C02, 65C816), and an integrated debugger.
+    </p>
+    <p>
+      Key features include built-in replacement firmware (AltirraOS), extensive
+      peripheral device support (disk drives, cassette, printers, modems,
+      hard drives), networking via emulated modem, video recording, and a
+      powerful debugging environment with disassembler, memory viewer, profiler,
+      and trace viewer.
+    </p>
+  </description>
+  <launchable type="desktop-id">altirra.desktop</launchable>
+  <url type="homepage">https://www.virtualdub.org/altirra.html</url>
+  <url type="bugtracker">https://github.com/pkilar/Altirra-4.40/issues</url>
+  <url type="vcs-browser">https://github.com/pkilar/Altirra-4.40</url>
+  <developer id="io.github.pkilar">
+    <name>Avery Lee (original), pkilar (Linux port)</name>
+  </developer>
+  <categories>
+    <category>Game</category>
+    <category>Emulator</category>
+  </categories>
+  <provides>
+    <binary>altirra</binary>
+  </provides>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="4.40" date="2025-01-01">
+      <description>
+        <p>Linux port of Altirra 4.40 with SDL2/OpenGL display, ImGui interface,
+        and full emulation feature parity.</p>
+      </description>
+    </release>
+  </releases>
+</component>

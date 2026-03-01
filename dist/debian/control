@@ -1,0 +1,32 @@
+Source: altirra
+Section: otherosfs
+Priority: optional
+Maintainer: pkilar <pkilar@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.20),
+               ninja-build,
+               g++ (>= 13),
+               mads,
+               pkg-config,
+               git,
+               libsdl2-dev,
+               libgl-dev,
+               zlib1g-dev,
+               xsltproc
+Standards-Version: 4.6.2
+Homepage: https://www.virtualdub.org/altirra.html
+Vcs-Browser: https://github.com/pkilar/Altirra-4.40
+Vcs-Git: https://github.com/pkilar/Altirra-4.40.git
+Rules-Requires-Root: no
+
+Package: altirra
+Architecture: amd64
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Suggests: ffmpeg
+Description: Atari 8-bit computer emulator (800/XL/XE/5200)
+ Altirra is a highly accurate Atari 8-bit computer emulator supporting the
+ Atari 400/800, XL, XE, and 5200 systems. It features cycle-accurate emulation
+ of all major chips (ANTIC, GTIA, POKEY, PIA), multiple CPU cores (6502, 65C02,
+ 65C816), built-in replacement firmware (AltirraOS), extensive peripheral device
+ support, and an integrated debugger with disassembler, profiler, and trace
+ viewer.

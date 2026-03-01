@@ -8,3 +8,5 @@ Icon=altirra
 Categories=Game;Emulator;
 MimeType=application/x-atari-disk;
 Terminal=false
+Keywords=Atari;8-bit;800;XL;XE;5200;emulator;retro;
+StartupWMClass=altirra
