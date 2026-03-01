@@ -680,6 +680,12 @@ static void HandleShortcuts(const SDL_Event& event) {
 					ATImGuiShowToast("Resumed");
 				} else {
 					g_sim.Pause();
+					// Suppress the auto-show overlay that normally activates
+					// when emulation enters stopped state (for debugger
+					// breakpoints).  User-initiated pause via F9 should NOT
+					// pop up the overlay.
+					g_debuggerAutoShowed = true;
+					ATImGuiDebuggerDidBreak();
 					ATImGuiShowToast("Paused");
 				}
 			}
