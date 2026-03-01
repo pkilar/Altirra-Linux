@@ -21,8 +21,8 @@ build() {
 }
 
 check() {
-	cd "$srcdir/Altirra-$pkgver"
-	build/src/ATTest/attest all
+	cd "$srcdir/Altirra-$pkgver/build/src"
+	ATTest/attest all
 }
 
 package() {
