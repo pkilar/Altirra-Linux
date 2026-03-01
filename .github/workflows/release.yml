@@ -59,6 +59,8 @@ jobs:
             "Altirra-Linux-${VERSION}/dist/arch/PKGBUILD" \
             --strip-components=3
           sed -i "s|^source=.*|source=(\"altirra-${VERSION}.tar.gz\")|" PKGBUILD
+          # Remove mads from makedepends — already built from source above
+          sed -i "s/'mads' //" PKGBUILD
 
       - name: Create builder user
         run: |
@@ -104,10 +106,13 @@ jobs:
       - name: Set up rpmbuild tree
         run: |
           rpmdev-setuptree
+          mkdir -p /root/rpmbuild/SOURCES
           cp "altirra-${VERSION}.tar.gz" "/root/rpmbuild/SOURCES/altirra-${VERSION}.tar.gz"
           tar xf "altirra-${VERSION}.tar.gz" \
             "Altirra-Linux-${VERSION}/dist/rpm/altirra.spec" \
             --strip-components=3
+          # Remove mads from BuildRequires — already built from source above
+          sed -i '/^BuildRequires:.*mads$/d' altirra.spec
           cp altirra.spec /root/rpmbuild/SPECS/
 
       - name: Build RPM
@@ -153,7 +158,8 @@ jobs:
           tar xf "altirra-${VERSION}.tar.gz"
           cd "Altirra-Linux-${VERSION}"
           cp -r dist/debian debian
-          dpkg-buildpackage -us -uc -b
+          # -d: skip dep check (mads built from source, g++-14 satisfies g++)
+          dpkg-buildpackage -us -uc -b -d
 
       - uses: actions/upload-artifact@v4
         with:
