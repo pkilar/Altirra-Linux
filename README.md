@@ -2,7 +2,7 @@
 
 An unofficial Linux port of [Altirra](https://virtualdub.org/altirra.html), a cycle-accurate Atari 8-bit computer emulator (800/XL/XE/5200) by Avery Lee.
 
-This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and Dear ImGui, replacing the Windows-native UI and display layers while keeping the emulation engine unchanged.
+This port brings Altirra's full emulation core to Linux using SDL3, OpenGL, and Dear ImGui, replacing the Windows-native UI and display layers while keeping the emulation engine unchanged.
 
 ## Features
 
@@ -21,9 +21,9 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 
 ### Linux Frontend
 
-- **Display**: SDL2 + OpenGL with bilinear/point filtering, multiple stretch modes (aspect-preserving, square pixels, integral scaling), PAR correction, HiDPI support, adaptive vsync
-- **Audio**: SDL2 audio output with POKEY emulation
-- **Input**: SDL2 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
+- **Display**: SDL3 + OpenGL with bilinear/point filtering, multiple stretch modes (aspect-preserving, square pixels, integral scaling), PAR correction, HiDPI support, adaptive vsync
+- **Audio**: SDL3 audio output with POKEY emulation
+- **Input**: SDL3 keyboard + joystick/gamepad mapping with configurable bindings and key/button capture editor
 - **UI**: Full Dear ImGui interface with menus, dialogs, tools, and configuration
 - **Debugger**: Integrated ImGui debugger with registers, disassembly, memory viewer, watch expressions, call stack, history, breakpoints, source-level debugging, console, hardware register inspection, CPU target switching, CPU profiler with timeline/call graph/function detail, trace viewer, and runtime performance overlay
 - **Tools**: Export ROM set, compatibility database browser with search/filter, cassette tape editor with waveform display, SAP to EXE converter, tape decoding analysis
@@ -86,7 +86,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 - CMake 3.20+
 - GCC 13+ or Clang 16+ (C++23 required)
 - Ninja (recommended) or Make
-- SDL2 development libraries
+- SDL3 development libraries
 - OpenGL development libraries
 - Git (for Dear ImGui fetch)
 - FFmpeg development libraries (optional, enables H.264+AAC video recording)
@@ -94,7 +94,7 @@ This port brings Altirra's full emulation core to Linux using SDL2, OpenGL, and 
 #### Debian/Ubuntu
 
 ```bash
-sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev git xsltproc
+sudo apt install build-essential cmake ninja-build libsdl3-dev libgl-dev git xsltproc
 
 # Optional: H.264 video recording
 sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
@@ -103,7 +103,7 @@ sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev lib
 #### Arch Linux
 
 ```bash
-sudo pacman -S base-devel cmake ninja sdl2 mesa git libxslt
+sudo pacman -S base-devel cmake ninja sdl3 mesa git libxslt
 
 # Optional: H.264 video recording
 sudo pacman -S ffmpeg
@@ -112,7 +112,7 @@ sudo pacman -S ffmpeg
 #### Fedora
 
 ```bash
-sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel git libxslt
+sudo dnf install gcc-c++ cmake ninja-build SDL3-devel mesa-libGL-devel git libxslt
 
 # Optional: H.264 video recording
 sudo dnf install ffmpeg-free-devel
@@ -174,7 +174,7 @@ makepkg -si
 `makepkg -si` will build the package and install it with `pacman`. The `-s` flag auto-installs missing dependencies. To build without installing, use `makepkg` alone — the resulting `.pkg.tar.zst` will be in the same directory.
 
 Prerequisites (installed automatically by `makepkg -s`):
-- Runtime: `sdl2`, `mesa`, `zlib`
+- Runtime: `sdl3`, `mesa`, `zlib`
 - Build: `cmake`, `ninja`, `mads`, `gcc`, `git`, `pkg-config`, `libxslt`
 - Optional: `ffmpeg` (H.264 video recording)
 
@@ -206,8 +206,8 @@ sudo dnf install ~/rpmbuild/RPMS/x86_64/altirra-4.40-1.*.x86_64.rpm
 ```
 
 Prerequisites (installed automatically during rpmbuild via BuildRequires):
-- Runtime: `SDL2`, `mesa-libGL`, `zlib`
-- Build: `cmake >= 3.20`, `gcc-c++ >= 13`, `ninja-build`, `mads`, `pkg-config`, `git`, `SDL2-devel`, `mesa-libGL-devel`, `zlib-devel`, `libxslt`
+- Runtime: `SDL3`, `mesa-libGL`, `zlib`
+- Build: `cmake >= 3.20`, `gcc-c++ >= 13`, `ninja-build`, `mads`, `pkg-config`, `git`, `SDL3-devel`, `mesa-libGL-devel`, `zlib-devel`, `libxslt`
 - Recommended: `ffmpeg-free` (H.264 video recording)
 
 #### Debian / Ubuntu
@@ -236,8 +236,8 @@ sudo apt install -f  # resolve any missing dependencies
 ```
 
 Prerequisites (installed via `apt build-dep`):
-- Runtime: `libsdl2-2.0-0`, `libgl1`, `zlib1g` (pulled in automatically via `${shlibs:Depends}`)
-- Build: `debhelper-compat (= 13)`, `cmake >= 3.20`, `ninja-build`, `g++ >= 13`, `mads`, `pkg-config`, `git`, `libsdl2-dev`, `libgl-dev`, `zlib1g-dev`, `xsltproc`
+- Runtime: `libsdl3-0`, `libgl1`, `zlib1g` (pulled in automatically via `${shlibs:Depends}`)
+- Build: `debhelper-compat (= 13)`, `cmake >= 3.20`, `ninja-build`, `g++ >= 13`, `mads`, `pkg-config`, `git`, `libsdl3-dev`, `libgl-dev`, `zlib1g-dev`, `xsltproc`
 - Suggested: `ffmpeg` (H.264 video recording)
 
 #### What the Packages Install
@@ -354,13 +354,13 @@ cmake/
   FetchImGui.cmake                      # Dear ImGui v1.91.8 auto-download
 src/
   AltirraLinux/source/
-    main_linux.cpp                      # Entry point, SDL2 window, main loop, settings
+    main_linux.cpp                      # Entry point, SDL3 window, main loop, settings
     stubs_linux.cpp                     # Implementations for Windows-only interfaces
     console_linux.cpp                   # Debug console, source window bridge
   AltirraShell/source/
     emulator_imgui.cpp                  # ImGui UI (menus, dialogs, status bar)
     debugger_imgui.cpp                  # ImGui debugger windows
-    display_sdl2.cpp                    # SDL2+OpenGL display backend
+    display_sdl3.cpp                    # SDL3+OpenGL display backend
   system/                               # VirtualDub-derived platform abstraction
   ATCore/                               # Device framework, schedulers, VFS
   ATCPU/                                # CPU emulators (6502, Z80, 6809, etc.)
@@ -384,4 +384,4 @@ This Linux port maintains the same license. The port modifies no emulation core 
 
 - **Avery Lee** — Altirra emulator author and all emulation core code
 - **Dear ImGui** — Immediate-mode GUI library by Omar Cornut ([ocornut/imgui](https://github.com/ocornut/imgui))
-- **SDL2** — Cross-platform multimedia library ([libsdl.org](https://www.libsdl.org/))
+- **SDL3** — Cross-platform multimedia library ([libsdl.org](https://www.libsdl.org/))

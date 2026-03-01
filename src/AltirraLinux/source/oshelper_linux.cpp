@@ -38,7 +38,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 // Resource loading — on Linux, kernel ROMs are not embedded as Win32 resources.
 // The firmware manager handles loading from external files.

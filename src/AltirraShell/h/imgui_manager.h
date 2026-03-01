@@ -5,7 +5,8 @@
 
 struct SDL_Window;
 union SDL_Event;
-typedef void *SDL_GLContext;
+struct SDL_GLContextState;
+typedef struct SDL_GLContextState *SDL_GLContext;
 
 class ATImGuiManager {
 public:

@@ -35,7 +35,7 @@
 #include "resource.h"
 #include "simulator.h"
 #include "virtualscreen.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 class ATUIEnhancedTextEngine final : public IATUIEnhancedTextEngine, public IATDeviceVideoOutput {
 	ATUIEnhancedTextEngine(const ATUIEnhancedTextEngine&) = delete;
@@ -457,8 +457,8 @@ bool ATUIEnhancedTextEngine::OnKeyDown(uint32 keyCode) {
 				if (vs) {
 					// Use SDL_GetModState() instead of Windows GetKeyState()
 					SDL_Keymod mod = SDL_GetModState();
-					bool shift = (mod & KMOD_SHIFT) != 0;
-					bool ctrl = (mod & KMOD_CTRL) != 0;
+					bool shift = (mod & SDL_KMOD_SHIFT) != 0;
+					bool ctrl = (mod & SDL_KMOD_CTRL) != 0;
 
 					if (shift) {
 						if (!ctrl) {

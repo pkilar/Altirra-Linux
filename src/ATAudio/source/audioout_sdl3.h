@@ -15,11 +15,11 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef AT_AUDIOOUT_SDL2_H
-#define AT_AUDIOOUT_SDL2_H
+#ifndef AT_AUDIOOUT_SDL3_H
+#define AT_AUDIOOUT_SDL3_H
 
 class IVDAudioOutput;
 
-IVDAudioOutput *VDCreateAudioOutputSDL2();
+IVDAudioOutput *VDCreateAudioOutputSDL3();
 
 #endif

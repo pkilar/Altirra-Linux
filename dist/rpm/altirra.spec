@@ -12,12 +12,12 @@ BuildRequires:  ninja-build
 BuildRequires:  mads
 BuildRequires:  pkg-config
 BuildRequires:  git
-BuildRequires:  SDL2-devel
+BuildRequires:  SDL3-devel
 BuildRequires:  mesa-libGL-devel
 BuildRequires:  zlib-devel
 BuildRequires:  libxslt
 
-Requires:       SDL2
+Requires:       SDL3
 Requires:       mesa-libGL
 Requires:       zlib
 

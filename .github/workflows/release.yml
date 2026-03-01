@@ -44,7 +44,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm --needed \
-            cmake ninja gcc sdl2 mesa zlib libxslt fpc git
+            cmake ninja gcc sdl3 mesa zlib libxslt fpc git
 
       - name: Build MADS assembler
         run: |
@@ -93,7 +93,7 @@ jobs:
           dnf install -y \
             rpm-build rpmdevtools \
             cmake gcc-c++ ninja-build \
-            SDL2-devel mesa-libGL-devel zlib-devel \
+            SDL3-devel mesa-libGL-devel zlib-devel \
             libxslt fpc git
 
       - name: Build MADS assembler
@@ -142,7 +142,7 @@ jobs:
           apt-get install -y --no-install-recommends \
             build-essential debhelper devscripts \
             cmake ninja-build g++-14 \
-            libsdl2-dev libgl-dev zlib1g-dev \
+            libsdl3-dev libgl-dev zlib1g-dev \
             xsltproc fp-compiler git ca-certificates
 
       - name: Build MADS assembler

@@ -51,10 +51,10 @@
 #include <at/atui/uimanager.h>
 #include <at/atui/uicommandmanager.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <error_imgui.h>
 #include <emulator_imgui.h>
-#include "display_sdl2.h"
+#include "display_sdl3.h"
 #include <at/atio/partitiontable.h>
 #include <at/atio/partitiondiskview.h>
 
@@ -280,13 +280,13 @@ void ATUISetConstrainMouseFullScreen(bool v) {
 	extern SDL_Window *ATGetLinuxWindow();
 	SDL_Window *w = ATGetLinuxWindow();
 	if (w && ATUIGetFullscreen())
-		SDL_SetWindowGrab(w, v ? SDL_TRUE : SDL_FALSE);
+		SDL_SetWindowMouseGrab(w, v);
 }
 void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) {
 	s_displayFilterMode = m;
-	extern ATDisplaySDL2 *ATGetLinuxDisplay();
-	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	extern ATDisplaySDL3 *ATGetLinuxDisplay();
+	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 	if (disp) {
 		IVDVideoDisplay::FilterMode fm =
 			(m == kATDisplayFilterMode_Point)
@@ -300,8 +300,8 @@ void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
 void ATUISetDisplayPanOffset(const vdfloat2& v) { s_displayPanOffset = v; }
 void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	s_displayStretchMode = m;
-	extern ATDisplaySDL2 *ATGetLinuxDisplay();
-	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	extern ATDisplaySDL3 *ATGetLinuxDisplay();
+	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 	if (disp)
 		disp->SetStretchMode(m);
 }
@@ -328,7 +328,7 @@ static ATLinuxEnhancedTextOutput g_enhancedTextOutput;
 
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 	extern ATSimulator g_sim;
-	extern ATDisplaySDL2 *ATGetLinuxDisplay();
+	extern ATDisplaySDL3 *ATGetLinuxDisplay();
 
 	ATUIEnhancedTextMode oldMode = s_enhancedTextMode;
 	s_enhancedTextMode = v;
@@ -371,7 +371,7 @@ void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 			g_pEnhancedTextEngine->Init(&g_enhancedTextOutput, &g_sim);
 
 			// Initialize with current window size
-			ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+			ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 			if (disp) {
 				int w = 0, h = 0;
 				disp->GetWindowSize(w, h);
@@ -387,7 +387,7 @@ static void ApplyVSyncSetting() {
 		SDL_GL_SetSwapInterval(0);
 	} else if (s_frameRateVSyncAdaptive) {
 		// -1 = adaptive vsync: tear if late, sync otherwise
-		if (SDL_GL_SetSwapInterval(-1) < 0)
+		if (!SDL_GL_SetSwapInterval(-1))
 			SDL_GL_SetSwapInterval(1);  // fallback to regular vsync
 	} else {
 		SDL_GL_SetSwapInterval(1);
@@ -535,7 +535,7 @@ bool ATUIGetAppActive() { return s_appActive; }
 void ATUISetAppActive(bool active) { s_appActive = active; }
 
 bool ATUIClipIsTextAvailable() {
-	return SDL_HasClipboardText() == SDL_TRUE;
+	return SDL_HasClipboardText();
 }
 
 bool ATUIClipGetText(VDStringA& s8, VDStringW& s16, bool& use16) {

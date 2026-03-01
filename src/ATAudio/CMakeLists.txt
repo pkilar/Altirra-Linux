@@ -21,10 +21,10 @@ if(WIN32)
 		source/audiooutxa2.cpp
 	)
 else()
-	find_package(SDL2 REQUIRED)
+	find_package(SDL3 REQUIRED)
 	list(APPEND ATAUDIO_SOURCES
 		source/audiooutput.cpp
-		source/audioout_sdl2.cpp
+		source/audioout_sdl3.cpp
 	)
 endif()
 
@@ -41,5 +41,5 @@ target_include_directories(ataudio
 target_link_libraries(ataudio PUBLIC system atcore)
 
 if(NOT WIN32)
-	target_link_libraries(ataudio PRIVATE SDL2::SDL2)
+	target_link_libraries(ataudio PRIVATE SDL3::SDL3)
 endif()

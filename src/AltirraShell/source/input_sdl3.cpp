@@ -15,39 +15,39 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#include <input_sdl2.h>
+#include <input_sdl3.h>
 #include <inputmanager.h>
 #include <inputdefs.h>
 #include <cstring>
 
-ATInputSDL2::ATInputSDL2() {
+ATInputSDL3::ATInputSDL3() {
 }
 
-ATInputSDL2::~ATInputSDL2() {
+ATInputSDL3::~ATInputSDL3() {
 	Shutdown();
 }
 
-void ATInputSDL2::Init(ATInputManager *inputMan) {
+void ATInputSDL3::Init(ATInputManager *inputMan) {
 	mpInputManager = inputMan;
 
 	// Register keyboard input unit
 	ATInputUnitIdentifier keyboardId;
 	memset(&keyboardId, 0, sizeof(keyboardId));
-	memcpy(keyboardId.buf, "sdl2_keyboard", 13);
-	mKeyboardUnit = mpInputManager->RegisterInputUnit(keyboardId, L"SDL2 Keyboard", nullptr);
+	memcpy(keyboardId.buf, "sdl3_keyboard", 13);
+	mKeyboardUnit = mpInputManager->RegisterInputUnit(keyboardId, L"SDL3 Keyboard", nullptr);
 
 	// Register mouse input unit
 	ATInputUnitIdentifier mouseId;
 	memset(&mouseId, 0, sizeof(mouseId));
-	memcpy(mouseId.buf, "sdl2_mouse\0\0\0\0\0", 15);
-	mMouseUnit = mpInputManager->RegisterInputUnit(mouseId, L"SDL2 Mouse", nullptr);
+	memcpy(mouseId.buf, "sdl3_mouse\0\0\0\0\0", 15);
+	mMouseUnit = mpInputManager->RegisterInputUnit(mouseId, L"SDL3 Mouse", nullptr);
 }
 
-void ATInputSDL2::Shutdown() {
-	// Close all open controllers
+void ATInputSDL3::Shutdown() {
+	// Close all open gamepads
 	for (auto& entry : mControllers) {
 		if (entry.mpController)
-			SDL_GameControllerClose(entry.mpController);
+			SDL_CloseGamepad(entry.mpController);
 	}
 	mControllers.clear();
 
@@ -64,7 +64,7 @@ void ATInputSDL2::Shutdown() {
 	}
 }
 
-uint32 ATInputSDL2::TranslateSDLScancode(SDL_Scancode sc) {
+uint32 ATInputSDL3::TranslateSDLScancode(SDL_Scancode sc) {
 	switch (sc) {
 		// Letters
 		case SDL_SCANCODE_A: return kATInputCode_KeyA;
@@ -185,15 +185,15 @@ uint32 ATInputSDL2::TranslateSDLScancode(SDL_Scancode sc) {
 	}
 }
 
-bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
+bool ATInputSDL3::ProcessEvent(const SDL_Event& event) {
 	if (!mpInputManager)
 		return false;
 
 	switch (event.type) {
-		case SDL_KEYDOWN: {
+		case SDL_EVENT_KEY_DOWN: {
 			if (event.key.repeat)
 				return false;
-			uint32 code = TranslateSDLScancode(event.key.keysym.scancode);
+			uint32 code = TranslateSDLScancode(event.key.scancode);
 			if (code != kATInputCode_None) {
 				mpInputManager->OnButtonDown(mKeyboardUnit, code);
 				return true;
@@ -201,8 +201,8 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return false;
 		}
 
-		case SDL_KEYUP: {
-			uint32 code = TranslateSDLScancode(event.key.keysym.scancode);
+		case SDL_EVENT_KEY_UP: {
+			uint32 code = TranslateSDLScancode(event.key.scancode);
 			if (code != kATInputCode_None) {
 				mpInputManager->OnButtonUp(mKeyboardUnit, code);
 				return true;
@@ -210,12 +210,12 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return false;
 		}
 
-		case SDL_MOUSEMOTION: {
+		case SDL_EVENT_MOUSE_MOTION: {
 			mpInputManager->OnMouseMove(mMouseUnit, event.motion.xrel, event.motion.yrel);
 			return true;
 		}
 
-		case SDL_MOUSEBUTTONDOWN: {
+		case SDL_EVENT_MOUSE_BUTTON_DOWN: {
 			uint32 code;
 			switch (event.button.button) {
 				case SDL_BUTTON_LEFT:   code = kATInputCode_MouseLMB; break;
@@ -229,7 +229,7 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return true;
 		}
 
-		case SDL_MOUSEBUTTONUP: {
+		case SDL_EVENT_MOUSE_BUTTON_UP: {
 			uint32 code;
 			switch (event.button.button) {
 				case SDL_BUTTON_LEFT:   code = kATInputCode_MouseLMB; break;
@@ -243,39 +243,32 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return true;
 		}
 
-		case SDL_MOUSEWHEEL: {
-			if (event.wheel.y != 0) {
-				float delta = (float)event.wheel.y;
-				if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
-					delta = -delta;
-				mpInputManager->OnMouseWheel(mMouseUnit, delta);
-			}
-			if (event.wheel.x != 0) {
-				float delta = (float)event.wheel.x;
-				if (event.wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
-					delta = -delta;
-				mpInputManager->OnMouseHWheel(mMouseUnit, delta);
-			}
+		case SDL_EVENT_MOUSE_WHEEL: {
+			// SDL3 normalizes scroll direction — no FLIPPED check needed
+			if (event.wheel.y != 0)
+				mpInputManager->OnMouseWheel(mMouseUnit, event.wheel.y);
+			if (event.wheel.x != 0)
+				mpInputManager->OnMouseHWheel(mMouseUnit, event.wheel.x);
 			return true;
 		}
 
-		case SDL_CONTROLLERAXISMOTION: {
-			// Find the controller entry
+		case SDL_EVENT_GAMEPAD_AXIS_MOTION: {
+			// Find the gamepad entry
 			for (const auto& entry : mControllers) {
-				if (entry.mInstanceID == event.caxis.which) {
+				if (entry.mInstanceID == event.gaxis.which) {
 					// Map SDL axis to ATInputCode axis
 					// SDL axis range: -32768..32767, ATInputCode expects 16:16 fixed point (-65536..65536)
-					sint32 rawValue = event.caxis.value;
+					sint32 rawValue = event.gaxis.value;
 					sint32 scaledValue = rawValue * 2;  // Scale to approximately +-65536
 
 					uint32 axisCode;
-					switch (event.caxis.axis) {
-						case SDL_CONTROLLER_AXIS_LEFTX:       axisCode = kATInputCode_JoyHoriz1; break;
-						case SDL_CONTROLLER_AXIS_LEFTY:        axisCode = kATInputCode_JoyVert1; break;
-						case SDL_CONTROLLER_AXIS_RIGHTX:       axisCode = kATInputCode_JoyHoriz3; break;
-						case SDL_CONTROLLER_AXIS_RIGHTY:       axisCode = kATInputCode_JoyVert3; break;
-						case SDL_CONTROLLER_AXIS_TRIGGERLEFT:  axisCode = kATInputCode_JoyVert2; break;
-						case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:  axisCode = kATInputCode_JoyVert4; break;
+					switch (event.gaxis.axis) {
+						case SDL_GAMEPAD_AXIS_LEFTX:         axisCode = kATInputCode_JoyHoriz1; break;
+						case SDL_GAMEPAD_AXIS_LEFTY:         axisCode = kATInputCode_JoyVert1; break;
+						case SDL_GAMEPAD_AXIS_RIGHTX:        axisCode = kATInputCode_JoyHoriz3; break;
+						case SDL_GAMEPAD_AXIS_RIGHTY:        axisCode = kATInputCode_JoyVert3; break;
+						case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:  axisCode = kATInputCode_JoyVert2; break;
+						case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: axisCode = kATInputCode_JoyVert4; break;
 						default: return false;
 					}
 
@@ -286,12 +279,12 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return false;
 		}
 
-		case SDL_CONTROLLERBUTTONDOWN:
-		case SDL_CONTROLLERBUTTONUP: {
+		case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+		case SDL_EVENT_GAMEPAD_BUTTON_UP: {
 			for (const auto& entry : mControllers) {
-				if (entry.mInstanceID == event.cbutton.which) {
-					uint32 code = kATInputCode_JoyButton0 + event.cbutton.button;
-					if (event.type == SDL_CONTROLLERBUTTONDOWN)
+				if (entry.mInstanceID == event.gbutton.which) {
+					uint32 code = kATInputCode_JoyButton0 + event.gbutton.button;
+					if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
 						mpInputManager->OnButtonDown(entry.mInputUnit, code);
 					else
 						mpInputManager->OnButtonUp(entry.mInputUnit, code);
@@ -301,12 +294,12 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 			return false;
 		}
 
-		case SDL_CONTROLLERDEVICEADDED:
-			OnControllerAdded(event.cdevice.which);
+		case SDL_EVENT_GAMEPAD_ADDED:
+			OnGamepadAdded(event.gdevice.which);
 			return true;
 
-		case SDL_CONTROLLERDEVICEREMOVED:
-			OnControllerRemoved(event.cdevice.which);
+		case SDL_EVENT_GAMEPAD_REMOVED:
+			OnGamepadRemoved(event.gdevice.which);
 			return true;
 
 		default:
@@ -314,35 +307,30 @@ bool ATInputSDL2::ProcessEvent(const SDL_Event& event) {
 	}
 }
 
-void ATInputSDL2::OnControllerAdded(int joystickIndex) {
-	if (!SDL_IsGameController(joystickIndex))
-		return;
-
-	SDL_GameController *controller = SDL_GameControllerOpen(joystickIndex);
-	if (!controller)
-		return;
-
-	SDL_JoystickID instanceID = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(controller));
-
+void ATInputSDL3::OnGamepadAdded(SDL_JoystickID instanceID) {
 	// Check if already registered
 	for (const auto& entry : mControllers) {
 		if (entry.mInstanceID == instanceID)
 			return;
 	}
 
-	// Register input unit for this controller
+	SDL_Gamepad *gamepad = SDL_OpenGamepad(instanceID);
+	if (!gamepad)
+		return;
+
+	// Register input unit for this gamepad
 	ATInputUnitIdentifier joyId;
 	memset(&joyId, 0, sizeof(joyId));
-	snprintf(joyId.buf, sizeof(joyId.buf), "sdl2_joy%d", (int)instanceID);
+	snprintf(joyId.buf, sizeof(joyId.buf), "sdl3_pad%d", (int)instanceID);
 
-	const char *name = SDL_GameControllerName(controller);
+	const char *name = SDL_GetGamepadName(gamepad);
 	wchar_t wname[64];
 	if (name) {
 		for (int i = 0; i < 63 && name[i]; ++i)
 			wname[i] = (wchar_t)name[i];
 		wname[63] = 0;
 	} else {
-		wcscpy(wname, L"SDL2 Controller");
+		wcscpy(wname, L"SDL3 Gamepad");
 	}
 
 	int unit = -1;
@@ -350,19 +338,19 @@ void ATInputSDL2::OnControllerAdded(int joystickIndex) {
 		unit = mpInputManager->RegisterInputUnit(joyId, wname, nullptr);
 
 	ControllerEntry entry;
-	entry.mpController = controller;
+	entry.mpController = gamepad;
 	entry.mInstanceID = instanceID;
 	entry.mInputUnit = unit;
 	mControllers.push_back(entry);
 }
 
-void ATInputSDL2::OnControllerRemoved(SDL_JoystickID instanceID) {
+void ATInputSDL3::OnGamepadRemoved(SDL_JoystickID instanceID) {
 	for (auto it = mControllers.begin(); it != mControllers.end(); ++it) {
 		if (it->mInstanceID == instanceID) {
 			if (mpInputManager && it->mInputUnit >= 0)
 				mpInputManager->UnregisterInputUnit(it->mInputUnit);
 			if (it->mpController)
-				SDL_GameControllerClose(it->mpController);
+				SDL_CloseGamepad(it->mpController);
 			mControllers.erase(it);
 			return;
 		}

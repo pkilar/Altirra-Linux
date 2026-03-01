@@ -58,8 +58,8 @@
 #include "versioninfo.h"
 #include "inputmap.h"
 
-#include <display_sdl2.h>
-#include <input_sdl2.h>
+#include <display_sdl3.h>
+#include <input_sdl3.h>
 #include <imgui_manager.h>
 #include <debugger_imgui.h>
 #include <emulator_imgui.h>
@@ -68,7 +68,7 @@
 #include <at/atcore/devicevideo.h>
 #include <at/atui/uiwidget.h>
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <GL/gl.h>
 
 #include <vd2/system/time.h>
@@ -102,16 +102,16 @@ IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine();
 ATSimulator g_sim;
 
 // Display
-static ATDisplaySDL2 *g_pDisplay = nullptr;
+static ATDisplaySDL3 *g_pDisplay = nullptr;
 
 // Input
-static ATInputSDL2 *g_pInput = nullptr;
+static ATInputSDL3 *g_pInput = nullptr;
 
 // ImGui manager (also referenced by console_linux.cpp)
 ATImGuiManager *g_pImGui = nullptr;
 
-// Joystick manager factory (defined in joystick_sdl2.cpp)
-IATJoystickManager *ATCreateJoystickManagerSDL2();
+// Joystick manager factory (defined in joystick_sdl3.cpp)
+IATJoystickManager *ATCreateJoystickManagerSDL3();
 
 // Fullscreen callback and state (defined in stubs_linux.cpp)
 void ATSetFullscreenCallback(void (*pfn)(bool));
@@ -179,9 +179,9 @@ static void CrashSignalHandler(int sig) {
 }
 
 // Mouse pointer auto-hide state
-static Uint32 g_lastMouseMoveTime = 0;
+static uint32_t g_lastMouseMoveTime = 0;
 static bool g_cursorHidden = false;
-static const Uint32 kCursorHideDelayMs = 3000;
+static const uint32_t kCursorHideDelayMs = 3000;
 
 // Tracks whether we paused due to window losing focus (vs. user manual pause)
 static bool g_pausedByInactive = false;
@@ -191,7 +191,7 @@ static bool g_pausedByInactive = false;
 static bool g_debuggerAutoShowed = false;
 
 // Global accessor for the display backend — used by emulator_imgui.cpp
-ATDisplaySDL2 *ATGetLinuxDisplay() { return g_pDisplay; }
+ATDisplaySDL3 *ATGetLinuxDisplay() { return g_pDisplay; }
 
 // SDL window pointer for fullscreen toggle callback
 static SDL_Window *g_pWindow = nullptr;
@@ -201,8 +201,8 @@ SDL_Window *ATGetLinuxWindow() { return g_pWindow; }
 
 static void SetFullscreenImpl(bool fs) {
 	if (g_pWindow) {
-		SDL_SetWindowFullscreen(g_pWindow, fs ? SDL_WINDOW_FULLSCREEN_DESKTOP : 0);
-		SDL_SetWindowGrab(g_pWindow, (fs && ATUIGetConstrainMouseFullScreen()) ? SDL_TRUE : SDL_FALSE);
+		SDL_SetWindowFullscreen(g_pWindow, fs);
+		SDL_SetWindowMouseGrab(g_pWindow, fs && ATUIGetConstrainMouseFullScreen());
 	}
 }
 
@@ -397,7 +397,7 @@ static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
 ///////////////////////////////////////////////////////////////////////////
 
 static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscreen) {
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER | SDL_INIT_TIMER) < 0) {
+	if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMEPAD)) {
 		fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
 		return false;
 	}
@@ -406,9 +406,9 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 
-	uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_SHOWN | SDL_WINDOW_ALLOW_HIGHDPI;
+	SDL_WindowFlags windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
 	if (fullscreen)
-		windowFlags |= SDL_WINDOW_FULLSCREEN_DESKTOP;
+		windowFlags |= SDL_WINDOW_FULLSCREEN;
 
 	// Restore saved window geometry, or use defaults (2x NTSC resolution)
 	int winX = SDL_WINDOWPOS_CENTERED;
@@ -416,6 +416,7 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 	int winW = 912;
 	int winH = 524;
 	bool winMaximized = false;
+	bool hasPosition = false;
 
 	VDRegistryAppKey key("Window", false);
 	if (key.getInt("Width", 0) > 0) {
@@ -424,43 +425,44 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 		winX = key.getInt("X", SDL_WINDOWPOS_CENTERED);
 		winY = key.getInt("Y", SDL_WINDOWPOS_CENTERED);
 		winMaximized = key.getBool("Maximized", false);
+		hasPosition = (winX != SDL_WINDOWPOS_CENTERED);
 
 		// Sanity check: ensure window is at least partially visible
-		int numDisplays = SDL_GetNumVideoDisplays();
-		if (numDisplays > 0 && winX != SDL_WINDOWPOS_CENTERED) {
-			SDL_Rect bounds;
-			bool onScreen = false;
-			for (int i = 0; i < numDisplays; ++i) {
-				if (SDL_GetDisplayBounds(i, &bounds) == 0) {
-					if (winX + winW > bounds.x && winX < bounds.x + bounds.w &&
-						winY + winH > bounds.y && winY < bounds.y + bounds.h) {
-						onScreen = true;
-						break;
+		if (hasPosition) {
+			int numDisplays = 0;
+			SDL_DisplayID *displays = SDL_GetDisplays(&numDisplays);
+			if (displays && numDisplays > 0) {
+				SDL_Rect bounds;
+				bool onScreen = false;
+				for (int i = 0; i < numDisplays; ++i) {
+					if (SDL_GetDisplayBounds(displays[i], &bounds)) {
+						if (winX + winW > bounds.x && winX < bounds.x + bounds.w &&
+							winY + winH > bounds.y && winY < bounds.y + bounds.h) {
+							onScreen = true;
+							break;
+						}
 					}
 				}
+				if (!onScreen)
+					hasPosition = false;
 			}
-			if (!onScreen) {
-				winX = SDL_WINDOWPOS_CENTERED;
-				winY = SDL_WINDOWPOS_CENTERED;
-			}
+			SDL_free(displays);
 		}
 	}
 
 	if (winMaximized && !fullscreen)
 		windowFlags |= SDL_WINDOW_MAXIMIZED;
 
-	window = SDL_CreateWindow(
-		"Altirra (Linux)",
-		winX,
-		winY,
-		winW, winH,
-		windowFlags
-	);
+	window = SDL_CreateWindow("Altirra (Linux)", winW, winH, windowFlags);
 
 	if (!window) {
 		fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
 		return false;
 	}
+
+	// Set window position (SDL3 CreateWindow no longer accepts x,y)
+	if (hasPosition)
+		SDL_SetWindowPosition(window, winX, winY);
 
 	glContext = SDL_GL_CreateContext(window);
 	if (!glContext) {
@@ -470,7 +472,7 @@ static bool InitSDL(SDL_Window *&window, SDL_GLContext &glContext, bool fullscre
 
 	// Enable vsync (adaptive if supported and configured)
 	if (ATUIGetFrameRateVSyncAdaptive()) {
-		if (SDL_GL_SetSwapInterval(-1) < 0)
+		if (!SDL_GL_SetSwapInterval(-1))
 			SDL_GL_SetSwapInterval(1);
 	} else {
 		SDL_GL_SetSwapInterval(1);
@@ -538,16 +540,16 @@ static void HandleSpecialKey(uint32 scanCode, bool state) {
 }
 
 static void ProcessAtariKeyboard(const SDL_Event& event) {
-	if (event.type == SDL_KEYDOWN) {
-		uint32 vk = ATInputSDL2::TranslateSDLScancode(event.key.keysym.scancode);
+	if (event.type == SDL_EVENT_KEY_DOWN) {
+		uint32 vk = ATInputSDL3::TranslateSDLScancode(event.key.scancode);
 		if (vk == kATInputCode_None)
 			return;
 
 		SDL_Keymod mod = SDL_GetModState();
-		bool alt   = (mod & KMOD_ALT) != 0;
-		bool ctrl  = (mod & KMOD_CTRL) != 0;
-		bool shift = (mod & KMOD_SHIFT) != 0;
-		bool ext   = IsExtendedKey(event.key.keysym.scancode);
+		bool alt   = (mod & SDL_KMOD_ALT) != 0;
+		bool ctrl  = (mod & SDL_KMOD_CTRL) != 0;
+		bool shift = (mod & SDL_KMOD_SHIFT) != 0;
+		bool ext   = IsExtendedKey(event.key.scancode);
 
 		uint32 scanCode;
 		if (!ATUIGetScanCodeForVirtualKey(vk, alt, ctrl, shift, ext, scanCode))
@@ -573,8 +575,8 @@ static void ProcessAtariKeyboard(const SDL_Event& event) {
 		} else {
 			g_sim.GetPokey().PushKey(scanCode, event.key.repeat != 0);
 		}
-	} else if (event.type == SDL_KEYUP) {
-		uint32 vk = ATInputSDL2::TranslateSDLScancode(event.key.keysym.scancode);
+	} else if (event.type == SDL_EVENT_KEY_UP) {
+		uint32 vk = ATInputSDL3::TranslateSDLScancode(event.key.scancode);
 		if (vk == kATInputCode_None)
 			return;
 
@@ -597,14 +599,14 @@ static void ProcessAtariKeyboard(const SDL_Event& event) {
 static vdrefptr<IATSerializable> s_pQuickState;
 
 static void HandleShortcuts(const SDL_Event& event) {
-	if (event.type != SDL_KEYDOWN)
+	if (event.type != SDL_EVENT_KEY_DOWN)
 		return;
 
-	bool shift = (event.key.keysym.mod & KMOD_SHIFT) != 0;
-	bool ctrl  = (event.key.keysym.mod & KMOD_CTRL) != 0;
-	bool alt   = (event.key.keysym.mod & KMOD_ALT) != 0;
+	bool shift = (event.key.mod & SDL_KMOD_SHIFT) != 0;
+	bool ctrl  = (event.key.mod & SDL_KMOD_CTRL) != 0;
+	bool alt   = (event.key.mod & SDL_KMOD_ALT) != 0;
 
-	switch (event.key.keysym.scancode) {
+	switch (event.key.scancode) {
 		// Shift+F1: cycle quick maps
 		case SDL_SCANCODE_F1: {
 			if (shift) {
@@ -625,7 +627,7 @@ static void HandleShortcuts(const SDL_Event& event) {
 				ATDisplayFilterMode fm = ATUIGetDisplayFilterMode();
 				fm = (ATDisplayFilterMode)(((int)fm + 1) % kATDisplayFilterModeCount);
 				ATUISetDisplayFilterMode(fm);
-				ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+				ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 				if (disp) {
 					disp->SetFilterMode(
 						(fm == kATDisplayFilterMode_Point)
@@ -729,7 +731,7 @@ static void HandleShortcuts(const SDL_Event& event) {
 	if (!dbg)
 		return;
 
-	switch (event.key.keysym.scancode) {
+	switch (event.key.scancode) {
 		case SDL_SCANCODE_F10:
 			if (!dbg->IsRunning())
 				dbg->StepOver(kATDebugSrcMode_Disasm);
@@ -758,11 +760,11 @@ static void ProcessEvents(SDL_Window *window) {
 
 		// Input capture mode: intercept keyboard/controller events for binding editor
 		if (ATImGuiIsCapturingInput()) {
-			if (event.type == SDL_KEYDOWN && !event.key.repeat) {
-				SDL_Scancode sc = event.key.keysym.scancode;
+			if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
+				SDL_Scancode sc = event.key.scancode;
 
 				// Shift+Escape = cancel capture
-				if (sc == SDL_SCANCODE_ESCAPE && (event.key.keysym.mod & KMOD_SHIFT)) {
+				if (sc == SDL_SCANCODE_ESCAPE && (event.key.mod & SDL_KMOD_SHIFT)) {
 					ATImGuiOnCapturedInput(kATInputCode_None);
 					continue;
 				}
@@ -771,35 +773,35 @@ static void ProcessEvents(SDL_Window *window) {
 				if (sc == SDL_SCANCODE_LSHIFT || sc == SDL_SCANCODE_RSHIFT)
 					continue;
 
-				uint32 code = ATInputSDL2::TranslateSDLScancode(sc);
+				uint32 code = ATInputSDL3::TranslateSDLScancode(sc);
 				if (code != kATInputCode_None) {
 					ATImGuiOnCapturedInput(code);
 					continue;
 				}
-			} else if (event.type == SDL_KEYUP) {
+			} else if (event.type == SDL_EVENT_KEY_UP) {
 				// Resolve L/R shift on key-up (user pressed and released shift alone)
-				if (event.key.keysym.scancode == SDL_SCANCODE_LSHIFT) {
+				if (event.key.scancode == SDL_SCANCODE_LSHIFT) {
 					ATImGuiOnCapturedInput(kATInputCode_KeyLShift);
 					continue;
-				} else if (event.key.keysym.scancode == SDL_SCANCODE_RSHIFT) {
+				} else if (event.key.scancode == SDL_SCANCODE_RSHIFT) {
 					ATImGuiOnCapturedInput(kATInputCode_KeyRShift);
 					continue;
 				}
-			} else if (event.type == SDL_CONTROLLERBUTTONDOWN) {
-				uint32 code = kATInputCode_JoyButton0 + event.cbutton.button;
+			} else if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+				uint32 code = kATInputCode_JoyButton0 + event.gbutton.button;
 				ATImGuiOnCapturedInput(code);
 				continue;
-			} else if (event.type == SDL_CONTROLLERAXISMOTION) {
-				sint32 rawValue = event.caxis.value;
+			} else if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+				sint32 rawValue = event.gaxis.value;
 				if (rawValue > 24000 || rawValue < -24000) {
 					uint32 axisCode;
-					switch (event.caxis.axis) {
-						case SDL_CONTROLLER_AXIS_LEFTX:       axisCode = kATInputCode_JoyHoriz1; break;
-						case SDL_CONTROLLER_AXIS_LEFTY:        axisCode = kATInputCode_JoyVert1; break;
-						case SDL_CONTROLLER_AXIS_RIGHTX:       axisCode = kATInputCode_JoyHoriz3; break;
-						case SDL_CONTROLLER_AXIS_RIGHTY:       axisCode = kATInputCode_JoyVert3; break;
-						case SDL_CONTROLLER_AXIS_TRIGGERLEFT:  axisCode = kATInputCode_JoyVert2; break;
-						case SDL_CONTROLLER_AXIS_TRIGGERRIGHT:  axisCode = kATInputCode_JoyVert4; break;
+					switch (event.gaxis.axis) {
+						case SDL_GAMEPAD_AXIS_LEFTX:         axisCode = kATInputCode_JoyHoriz1; break;
+						case SDL_GAMEPAD_AXIS_LEFTY:         axisCode = kATInputCode_JoyVert1; break;
+						case SDL_GAMEPAD_AXIS_RIGHTX:        axisCode = kATInputCode_JoyHoriz3; break;
+						case SDL_GAMEPAD_AXIS_RIGHTY:        axisCode = kATInputCode_JoyVert3; break;
+						case SDL_GAMEPAD_AXIS_LEFT_TRIGGER:  axisCode = kATInputCode_JoyVert2; break;
+						case SDL_GAMEPAD_AXIS_RIGHT_TRIGGER: axisCode = kATInputCode_JoyVert4; break;
 						default: goto not_captured;
 					}
 					ATImGuiOnCapturedInput(axisCode);
@@ -810,21 +812,21 @@ static void ProcessEvents(SDL_Window *window) {
 		}
 
 		// Track mouse movement for auto-hide cursor
-		if (event.type == SDL_MOUSEMOTION) {
+		if (event.type == SDL_EVENT_MOUSE_MOTION) {
 			g_lastMouseMoveTime = SDL_GetTicks();
 			if (g_cursorHidden) {
-				SDL_ShowCursor(SDL_ENABLE);
+				SDL_ShowCursor();
 				g_cursorHidden = false;
 			}
 		}
 
 		// F12 toggles debugger overlay
-		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_F12) {
+		if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F12) {
 			if (g_pImGui) {
 				g_pImGui->ToggleVisible();
 				// Show cursor when overlay becomes visible
 				if (g_pImGui->IsVisible() && g_cursorHidden) {
-					SDL_ShowCursor(SDL_ENABLE);
+					SDL_ShowCursor();
 					g_cursorHidden = false;
 				}
 			}
@@ -832,7 +834,7 @@ static void ProcessEvents(SDL_Window *window) {
 		}
 
 		// Escape closes overlay (when visible and no popup active)
-		if (event.type == SDL_KEYDOWN && event.key.keysym.scancode == SDL_SCANCODE_ESCAPE
+		if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_ESCAPE
 			&& g_pImGui && g_pImGui->IsVisible()
 			&& !ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId)) {
 			g_pImGui->SetVisible(false);
@@ -840,40 +842,40 @@ static void ProcessEvents(SDL_Window *window) {
 		}
 
 		// F1 warp: hold to enable, release to disable
-		if (event.key.keysym.scancode == SDL_SCANCODE_F1
-			&& !(event.key.keysym.mod & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT))) {
-			if (event.type == SDL_KEYDOWN && !event.key.repeat) {
+		if (event.key.scancode == SDL_SCANCODE_F1
+			&& !(event.key.mod & (SDL_KMOD_SHIFT | SDL_KMOD_CTRL | SDL_KMOD_ALT))) {
+			if (event.type == SDL_EVENT_KEY_DOWN && !event.key.repeat) {
 				ATUISetTurbo(true);
-			} else if (event.type == SDL_KEYUP) {
+			} else if (event.type == SDL_EVENT_KEY_UP) {
 				ATUISetTurbo(false);
 			}
 			continue;
 		}
 
 		// F1/F5/F8/F9 shortcuts always active
-		if (event.type == SDL_KEYDOWN) {
-			if (event.key.keysym.scancode == SDL_SCANCODE_F1
-				|| event.key.keysym.scancode == SDL_SCANCODE_F5
-				|| event.key.keysym.scancode == SDL_SCANCODE_F8
-				|| event.key.keysym.scancode == SDL_SCANCODE_F9) {
+		if (event.type == SDL_EVENT_KEY_DOWN) {
+			if (event.key.scancode == SDL_SCANCODE_F1
+				|| event.key.scancode == SDL_SCANCODE_F5
+				|| event.key.scancode == SDL_SCANCODE_F8
+				|| event.key.scancode == SDL_SCANCODE_F9) {
 				HandleShortcuts(event);
 				continue;
 			}
 
 			// Alt+Enter = fullscreen toggle (always)
 			// F11 = fullscreen toggle (when overlay hidden)
-			if ((event.key.keysym.scancode == SDL_SCANCODE_RETURN
-					&& (event.key.keysym.mod & KMOD_ALT))
-				|| (event.key.keysym.scancode == SDL_SCANCODE_F11
+			if ((event.key.scancode == SDL_SCANCODE_RETURN
+					&& (event.key.mod & SDL_KMOD_ALT))
+				|| (event.key.scancode == SDL_SCANCODE_F11
 					&& !(g_pImGui && g_pImGui->IsVisible()))) {
 				ATSetFullscreen(!ATUIGetFullscreen());
 				continue;
 			}
 
 			// Ctrl+O = open image, Ctrl+Shift+O = boot image
-			if (event.key.keysym.scancode == SDL_SCANCODE_O
-				&& (event.key.keysym.mod & KMOD_CTRL)) {
-				if (event.key.keysym.mod & KMOD_SHIFT)
+			if (event.key.scancode == SDL_SCANCODE_O
+				&& (event.key.mod & SDL_KMOD_CTRL)) {
+				if (event.key.mod & SDL_KMOD_SHIFT)
 					ATImGuiBootImage();
 				else
 					ATImGuiOpenImage();
@@ -881,25 +883,25 @@ static void ProcessEvents(SDL_Window *window) {
 			}
 
 			// Ctrl+S = save settings
-			if (event.key.keysym.scancode == SDL_SCANCODE_S
-				&& (event.key.keysym.mod & KMOD_CTRL)) {
+			if (event.key.scancode == SDL_SCANCODE_S
+				&& (event.key.mod & SDL_KMOD_CTRL)) {
 				ATLinuxSaveSettings();
 				ATImGuiShowToast("Settings saved");
 				continue;
 			}
 
 			// Alt+Shift+V = paste text to emulator
-			if (event.key.keysym.scancode == SDL_SCANCODE_V
-				&& (event.key.keysym.mod & KMOD_ALT)
-				&& (event.key.keysym.mod & KMOD_SHIFT)) {
+			if (event.key.scancode == SDL_SCANCODE_V
+				&& (event.key.mod & SDL_KMOD_ALT)
+				&& (event.key.mod & SDL_KMOD_SHIFT)) {
 				ATImGuiPasteText();
 				continue;
 			}
 
 			// Alt+Shift+C = copy frame to clipboard
-			if (event.key.keysym.scancode == SDL_SCANCODE_C
-				&& (event.key.keysym.mod & KMOD_ALT)
-				&& (event.key.keysym.mod & KMOD_SHIFT)) {
+			if (event.key.scancode == SDL_SCANCODE_C
+				&& (event.key.mod & SDL_KMOD_ALT)
+				&& (event.key.mod & SDL_KMOD_SHIFT)) {
 				VDPixmapBuffer pxbuf;
 				VDPixmap px;
 				if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
@@ -910,23 +912,23 @@ static void ProcessEvents(SDL_Window *window) {
 			}
 
 			// Alt+F10 = save screenshot
-			if (event.key.keysym.scancode == SDL_SCANCODE_F10
-				&& (event.key.keysym.mod & KMOD_ALT)) {
+			if (event.key.scancode == SDL_SCANCODE_F10
+				&& (event.key.mod & SDL_KMOD_ALT)) {
 				HandleShortcuts(event);
 				continue;
 			}
 
 			// Alt+Backspace = toggle slow motion
-			if (event.key.keysym.scancode == SDL_SCANCODE_BACKSPACE
-				&& (event.key.keysym.mod & KMOD_ALT)) {
+			if (event.key.scancode == SDL_SCANCODE_BACKSPACE
+				&& (event.key.mod & SDL_KMOD_ALT)) {
 				ATUISetSlowMotion(!ATUIGetSlowMotion());
 				ATImGuiShowToast(ATUIGetSlowMotion() ? "Slow motion" : "Normal speed");
 				continue;
 			}
 
 			// Ctrl+Q = quit
-			if (event.key.keysym.scancode == SDL_SCANCODE_Q
-				&& (event.key.keysym.mod & KMOD_CTRL)) {
+			if (event.key.scancode == SDL_SCANCODE_Q
+				&& (event.key.mod & SDL_KMOD_CTRL)) {
 				ATImGuiRequestQuit();
 				if (g_pImGui && !g_pImGui->IsVisible())
 					g_pImGui->ToggleVisible();
@@ -940,7 +942,8 @@ static void ProcessEvents(SDL_Window *window) {
 
 			// If ImGui wants the input, don't pass to emulation — but always
 			// let system events (quit, window close/focus) through.
-			if (event.type != SDL_QUIT && event.type != SDL_WINDOWEVENT
+			if (event.type != SDL_EVENT_QUIT
+				&& !(event.type >= SDL_EVENT_WINDOW_FIRST && event.type <= SDL_EVENT_WINDOW_LAST)
 				&& (g_pImGui->WantCaptureMouse() || g_pImGui->WantCaptureKeyboard()))
 				continue;
 		}
@@ -950,9 +953,9 @@ static void ProcessEvents(SDL_Window *window) {
 		{
 			IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
 			if (enhText && !enhText->IsRawInputEnabled()) {
-				if (event.type == SDL_KEYDOWN) {
+				if (event.type == SDL_EVENT_KEY_DOWN) {
 					uint32 vk = 0;
-					switch (event.key.keysym.scancode) {
+					switch (event.key.scancode) {
 						case SDL_SCANCODE_LEFT:      vk = kATUIVK_Left; break;
 						case SDL_SCANCODE_RIGHT:     vk = kATUIVK_Right; break;
 						case SDL_SCANCODE_UP:        vk = kATUIVK_Up; break;
@@ -966,9 +969,9 @@ static void ProcessEvents(SDL_Window *window) {
 					}
 					if (vk && enhText->OnKeyDown(vk))
 						continue;
-				} else if (event.type == SDL_KEYUP) {
+				} else if (event.type == SDL_EVENT_KEY_UP) {
 					uint32 vk = 0;
-					switch (event.key.keysym.scancode) {
+					switch (event.key.scancode) {
 						case SDL_SCANCODE_LEFT:      vk = kATUIVK_Left; break;
 						case SDL_SCANCODE_RIGHT:     vk = kATUIVK_Right; break;
 						case SDL_SCANCODE_UP:        vk = kATUIVK_Up; break;
@@ -982,8 +985,8 @@ static void ProcessEvents(SDL_Window *window) {
 					}
 					if (vk && enhText->OnKeyUp(vk))
 						continue;
-				} else if (event.type == SDL_TEXTINPUT) {
-					// SDL_TEXTINPUT gives us UTF-8 text — forward printable ASCII chars
+				} else if (event.type == SDL_EVENT_TEXT_INPUT) {
+					// SDL_EVENT_TEXT_INPUT gives us UTF-8 text — forward printable ASCII chars
 					for (const char *p = event.text.text; *p; ++p) {
 						uint8 ch = (uint8)*p;
 						if (ch >= 0x20 && ch < 0x7F)
@@ -1002,39 +1005,44 @@ static void ProcessEvents(SDL_Window *window) {
 			continue;
 
 		switch (event.type) {
-			case SDL_QUIT:
+			case SDL_EVENT_QUIT:
 				ATImGuiRequestQuit();
 				if (g_pImGui && !g_pImGui->IsVisible())
 					g_pImGui->ToggleVisible();
 				break;
 
-			case SDL_WINDOWEVENT:
-				if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
-					ATImGuiRequestQuit();
-					if (g_pImGui && !g_pImGui->IsVisible())
-						g_pImGui->ToggleVisible();
-				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
-					ATUISetAppActive(false);
-					if (ATUIGetPauseWhenInactive() && !g_sim.IsPaused()) {
-						g_sim.Pause();
-						g_pausedByInactive = true;
-					}
-				} else if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) {
-					ATUISetAppActive(true);
-					if (g_pausedByInactive) {
-						g_pausedByInactive = false;
-						g_sim.Resume();
-					}
-				} else if (event.window.event == SDL_WINDOWEVENT_RESIZED
-					|| event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
-					IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
-					if (enhText)
-						enhText->OnSize(event.window.data1, event.window.data2);
+			case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
+				ATImGuiRequestQuit();
+				if (g_pImGui && !g_pImGui->IsVisible())
+					g_pImGui->ToggleVisible();
+				break;
+
+			case SDL_EVENT_WINDOW_FOCUS_LOST:
+				ATUISetAppActive(false);
+				if (ATUIGetPauseWhenInactive() && !g_sim.IsPaused()) {
+					g_sim.Pause();
+					g_pausedByInactive = true;
 				}
 				break;
 
-			case SDL_DROPFILE: {
-				char *dropped = event.drop.file;
+			case SDL_EVENT_WINDOW_FOCUS_GAINED:
+				ATUISetAppActive(true);
+				if (g_pausedByInactive) {
+					g_pausedByInactive = false;
+					g_sim.Resume();
+				}
+				break;
+
+			case SDL_EVENT_WINDOW_RESIZED:
+			case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+				IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
+				if (enhText)
+					enhText->OnSize(event.window.data1, event.window.data2);
+				break;
+			}
+
+			case SDL_EVENT_DROP_FILE: {
+				const char *dropped = event.drop.data;
 				if (dropped) {
 					VDStringW path = VDTextU8ToW(VDStringA(dropped));
 					if (ATImGuiIsDiskExplorerActive()) {
@@ -1054,7 +1062,7 @@ static void ProcessEvents(SDL_Window *window) {
 							ATImGuiShowToast("Failed to load dropped file");
 						}
 					}
-					SDL_free(dropped);
+					// SDL3 manages drop event memory — no SDL_free needed
 				}
 				break;
 			}
@@ -1151,7 +1159,7 @@ static void RenderAndSwap(SDL_Window *window) {
 	// Auto-show overlay when debugger hits a breakpoint
 	if (g_pImGui && !g_pImGui->IsVisible() && ATImGuiDebuggerDidBreak()) {
 		g_pImGui->SetVisible(true);
-		SDL_ShowCursor(SDL_ENABLE);
+		SDL_ShowCursor();
 		g_cursorHidden = false;
 	}
 
@@ -1274,12 +1282,12 @@ int main(int argc, char *argv[]) {
 
 	fprintf(stderr, "Simulator initialized\n");
 
-	// Init SDL2
+	// Init SDL3
 	SDL_Window *window = nullptr;
 	SDL_GLContext glContext = nullptr;
 
 	if (!InitSDL(window, glContext, opts.fullscreen)) {
-		fprintf(stderr, "Failed to initialize SDL2/OpenGL\n");
+		fprintf(stderr, "Failed to initialize SDL3/OpenGL\n");
 		return 1;
 	}
 
@@ -1289,10 +1297,10 @@ int main(int argc, char *argv[]) {
 	ATSetWindowSizeCallback(SetWindowSizeImpl);
 
 	const char *videoDriver = SDL_GetCurrentVideoDriver();
-	fprintf(stderr, "SDL2/OpenGL initialized (video driver: %s)\n", videoDriver ? videoDriver : "unknown");
+	fprintf(stderr, "SDL3/OpenGL initialized (video driver: %s)\n", videoDriver ? videoDriver : "unknown");
 
 	// Init display backend
-	g_pDisplay = new ATDisplaySDL2;
+	g_pDisplay = new ATDisplaySDL3;
 	if (!g_pDisplay->Init(window, glContext)) {
 		fprintf(stderr, "Failed to initialize display backend\n");
 		return 1;
@@ -1342,11 +1350,11 @@ int main(int argc, char *argv[]) {
 	fprintf(stderr, "Audio initialized\n");
 
 	// Init input
-	g_pInput = new ATInputSDL2;
+	g_pInput = new ATInputSDL3;
 	g_pInput->Init(g_sim.GetInputManager());
 
 	// Init joystick manager
-	IATJoystickManager *jm = ATCreateJoystickManagerSDL2();
+	IATJoystickManager *jm = ATCreateJoystickManagerSDL3();
 	if (jm->Init(nullptr, g_sim.GetInputManager())) {
 		g_sim.SetJoystickManager(jm);
 		fprintf(stderr, "Joystick manager initialized\n");
@@ -1417,9 +1425,9 @@ int main(int argc, char *argv[]) {
 		// Auto-hide mouse cursor after idle period
 		if (ATUIGetPointerAutoHide() && !g_cursorHidden
 			&& !(g_pImGui && g_pImGui->IsVisible())) {
-			Uint32 now = SDL_GetTicks();
+			uint32_t now = SDL_GetTicks();
 			if (now - g_lastMouseMoveTime > kCursorHideDelayMs) {
-				SDL_ShowCursor(SDL_DISABLE);
+				SDL_HideCursor();
 				g_cursorHidden = true;
 			}
 		}
@@ -1570,7 +1578,7 @@ int main(int argc, char *argv[]) {
 		uint32 flags = SDL_GetWindowFlags(window);
 		wkey.setBool("Maximized", (flags & SDL_WINDOW_MAXIMIZED) != 0);
 
-		if (!(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN_DESKTOP | SDL_WINDOW_FULLSCREEN))) {
+		if (!(flags & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_FULLSCREEN))) {
 			int x, y, w, h;
 			SDL_GetWindowPosition(window, &x, &y);
 			SDL_GetWindowSize(window, &w, &h);
@@ -1632,7 +1640,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	// Shutdown SDL
-	SDL_GL_DeleteContext(glContext);
+	SDL_GL_DestroyContext(glContext);
 	SDL_DestroyWindow(window);
 	SDL_Quit();
 
