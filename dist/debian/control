@@ -15,8 +15,8 @@ Build-Depends: debhelper-compat (= 13),
                xsltproc
 Standards-Version: 4.6.2
 Homepage: https://www.virtualdub.org/altirra.html
-Vcs-Browser: https://github.com/pkilar/Altirra-4.40
-Vcs-Git: https://github.com/pkilar/Altirra-4.40.git
+Vcs-Browser: https://github.com/pkilar/Altirra-Linux
+Vcs-Git: https://github.com/pkilar/Altirra-Linux.git
 Rules-Requires-Root: no
 
 Package: altirra

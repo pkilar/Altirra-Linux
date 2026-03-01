@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build g++-14 \
+            libsdl2-dev libgl-dev zlib1g-dev \
+            xsltproc fp-compiler
+
+      - name: Build MADS assembler
+        run: |
+          git clone --depth 1 https://github.com/tebe6502/Mad-Assembler.git /tmp/mads
+          cd /tmp/mads
+          fpc -Mdelphi -vh -O3 mads.pas
+          sudo install -m 755 mads /usr/local/bin/mads
+
+      - name: Configure
+        run: |
+          cmake -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-14
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: cd build/src && ATTest/attest all

@@ -1,0 +1,185 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  create-source-tarball:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Create source tarball
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git archive --prefix="Altirra-Linux-${VERSION}/" \
+            -o "altirra-${VERSION}.tar.gz" HEAD
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-tarball
+          path: altirra-${{ steps.version.outputs.version }}.tar.gz
+
+  build-arch:
+    needs: create-source-tarball
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      VERSION: ${{ needs.create-source-tarball.outputs.version }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-tarball
+
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm
+          pacman -S --noconfirm --needed \
+            cmake ninja gcc sdl2 mesa zlib libxslt fpc git
+
+      - name: Build MADS assembler
+        run: |
+          git clone --depth 1 https://github.com/tebe6502/Mad-Assembler.git /tmp/mads
+          cd /tmp/mads
+          fpc -Mdelphi -vh -O3 mads.pas
+          install -m 755 mads /usr/local/bin/mads
+
+      - name: Extract PKGBUILD from tarball
+        run: |
+          tar xf "altirra-${VERSION}.tar.gz" \
+            "Altirra-Linux-${VERSION}/dist/arch/PKGBUILD" \
+            --strip-components=3
+          sed -i "s|^source=.*|source=(\"altirra-${VERSION}.tar.gz\")|" PKGBUILD
+
+      - name: Create builder user
+        run: |
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' >> /etc/sudoers
+          chown -R builder:builder .
+
+      - name: Build package
+        run: su builder -c 'makepkg -s --noconfirm'
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-package
+          path: '*.pkg.tar.zst'
+
+  build-rpm:
+    needs: create-source-tarball
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    env:
+      VERSION: ${{ needs.create-source-tarball.outputs.version }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-tarball
+
+      - name: Install dependencies
+        run: |
+          dnf install -y \
+            rpm-build rpmdevtools \
+            cmake gcc-c++ ninja-build \
+            SDL2-devel mesa-libGL-devel zlib-devel \
+            libxslt fpc git
+
+      - name: Build MADS assembler
+        run: |
+          git clone --depth 1 https://github.com/tebe6502/Mad-Assembler.git /tmp/mads
+          cd /tmp/mads
+          fpc -Mdelphi -vh -O3 mads.pas
+          install -m 755 mads /usr/local/bin/mads
+
+      - name: Set up rpmbuild tree
+        run: |
+          rpmdev-setuptree
+          cp "altirra-${VERSION}.tar.gz" "/root/rpmbuild/SOURCES/altirra-${VERSION}.tar.gz"
+          tar xf "altirra-${VERSION}.tar.gz" \
+            "Altirra-Linux-${VERSION}/dist/rpm/altirra.spec" \
+            --strip-components=3
+          cp altirra.spec /root/rpmbuild/SPECS/
+
+      - name: Build RPM
+        run: rpmbuild -ba /root/rpmbuild/SPECS/altirra.spec
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm-package
+          path: /root/rpmbuild/RPMS/**/*.rpm
+
+  build-deb:
+    needs: create-source-tarball
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04
+    env:
+      VERSION: ${{ needs.create-source-tarball.outputs.version }}
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: source-tarball
+
+      - name: Install dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            debhelper devscripts \
+            cmake ninja-build g++-14 \
+            libsdl2-dev libgl-dev zlib1g-dev \
+            xsltproc fp-compiler git ca-certificates
+
+      - name: Build MADS assembler
+        run: |
+          git clone --depth 1 https://github.com/tebe6502/Mad-Assembler.git /tmp/mads
+          cd /tmp/mads
+          fpc -Mdelphi -vh -O3 mads.pas
+          install -m 755 mads /usr/local/bin/mads
+
+      - name: Build package
+        run: |
+          tar xf "altirra-${VERSION}.tar.gz"
+          cd "Altirra-Linux-${VERSION}"
+          cp -r dist/debian debian
+          dpkg-buildpackage -us -uc -b
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb-package
+          path: '*.deb'
+
+  create-release:
+    needs: [create-source-tarball, build-arch, build-rpm, build-deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: List artifacts
+        run: find . -type f \( -name '*.tar.gz' -o -name '*.pkg.tar.zst' -o -name '*.rpm' -o -name '*.deb' \)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          generate_release_notes: true
+          files: |
+            *.tar.gz
+            *.pkg.tar.zst
+            *.rpm
+            *.deb

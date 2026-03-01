@@ -4,7 +4,7 @@ Release:        1%{?dist}
 Summary:        Atari 8-bit computer emulator (800/XL/XE/5200)
 License:        GPL-2.0-or-later
 URL:            https://www.virtualdub.org/altirra.html
-Source0:        https://github.com/pkilar/Altirra-4.40/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
+Source0:        https://github.com/pkilar/Altirra-Linux/archive/refs/tags/v%{version}.tar.gz#/%{name}-%{version}.tar.gz
 
 BuildRequires:  cmake >= 3.20
 BuildRequires:  gcc-c++ >= 13
@@ -31,14 +31,15 @@ of all major chips (ANTIC, GTIA, POKEY, PIA), multiple CPU cores (6502, 65C02,
 support, and an integrated debugger with disassembler, profiler, and trace viewer.
 
 %prep
-%autosetup -n Altirra-%{version}
+%autosetup -n Altirra-Linux-%{version}
 
 %build
 %cmake -G Ninja
 %cmake_build
 
 %check
-%{_vpath_builddir}/src/ATTest/attest all
+cd %{_vpath_builddir}/src
+ATTest/attest all
 
 %install
 %cmake_install
