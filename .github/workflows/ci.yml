@@ -48,13 +48,3 @@ jobs:
 
       - name: Test
         run: cd build/src && ATTest/attest all
-
-      - name: Configure wxWidgets build
-        run: |
-          cmake -B build-wx -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_CXX_COMPILER=g++-14 \
-            -DAT_USE_WX=ON
-
-      - name: Build wxWidgets frontend
-        run: cmake --build build-wx

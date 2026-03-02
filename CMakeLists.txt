@@ -1,9 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(Altirra VERSION 4.40.1 LANGUAGES CXX)
 
-# Frontend selection: ImGui (default) or wxWidgets
-option(AT_USE_WX "Build wxWidgets frontend instead of ImGui" OFF)
-
 # Include shared compiler flags
 include(cmake/AltirraCompilerFlags.cmake)
 
@@ -50,15 +47,7 @@ add_subdirectory(src/ATTest)
 # UI command manager (platform-independent)
 add_subdirectory(src/ATUI)
 
-# Linux frontend
+# Linux frontend (wxWidgets + SDL3 for audio/gamepad)
 if(NOT WIN32)
-	if(AT_USE_WX)
-		# wxWidgets frontend — self-contained executable with SDL3 for audio/gamepad
-		add_subdirectory(src/AltirraWx)
-	else()
-		# ImGui frontend (default) — SDL3+OpenGL+Dear ImGui
-		include(cmake/FetchImGui.cmake)
-		add_subdirectory(src/AltirraShell)
-		add_subdirectory(src/AltirraLinux)
-	endif()
+	add_subdirectory(src/AltirraLinux)
 endif()

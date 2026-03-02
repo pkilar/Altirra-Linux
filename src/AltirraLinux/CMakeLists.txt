@@ -1,7 +1,10 @@
-# AltirraLinux - Linux port of Altirra emulator (Phases 6-8)
+# AltirraLinux - Linux port of Altirra emulator (wxWidgets + SDL3 audio/gamepad)
 #
-# Strategy: GLOB all .cpp from Altirra/source, exclude Windows-only UI files,
-# add our Linux replacement implementations, link against all Phase 0-5 libraries.
+# wxWidgets-based application with SDL3 for audio and gamepad only.
+
+# wxWidgets 3.2+ required for proper CMake integration
+find_package(wxWidgets 3.2 REQUIRED COMPONENTS core base gl aui stc propgrid)
+include(${wxWidgets_USE_FILE})
 
 find_package(SDL3 REQUIRED)
 find_package(OpenGL REQUIRED)
@@ -24,7 +27,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 
 	# Win32-specific implementations
 	"asyncdownloader_win32.cpp"
-	# customdevice_win32.cpp — uses platform-agnostic ATNetConnect, works on Linux
 	"devxcmdmountvhd_win32.cpp"
 	"pclink_win32.cpp"
 	"pipeserial_win32.cpp"
@@ -254,48 +256,39 @@ mads_assemble(DISKLOADER128_BIN atdiskloader128.bin
 	-d:MEMORY=128 -s -p -b:$0700
 	${KERNEL_SRC}/source/ATDiskLoader/main.s)
 
-# Kernel ROMs — AltirraOS replacement firmware
-# kernel.rom (IDR_KERNEL = 110) — 400/800 mode
+# Kernel ROMs
 mads_assemble(KERNEL_BIN kernel.rom
 	-d:_KERNEL_XLXE=0 -s -p -i:${KERNEL_SHARED} -b:$d800
 	${KERNEL_SRC}/source/main.xasm)
 
-# kernelxl.rom (IDR_KERNELXL = 174) — XL/XE/XEGS mode
 mads_assemble(KERNELXL_BIN kernelxl.rom
 	-d:_KERNEL_XLXE=1 -s -p -i:${KERNEL_SHARED} -b:$c000
 	${KERNEL_SRC}/source/main.xasm)
 
-# kernel816.rom (IDR_KERNEL816 = 236) — 65C816 mode
 mads_assemble(KERNEL816_BIN kernel816.rom
 	-d:_KERNEL_XLXE=1 -d:_KERNEL_816=1 -s -p -i:${KERNEL_SHARED} -b:$c000
 	${KERNEL_SRC}/source/main.xasm)
 
-# superkernel.rom (IDR_5200KERNEL = 136) — Atari 5200 mode
 mads_assemble(SUPERKERNEL_BIN superkernel.rom
 	-s -p -i:${KERNEL_SHARED} -b:$f800
 	${KERNEL_SRC}/source/SuperKernel/main.xasm)
 
-# nokernel.rom (IDR_NOKERNEL = 124) — placeholder "no kernel"
 mads_assemble(NOKERNEL_BIN nokernel.rom
 	-s -p -i:${KERNEL_SHARED} -b:$c000
 	${KERNEL_SRC}/source/NoKernel/main.xasm)
 
-# nocartridge.rom (IDR_NOCARTRIDGE = 138) — placeholder "no cartridge"
 mads_assemble(NOCARTRIDGE_BIN nocartridge.rom
 	-s -p -b:$b000
 	${KERNEL_SRC}/source/NoCartridge/main.s)
 
-# nohdbios.rom (IDR_NOHDBIOS = 154) — "no HDB BIOS" placeholder
 mads_assemble(NOHDBIOS_BIN nohdbios.rom
 	-s -p -b:$d800
 	${KERNEL_SRC}/source/NoHDBIOS/main.s)
 
-# nogame.rom (IDR_NOGAME = 162) — "no GAME" placeholder
 mads_assemble(NOGAME_BIN nogame.rom
 	-s -p -b:$a000
 	${KERNEL_SRC}/source/NoGame/main.s)
 
-# atbasic.bin (IDR_BASIC = 125) — Altirra 8K BASIC cartridge
 mads_assemble(ATBASIC_BIN atbasic.bin
 	-c -s -d:CART=1 -b:$a000
 	${CMAKE_SOURCE_DIR}/src/ATBasic/source/atbasic.s)
@@ -307,7 +300,7 @@ endif()
 # Embed resource files from Altirra/res at configure time
 include(${CMAKE_SOURCE_DIR}/cmake/EmbedResources.cmake)
 
-# Build STUFF resource list (conditionally include diskloader128)
+# Build STUFF resource list
 set(STUFF_RESOURCES
 	112 changes.txt
 	143 dbghelp.txt
@@ -329,7 +322,6 @@ set(STUFF_RESOURCES
 	267 printer-1029-home.pcm
 	268 printer-1025-feed.pcm
 )
-# Conditionally include MADS-assembled firmware ROMs
 if(DISKLOADER128_BIN)
 	list(APPEND STUFF_RESOURCES 150 ${DISKLOADER128_BIN})
 endif()
@@ -372,28 +364,57 @@ embed_resources(
 		272 firmware.png
 )
 
+# wxWidgets frontend sources
+set(WX_SOURCES
+	source/main_wx.cpp
+	source/mainframe.cpp
+	source/menubar.cpp
+	source/display_wx.cpp
+	source/input_wx.cpp
+	source/dialog_system.cpp
+	source/dialog_cpu.cpp
+	source/dialog_boot.cpp
+	source/dialog_keyboard.cpp
+	source/dialog_audio.cpp
+	source/dialog_video.cpp
+	source/dialog_cassette.cpp
+	source/dialog_firmware.cpp
+	source/dialog_cartridge.cpp
+	source/dialog_devices.cpp
+	source/dialog_misc.cpp
+	source/dialog_input.cpp
+	source/dialog_audio_monitor.cpp
+	source/dialog_tape_editor.cpp
+	source/dialog_disk_explorer.cpp
+	source/statusbar_wx.cpp
+	source/debugger_wx.cpp
+)
+
 # Linux replacement implementations
 set(LINUX_SOURCES
-	source/main_linux.cpp
 	source/oshelper_linux.cpp
-	source/console_linux.cpp
+	source/console_wx.cpp
 	source/stubs_linux.cpp
 	source/modemtcp_linux.cpp
 	source/uikeyboard_linux.cpp
 	source/worker_linux.cpp
+	source/joystick_sdl3.cpp
+	source/commands_linux.cpp
+	source/enhancedtext_linux.cpp
 	${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.cpp
 )
 
 # Build executable
 add_executable(altirra
 	${ALTIRRA_SOURCES}
+	${WX_SOURCES}
 	${LINUX_SOURCES}
 )
 
 # Include directories — BEFORE ensures our shim headers override system-wide includes
 target_include_directories(altirra BEFORE
 	PRIVATE
-		# Our Linux headers (stdafx.h, tchar.h, uiframe.h shim) — must be FIRST to override
+		# Our headers (stdafx.h, tchar.h, shim headers, wx UI headers)
 		${CMAKE_CURRENT_SOURCE_DIR}/h
 
 		# Altirra application headers (simulator.h, console.h, etc.)
@@ -408,22 +429,14 @@ target_include_directories(altirra BEFORE
 		# Altirra autogen (generated firmware .inl files)
 		${CMAKE_SOURCE_DIR}/src/Altirra/autogen
 
-		# AltirraShell headers (display_sdl3.h, input_sdl3.h)
-		${CMAKE_SOURCE_DIR}/src/AltirraShell/h
-
 		# Foundation headers
 		${CMAKE_SOURCE_DIR}/src/h
-
-		# SDL3 (headers provided via target_link_libraries)
 )
 
 # Link all libraries
 target_link_libraries(altirra
 	PRIVATE
-		# Linux frontend backends (Phase 3-5)
-		altirrashell
-
-		# Core emulation libraries (Phase 2)
+		# Core emulation libraries
 		atcore
 		atcpu
 		atemulation
@@ -434,11 +447,15 @@ target_link_libraries(altirra
 		atnetsockets
 		atdebugger
 		atvm
+		atui
 		kasumi
 
-		# Foundation libraries (Phase 0-1)
+		# Foundation libraries
 		system
 		vdjson
+
+		# wxWidgets
+		${wxWidgets_LIBRARIES}
 
 		# External libraries
 		SDL3::SDL3

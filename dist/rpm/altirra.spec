@@ -36,7 +36,7 @@ support, and an integrated debugger with disassembler, profiler, and trace viewe
 %autosetup -n Altirra-Linux-%{version}
 
 %build
-%cmake -G Ninja -DAT_USE_WX=ON
+%cmake -G Ninja
 %cmake_build
 
 %check
