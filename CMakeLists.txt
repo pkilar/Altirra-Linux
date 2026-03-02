@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Altirra VERSION 4.40 LANGUAGES CXX)
+project(Altirra VERSION 4.40.1 LANGUAGES CXX)
 
 # Include shared compiler flags
 include(cmake/AltirraCompilerFlags.cmake)
