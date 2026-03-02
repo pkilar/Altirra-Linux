@@ -32,6 +32,7 @@
 #include <at/atcore/media.h>
 #include <at/atcore/profile.h>
 #include <at/ataudio/audiooutput.h>
+#include <at/ataudio/pokey.h>
 #include <at/atio/image.h>
 
 #include "simulator.h"
@@ -49,6 +50,7 @@
 #include "versioninfo.h"
 
 #include "mainframe.h"
+#include "dialogs_wx.h"
 #include "display_sdl3.h"
 #include "imgui_manager.h"
 #include <debugger_wx.h>
@@ -79,10 +81,30 @@ void ATUISaveRegistry(const wchar_t *fnpath);
 // Global simulator instance — matches Windows main.cpp
 ATSimulator g_sim;
 
-// Display pointer — stubs_linux.cpp calls ATGetLinuxDisplay() to access display settings.
-// Points to the ATDisplayWx (wxGLCanvas) owned by ATMainFrame.
+// Display pointer — owned by ATMainFrame, accessed via global functions below.
 static ATDisplayWx *g_pDisplay = nullptr;
-ATDisplaySDL3 *ATGetLinuxDisplay() { return g_pDisplay; }
+
+// stubs_linux.cpp calls these to access display settings without needing
+// the concrete type. Replaces ATGetLinuxDisplay() type-unsafe pattern.
+void ATLinuxSetDisplayFilterMode(IVDVideoDisplay::FilterMode fm) {
+	if (g_pDisplay) g_pDisplay->SetFilterMode(fm);
+}
+void ATLinuxSetDisplayStretchMode(ATDisplayStretchMode m) {
+	if (g_pDisplay) g_pDisplay->SetStretchMode(m);
+}
+void ATLinuxGetDisplayWindowSize(int& w, int& h) {
+	if (g_pDisplay) g_pDisplay->GetWindowSize(w, h);
+	else { w = 0; h = 0; }
+}
+
+// Clear the global display pointer (called during shutdown).
+void ATLinuxClearDisplay() {
+	g_pDisplay = nullptr;
+}
+
+// Legacy accessor — returns nullptr in wx build since callers should use
+// the typed functions above.
+ATDisplaySDL3 *ATGetLinuxDisplay() { return nullptr; }
 
 // No SDL window in the wxWidgets build (wxWidgets manages the window)
 SDL_Window *ATGetLinuxWindow() { return nullptr; }
@@ -440,8 +462,24 @@ bool ATApp::OnInit() {
 	return true;
 }
 
+// Close functions defined in individual dialog files
+void ATCloseAudioWindows();
+void ATCloseVideoSettingsWindow();
+
+void ATCloseAllNonModalWindows() {
+	ATCloseAudioWindows();
+	ATCloseVideoSettingsWindow();
+}
+
 int ATApp::OnExit() {
 	fprintf(stderr, "Shutting down...\n");
+
+	// NOTE: Do NOT access m_frame here — it may already be deleted.
+	// OnClose() already called StopEmulation(), disconnected GTIA,
+	// cleared g_pDisplay, and closed non-modal windows before calling
+	// Destroy().  wxWidgets may have deleted the frame during idle
+	// processing before OnExit() was called.
+	m_frame = nullptr;
 
 	// Save settings before shutdown
 	ATSaveSettings(ATSettingsCategory(kATSettingsCategory_All & ~kATSettingsCategory_FullScreen));
@@ -452,7 +490,8 @@ int ATApp::OnExit() {
 		fprintf(stderr, "Warning: Failed to save settings\n");
 	}
 
-	// Disconnect display from GTIA before destroying it
+	// Disconnect display from GTIA (idempotent — OnClose already did this,
+	// but guard against abnormal shutdown paths)
 	g_sim.GetGTIA().SetVideoOutput(nullptr);
 	g_pDisplay = nullptr;
 
@@ -568,6 +607,49 @@ int ATApp::FilterEvent(wxEvent& event) {
 				ATImGuiShowToast("Paused");
 			}
 			return Event_Processed;
+		}
+
+		// Ctrl+V: paste text to emulator
+		case 'V': {
+			if (ctrl) {
+				// Paste via SDL clipboard (SDL3 is still linked for audio/gamepad)
+				char *text = SDL_GetClipboardText();
+				if (text && *text) {
+					VDStringW ws = VDTextU8ToW(VDStringSpanA(text));
+					auto& pokey = g_sim.GetPokey();
+
+					for (size_t i = 0; i < ws.size(); ++i) {
+						wchar_t c = ws[i];
+						if (!c) continue;
+
+						// Normalize smart quotes/dashes
+						switch (c) {
+							case L'\u2010': case L'\u2011': case L'\u2012':
+							case L'\u2013': case L'\u2014': case L'\u2015':
+								c = L'-'; break;
+							case L'\u2018': case L'\u2019':
+								c = L'\''; break;
+							case L'\u201C': case L'\u201D':
+								c = L'"'; break;
+						}
+
+						if (c == L'\r' || c == L'\n') {
+							if (c == L'\r' && i + 1 < ws.size() && ws[i + 1] == L'\n')
+								++i;
+							pokey.PushKey(0x0C, false, true, false, true);
+							continue;
+						}
+						if (c == L'\t') {
+							pokey.PushKey(0x2C, false, true, false, true);
+							continue;
+						}
+					}
+					ATImGuiShowToast("Text pasted");
+				}
+				SDL_free(text);
+				return Event_Processed;
+			}
+			break;
 		}
 
 		// Ctrl+Q: quit

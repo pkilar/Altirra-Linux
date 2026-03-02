@@ -383,6 +383,11 @@ set(WX_SOURCES
 	source/dialog_cartridge.cpp
 	source/dialog_devices.cpp
 	source/dialog_misc.cpp
+	source/dialog_input.cpp
+	source/dialog_audio_monitor.cpp
+	source/dialog_tape_editor.cpp
+	source/dialog_disk_explorer.cpp
+	source/statusbar_wx.cpp
 	source/debugger_wx.cpp
 )
 

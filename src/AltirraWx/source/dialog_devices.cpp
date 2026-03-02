@@ -554,8 +554,8 @@ public:
 	const ATPropertySet& GetProperties() const { return mProps; }
 
 private:
-	void BuildStructuredUI(const DevCfgTagMapping *mapping);
-	void BuildGenericUI();
+	wxSizer *BuildStructuredUI(const DevCfgTagMapping *mapping);
+	wxSizer *BuildGenericUI();
 	void PopulateFromProps();
 	void CollectToProps();
 	void OnOK(wxCommandEvent& event);
@@ -587,31 +587,18 @@ ATDeviceConfigDialog::ATDeviceConfigDialog(wxWindow *parent, IATDevice *dev)
 	const char *tag = devInfo.mpDef ? devInfo.mpDef->mpTag : "";
 	mpMapping = FindDevCfgMapping(tag);
 
-	wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
+	wxBoxSizer *outerSizer = new wxBoxSizer(wxVERTICAL);
 
 	if (mpMapping) {
 		SetTitle(wxString::Format("Configure %s", mpMapping->title));
-		BuildStructuredUI(mpMapping);
+		outerSizer->Add(BuildStructuredUI(mpMapping), 1, wxEXPAND);
 	} else {
 		SetTitle("Device Configuration");
-		BuildGenericUI();
+		outerSizer->Add(BuildGenericUI(), 1, wxEXPAND);
 	}
 
-	topSizer->Add(GetSizer(), 1, wxEXPAND);
+	outerSizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 5);
 
-	// OK/Cancel
-	wxBoxSizer *btnSizer = new wxBoxSizer(wxHORIZONTAL);
-	btnSizer->Add(new wxButton(this, wxID_OK, "OK"), 0, wxRIGHT, 5);
-	btnSizer->Add(new wxButton(this, wxID_CANCEL, "Cancel"), 0);
-
-	wxSizer *outerSizer = new wxBoxSizer(wxVERTICAL);
-	if (GetSizer()) {
-		// Re-parent sizer contents
-		outerSizer->Add(GetSizer(), 1, wxEXPAND);
-	}
-	outerSizer->Add(btnSizer, 0, wxALIGN_RIGHT | wxALL, 5);
-
-	SetSizer(nullptr);
 	SetSizerAndFit(outerSizer);
 
 	PopulateFromProps();
@@ -619,7 +606,7 @@ ATDeviceConfigDialog::ATDeviceConfigDialog(wxWindow *parent, IATDevice *dev)
 	Bind(wxEVT_BUTTON, &ATDeviceConfigDialog::OnOK, this, wxID_OK);
 }
 
-void ATDeviceConfigDialog::BuildStructuredUI(const DevCfgTagMapping *mapping) {
+wxSizer *ATDeviceConfigDialog::BuildStructuredUI(const DevCfgTagMapping *mapping) {
 	wxFlexGridSizer *grid = new wxFlexGridSizer(2, 5, 10);
 	grid->AddGrowableCol(1, 1);
 
@@ -713,10 +700,10 @@ void ATDeviceConfigDialog::BuildStructuredUI(const DevCfgTagMapping *mapping) {
 
 	wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
 	sizer->Add(grid, 1, wxEXPAND | wxALL, 10);
-	SetSizer(sizer);
+	return sizer;
 }
 
-void ATDeviceConfigDialog::BuildGenericUI() {
+wxSizer *ATDeviceConfigDialog::BuildGenericUI() {
 	wxFlexGridSizer *grid = new wxFlexGridSizer(2, 5, 10);
 	grid->AddGrowableCol(1, 1);
 
@@ -727,7 +714,7 @@ void ATDeviceConfigDialog::BuildGenericUI() {
 
 	wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
 	sizer->Add(grid, 1, wxEXPAND | wxALL, 10);
-	SetSizer(sizer);
+	return sizer;
 }
 
 void ATDeviceConfigDialog::PopulateFromProps() {

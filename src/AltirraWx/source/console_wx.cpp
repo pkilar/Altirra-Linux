@@ -16,6 +16,10 @@
 #include <vd2/system/filesys.h>
 #include <vd2/system/text.h>
 
+#include <wx/choicdlg.h>
+#include <wx/msgdlg.h>
+#include <wx/utils.h>
+
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
@@ -87,13 +91,11 @@ void ATConsoleSetFontDpi(unsigned dpi) {
 }
 
 bool ATConsoleShowSource(uint32 addr) {
-	// TODO: Navigate wx source view when implemented
-	return false;
+	return ATWxDebuggerNavigateSource(addr);
 }
 
 bool ATConsoleCheckBreak() {
-	// TODO: Check for Ctrl+C/Ctrl+Break via wxWidgets
-	return false;
+	return wxGetKeyState(WXK_CONTROL) && wxGetKeyState(WXK_PAUSE);
 }
 
 void ATShowConsole() {
@@ -154,7 +156,23 @@ public:
 	void SetPathAlias(const wchar_t *alias) { mPathAlias = alias; }
 
 	void FocusOnLine(int line) override {
-		// TODO: Navigate wx source view
+		// Find the address for this line and navigate the debugger source panel
+		IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+		if (!dbs) return;
+
+		uint32 moduleId;
+		uint16 fileId;
+		if (!dbs->LookupFile(mPath.c_str(), moduleId, fileId)) return;
+
+		vdfastvector<ATSourceLineInfo> lines;
+		dbs->GetLinesForFile(moduleId, fileId, lines);
+
+		for (const auto& li : lines) {
+			if ((int)li.mLine - 1 == line) {
+				ATWxDebuggerNavigateSource(li.mOffset);
+				return;
+			}
+		}
 	}
 
 	void ActivateLine(int line) override {
@@ -266,7 +284,49 @@ IATSourceWindow *ATOpenSourceWindow(const ATDebuggerSourceFileInfo& sourceFileIn
 }
 
 void ATUIShowSourceListDialog() {
-	// TODO: Show source file list in wx debugger
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg) return;
+
+	struct SourceEntry {
+		VDStringW path;
+		uint32 numLines;
+	};
+	std::vector<SourceEntry> files;
+
+	dbg->EnumSourceFiles(
+		[&files](const wchar_t *path, uint32 numLines) {
+			if (numLines > 0)
+				files.push_back({VDStringW(path), numLines});
+		}
+	);
+
+	if (files.empty()) {
+		wxMessageBox("No source files are currently loaded.\nLoad symbols first (Debug > Load Symbols).",
+			"Source Files", wxOK | wxICON_INFORMATION);
+		return;
+	}
+
+	wxArrayString choices;
+	for (const auto& f : files) {
+		const wchar_t *name = VDFileSplitPath(f.path.c_str());
+		VDStringA u8 = VDTextWToU8(VDStringW(name));
+		char label[256];
+		snprintf(label, sizeof(label), "%s (%u lines)", u8.c_str(), f.numLines);
+		choices.Add(label);
+	}
+
+	wxSingleChoiceDialog dlg(nullptr, "Select a source file to view:",
+		"Source Files", choices);
+	if (dlg.ShowModal() != wxID_OK) return;
+
+	int sel = dlg.GetSelection();
+	if (sel < 0 || sel >= (int)files.size()) return;
+
+	ATDebuggerSourceFileInfo info;
+	info.mSourcePath = files[sel].path;
+	IATSourceWindow *w = ATOpenSourceWindow(info, true);
+	if (w)
+		w->FocusOnLine(0);
 }
 
 // UI pane management — stub

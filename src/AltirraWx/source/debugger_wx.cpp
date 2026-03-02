@@ -10,16 +10,21 @@
 #include <stdafx.h>
 #include <debugger_wx.h>
 
+#include <fstream>
+#include <map>
 #include <mutex>
 
 #include <wx/aui/aui.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/combobox.h>
+#include <wx/dcbuffer.h>
 #include <wx/listctrl.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/panel.h>
+#include <wx/rawbmp.h>
 #include <wx/sizer.h>
 #include <wx/spinctrl.h>
 #include <wx/stattext.h>
@@ -27,14 +32,28 @@
 #include <wx/timer.h>
 #include <wx/toolbar.h>
 
+#include <vd2/system/filesys.h>
 #include <vd2/system/text.h>
+#include <vd2/system/time.h>
 #include <vd2/system/vdtypes.h>
 #include <at/atcpu/execstate.h>
+#include <at/atcore/profile.h>
 #include <at/atdebugger/target.h>
 
+#include <wx/filedlg.h>
+
 #include "debugger.h"
+#include "debugdisplay.h"
 #include "disasm.h"
+#include "printeroutput.h"
+
+// profiler.h uses ATCPUTimestampDecoder by reference in internal methods
+struct ATCPUTimestampDecoder;
+struct ATCPUHistoryEntry;
+#include "profiler.h"
+
 #include "simulator.h"
+#include "trace.h"
 
 extern ATSimulator g_sim;
 
@@ -266,8 +285,8 @@ ATWxDisassemblyPanel::ATWxDisassemblyPanel(wxWindow *parent)
 	mpAddrInput = new wxTextCtrl(this, wxID_ANY, "0000", wxDefaultPosition,
 		wxSize(80, -1), wxTE_PROCESS_ENTER);
 	nav->Add(mpAddrInput, 0, wxRIGHT, 2);
-	nav->Add(new wxButton(this, ID_GO, "Go", wxDefaultPosition, wxSize(40, -1)), 0, wxRIGHT, 2);
-	nav->Add(new wxButton(this, ID_GO_PC, "PC", wxDefaultPosition, wxSize(40, -1)), 0, wxRIGHT, 4);
+	nav->Add(new wxButton(this, ID_GO, "Go", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	nav->Add(new wxButton(this, ID_GO_PC, "PC", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 4);
 	mpFollowPC = new wxCheckBox(this, ID_FOLLOW_PC, "Follow PC");
 	mpFollowPC->SetValue(true);
 	nav->Add(mpFollowPC, 0, wxALIGN_CENTER_VERTICAL);
@@ -415,10 +434,10 @@ ATWxMemoryPanel::ATWxMemoryPanel(wxWindow *parent)
 	mpAddrInput = new wxTextCtrl(this, wxID_ANY, "0000", wxDefaultPosition,
 		wxSize(80, -1), wxTE_PROCESS_ENTER);
 	nav->Add(mpAddrInput, 0, wxRIGHT, 2);
-	nav->Add(new wxButton(this, ID_GO, "Go", wxDefaultPosition, wxSize(40, -1)), 0, wxRIGHT, 4);
-	nav->Add(new wxButton(this, ID_NAV_ZP, "ZP", wxDefaultPosition, wxSize(35, -1)), 0, wxRIGHT, 2);
-	nav->Add(new wxButton(this, ID_NAV_STK, "Stk", wxDefaultPosition, wxSize(35, -1)), 0, wxRIGHT, 2);
-	nav->Add(new wxButton(this, ID_NAV_HW, "HW", wxDefaultPosition, wxSize(35, -1)), 0);
+	nav->Add(new wxButton(this, ID_GO, "Go", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 4);
+	nav->Add(new wxButton(this, ID_NAV_ZP, "ZP", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	nav->Add(new wxButton(this, ID_NAV_STK, "Stk", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	nav->Add(new wxButton(this, ID_NAV_HW, "HW", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
 	top->Add(nav, 0, wxEXPAND | wxALL, 2);
 
 	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
@@ -548,7 +567,7 @@ ATWxConsolePanel::ATWxConsolePanel(wxWindow *parent)
 		wxDefaultSize, wxTE_PROCESS_ENTER);
 	mpInput->SetFont(mono);
 	inputRow->Add(mpInput, 1, wxEXPAND | wxRIGHT, 2);
-	inputRow->Add(new wxButton(this, ID_CLEAR, "Clear", wxDefaultPosition, wxSize(50, -1)), 0);
+	inputRow->Add(new wxButton(this, ID_CLEAR, "Clear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
 	top->Add(inputRow, 0, wxEXPAND | wxALL, 2);
 
 	SetSizer(top);
@@ -636,9 +655,9 @@ ATWxBreakpointsPanel::ATWxBreakpointsPanel(wxWindow *parent)
 	mpTypeChoice->SetSelection(0);
 	addRow->Add(mpTypeChoice, 0, wxRIGHT, 2);
 
-	addRow->Add(new wxButton(this, ID_ADD, "Add", wxDefaultPosition, wxSize(50, -1)), 0, wxRIGHT, 4);
-	addRow->Add(new wxButton(this, ID_REMOVE, "Remove", wxDefaultPosition, wxSize(60, -1)), 0, wxRIGHT, 2);
-	addRow->Add(new wxButton(this, ID_CLEAR_ALL, "Clear All", wxDefaultPosition, wxSize(70, -1)), 0);
+	addRow->Add(new wxButton(this, ID_ADD, "Add", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 4);
+	addRow->Add(new wxButton(this, ID_REMOVE, "Remove", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	addRow->Add(new wxButton(this, ID_CLEAR_ALL, "Clear All", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
 	top->Add(addRow, 0, wxEXPAND | wxALL, 2);
 
 	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
@@ -835,8 +854,8 @@ ATWxWatchPanel::ATWxWatchPanel(wxWindow *parent)
 	mpExprInput = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition,
 		wxSize(120, -1), wxTE_PROCESS_ENTER);
 	addRow->Add(mpExprInput, 1, wxRIGHT, 2);
-	addRow->Add(new wxButton(this, ID_ADD, "Add", wxDefaultPosition, wxSize(50, -1)), 0, wxRIGHT, 2);
-	addRow->Add(new wxButton(this, ID_CLEAR_ALL, "Clear", wxDefaultPosition, wxSize(50, -1)), 0);
+	addRow->Add(new wxButton(this, ID_ADD, "Add", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	addRow->Add(new wxButton(this, ID_CLEAR_ALL, "Clear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
 	top->Add(addRow, 0, wxEXPAND | wxALL, 2);
 
 	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
@@ -1009,6 +1028,1144 @@ void ATWxHistoryPanel::OnToggleRecording(wxCommandEvent&) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
+// Printer Output panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxPrinterPanel : public wxPanel {
+public:
+	ATWxPrinterPanel(wxWindow *parent);
+	void Refresh();
+
+private:
+	void OnClear(wxCommandEvent& event);
+	void OnOutputSelect(wxCommandEvent& event);
+
+	wxComboBox *mpOutputSelect = nullptr;
+	wxTextCtrl *mpOutput = nullptr;
+	int mSelectedOutput = 0;
+	size_t mLastOffset = 0;
+
+	enum { ID_CLEAR = 4700, ID_OUTPUT_SELECT };
+};
+
+ATWxPrinterPanel::ATWxPrinterPanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY)
+{
+	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
+
+	wxBoxSizer *toolbar = new wxBoxSizer(wxHORIZONTAL);
+	mpOutputSelect = new wxComboBox(this, ID_OUTPUT_SELECT, "", wxDefaultPosition,
+		wxSize(200, -1), 0, nullptr, wxCB_READONLY);
+	toolbar->Add(mpOutputSelect, 0, wxRIGHT, 4);
+	toolbar->Add(new wxButton(this, ID_CLEAR, "Clear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
+	top->Add(toolbar, 0, wxEXPAND | wxALL, 2);
+
+	mpOutput = new wxTextCtrl(this, wxID_ANY, "", wxDefaultPosition, wxDefaultSize,
+		wxTE_MULTILINE | wxTE_READONLY | wxTE_DONTWRAP);
+	wxFont mono(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+	mpOutput->SetFont(mono);
+	top->Add(mpOutput, 1, wxEXPAND);
+
+	SetSizer(top);
+
+	Bind(wxEVT_BUTTON, &ATWxPrinterPanel::OnClear, this, ID_CLEAR);
+	Bind(wxEVT_COMBOBOX, &ATWxPrinterPanel::OnOutputSelect, this, ID_OUTPUT_SELECT);
+}
+
+void ATWxPrinterPanel::Refresh() {
+	ATPrinterOutputManager *mgr = static_cast<ATPrinterOutputManager *>(
+		&g_sim.GetPrinterOutputManager());
+
+	uint32 count = mgr->GetOutputCount();
+
+	// Update combo box if output count changed
+	if ((int)mpOutputSelect->GetCount() != (int)count) {
+		mpOutputSelect->Clear();
+		for (uint32 i = 0; i < count; i++) {
+			ATPrinterOutput& out = mgr->GetOutput(i);
+			VDStringA name = VDTextWToU8(VDStringW(out.GetName()));
+			mpOutputSelect->Append(name.c_str());
+		}
+		if (count > 0 && mpOutputSelect->GetSelection() < 0)
+			mpOutputSelect->SetSelection(0);
+	}
+
+	if (count == 0) return;
+	if (mSelectedOutput >= (int)count) mSelectedOutput = 0;
+
+	ATPrinterOutput& out = mgr->GetOutput(mSelectedOutput);
+	size_t currentLen = out.GetLength();
+
+	if (currentLen > mLastOffset) {
+		const wchar_t *ptr = out.GetTextPointer(mLastOffset);
+		size_t newChars = currentLen - mLastOffset;
+		VDStringW wstr(ptr, newChars);
+		VDStringA u8 = VDTextWToU8(wstr);
+		mpOutput->AppendText(u8.c_str());
+		mLastOffset = currentLen;
+		out.Revalidate();
+	}
+}
+
+void ATWxPrinterPanel::OnClear(wxCommandEvent&) {
+	ATPrinterOutputManager *mgr = static_cast<ATPrinterOutputManager *>(
+		&g_sim.GetPrinterOutputManager());
+	if (mSelectedOutput < (int)mgr->GetOutputCount()) {
+		mgr->GetOutput(mSelectedOutput).Clear();
+		mpOutput->Clear();
+		mLastOffset = 0;
+	}
+}
+
+void ATWxPrinterPanel::OnOutputSelect(wxCommandEvent& event) {
+	mSelectedOutput = event.GetSelection();
+	mLastOffset = 0;
+	mpOutput->Clear();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Source Code panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxSourcePanel : public wxPanel {
+public:
+	ATWxSourcePanel(wxWindow *parent);
+	void UpdateFromState(const ATDebuggerSystemState& state);
+	bool NavigateToAddress(uint32 addr);
+
+private:
+	void OnFileSelect(wxCommandEvent& event);
+	void RefreshFileList();
+	void LoadFile(int fileIdx);
+	void Repopulate();
+
+	wxChoice *mpFileChoice = nullptr;
+	wxListCtrl *mpList = nullptr;
+
+	struct SourceFile {
+		VDStringW mPath;
+		uint32 mNumLines;
+	};
+	std::vector<SourceFile> mFiles;
+	std::vector<std::string> mSourceLines;
+	std::map<int, uint32> mLineToAddr;
+	std::map<uint32, int> mAddrToLine;
+	uint32 mModuleId = 0;
+	uint16 mFileId = 0;
+	int mSelectedFile = -1;
+	int mPCLine = -1;
+	bool mNeedsFileList = true;
+
+	enum { ID_FILE_SELECT = 4800 };
+};
+
+ATWxSourcePanel::ATWxSourcePanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY)
+{
+	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
+
+	mpFileChoice = new wxChoice(this, ID_FILE_SELECT);
+	top->Add(mpFileChoice, 0, wxEXPAND | wxALL, 2);
+
+	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+		wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
+	mpList->AppendColumn("Source", wxLIST_FORMAT_LEFT, 800);
+
+	wxFont mono(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+	mpList->SetFont(mono);
+	top->Add(mpList, 1, wxEXPAND);
+
+	SetSizer(top);
+
+	Bind(wxEVT_CHOICE, &ATWxSourcePanel::OnFileSelect, this, ID_FILE_SELECT);
+}
+
+void ATWxSourcePanel::RefreshFileList() {
+	mFiles.clear();
+	mpFileChoice->Clear();
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg) return;
+
+	dbg->EnumSourceFiles(
+		[](const wchar_t *path, uint32 numLines) {
+			// Can't capture 'this' in a C callback-style lambda easily,
+			// so we use a global workaround
+		}
+	);
+
+	// Use a different approach: iterate symbol stores
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+	if (!dbs) return;
+
+	// EnumSourceFiles takes a vdfunction, use it directly
+	auto *filesPtr = &mFiles;
+	dbg->EnumSourceFiles(
+		[filesPtr](const wchar_t *path, uint32 numLines) {
+			if (numLines > 0)
+				filesPtr->push_back({VDStringW(path), numLines});
+		}
+	);
+
+	for (size_t i = 0; i < mFiles.size(); i++) {
+		const wchar_t *name = VDFileSplitPath(mFiles[i].mPath.c_str());
+		VDStringA u8 = VDTextWToU8(VDStringW(name));
+		char label[256];
+		snprintf(label, sizeof(label), "%s (%u lines)", u8.c_str(), mFiles[i].mNumLines);
+		mpFileChoice->Append(label);
+	}
+
+	mNeedsFileList = false;
+}
+
+void ATWxSourcePanel::LoadFile(int fileIdx) {
+	mSourceLines.clear();
+	mLineToAddr.clear();
+	mAddrToLine.clear();
+	mPCLine = -1;
+	mModuleId = 0;
+	mFileId = 0;
+
+	if (fileIdx < 0 || fileIdx >= (int)mFiles.size()) return;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+	if (!dbs) return;
+
+	const VDStringW& path = mFiles[fileIdx].mPath;
+	uint32 moduleId;
+	uint16 fileId;
+	if (!dbs->LookupFile(path.c_str(), moduleId, fileId)) return;
+
+	mModuleId = moduleId;
+	mFileId = fileId;
+
+	vdfastvector<ATSourceLineInfo> lines;
+	dbs->GetLinesForFile(moduleId, fileId, lines);
+
+	for (const auto& li : lines) {
+		int lineIdx = (int)li.mLine - 1;
+		if (lineIdx >= 0) {
+			if (mLineToAddr.find(lineIdx) == mLineToAddr.end())
+				mLineToAddr[lineIdx] = li.mOffset;
+			if (mAddrToLine.find(li.mOffset) == mAddrToLine.end())
+				mAddrToLine[li.mOffset] = lineIdx;
+		}
+	}
+
+	// Try to load source file from disk
+	ATDebuggerSourceFileInfo sourceFileInfo;
+	if (!dbs->GetSourceFilePath(moduleId, fileId, sourceFileInfo)) return;
+
+	const wchar_t *tryPaths[] = { sourceFileInfo.mSourcePath.c_str(), sourceFileInfo.mModulePath.c_str() };
+	bool loaded = false;
+
+	for (const wchar_t *tryPath : tryPaths) {
+		if (!tryPath || !tryPath[0]) continue;
+		VDStringA narrowPath = VDTextWToU8(VDStringW(tryPath));
+		std::ifstream ifs(narrowPath.c_str());
+		if (!ifs.is_open()) continue;
+
+		std::string line;
+		while (std::getline(ifs, line))
+			mSourceLines.push_back(std::move(line));
+		loaded = true;
+		break;
+	}
+
+	if (!loaded) {
+		mSourceLines.push_back("(Source file not found on disk)");
+		if (!mLineToAddr.empty()) {
+			int maxLine = mLineToAddr.rbegin()->first;
+			mSourceLines.resize(maxLine + 1);
+		}
+	}
+
+	Repopulate();
+}
+
+void ATWxSourcePanel::Repopulate() {
+	IATDebugger *dbg = ATGetDebugger();
+	mpList->DeleteAllItems();
+
+	for (int i = 0; i < (int)mSourceLines.size(); i++) {
+		auto addrIt = mLineToAddr.find(i);
+		bool hasMappedAddr = (addrIt != mLineToAddr.end());
+
+		char prefix[32];
+		if (hasMappedAddr)
+			snprintf(prefix, sizeof(prefix), "%5d %04X  ", i + 1, addrIt->second);
+		else
+			snprintf(prefix, sizeof(prefix), "%5d       ", i + 1);
+
+		std::string display = std::string(prefix) + mSourceLines[i];
+		long idx = mpList->InsertItem(i, display.c_str());
+
+		if (i == mPCLine) {
+			mpList->SetItemBackgroundColour(idx, wxColour(100, 100, 0));
+			mpList->SetItemTextColour(idx, wxColour(255, 255, 77));
+		} else if (hasMappedAddr) {
+			mpList->SetItemTextColour(idx, wxColour(220, 220, 220));
+		} else {
+			mpList->SetItemTextColour(idx, wxColour(128, 128, 128));
+		}
+
+		if (hasMappedAddr && dbg && dbg->IsBreakpointAtPC(addrIt->second))
+			mpList->SetItemTextColour(idx, wxColour(220, 40, 40));
+	}
+
+	// Scroll to PC line
+	if (mPCLine >= 0 && mPCLine < (int)mSourceLines.size())
+		mpList->EnsureVisible(mPCLine);
+}
+
+void ATWxSourcePanel::UpdateFromState(const ATDebuggerSystemState& state) {
+	if (mNeedsFileList) RefreshFileList();
+
+	mPCLine = -1;
+	if (!state.mbRunning && state.mPCModuleId == mModuleId && state.mPCFileId == mFileId && state.mPCLine > 0) {
+		mPCLine = (int)state.mPCLine - 1;
+	} else if (!state.mbRunning) {
+		auto it = mAddrToLine.find(state.mPC);
+		if (it != mAddrToLine.end())
+			mPCLine = it->second;
+	}
+
+	if (!mSourceLines.empty())
+		Repopulate();
+}
+
+void ATWxSourcePanel::OnFileSelect(wxCommandEvent& event) {
+	mSelectedFile = event.GetSelection();
+	LoadFile(mSelectedFile);
+}
+
+bool ATWxSourcePanel::NavigateToAddress(uint32 addr) {
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+	if (!dbs) return false;
+
+	uint32 moduleId;
+	ATSourceLineInfo lineInfo;
+	if (!dbs->LookupLine(addr, false, moduleId, lineInfo))
+		return false;
+
+	ATDebuggerSourceFileInfo sourceFileInfo;
+	if (!dbs->GetSourceFilePath(moduleId, lineInfo.mFileId, sourceFileInfo))
+		return false;
+
+	// Find matching file in our list, refreshing if needed
+	if (mNeedsFileList) RefreshFileList();
+
+	int targetIdx = -1;
+	for (int i = 0; i < (int)mFiles.size(); i++) {
+		if (VDFileIsPathEqual(mFiles[i].mPath.c_str(), sourceFileInfo.mSourcePath.c_str())) {
+			targetIdx = i;
+			break;
+		}
+		// Try filename-only match
+		if (VDFileIsPathEqual(VDFileSplitPath(mFiles[i].mPath.c_str()),
+				VDFileSplitPath(sourceFileInfo.mSourcePath.c_str()))) {
+			targetIdx = i;
+			break;
+		}
+	}
+
+	if (targetIdx < 0) return false;
+
+	// Load the file if not already loaded
+	if (targetIdx != mSelectedFile) {
+		mSelectedFile = targetIdx;
+		mpFileChoice->SetSelection(targetIdx);
+		LoadFile(targetIdx);
+	}
+
+	// Scroll to the target line
+	int targetLine = (int)lineInfo.mLine - 1;
+	if (targetLine >= 0 && targetLine < (int)mSourceLines.size())
+		mpList->EnsureVisible(targetLine);
+
+	return true;
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Performance Overlay panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxPerformanceProfiler : public IATProfiler {
+public:
+	static constexpr int kWidth = 256;
+	static constexpr int kHeight = 200;
+
+	void OnEvent(ATProfileEvent event) override;
+	void OnEventWithArg(ATProfileEvent event, uintptr arg) override {}
+	void BeginRegion(ATProfileRegion region) override;
+	void EndRegion(ATProfileRegion region) override;
+
+	struct Column {
+		int regionPixels[kATProfileRegionCount] {};
+	};
+
+	Column mColumns[kWidth] {};
+	int mX = 0;
+	int mRegionStackHt = 0;
+	ATProfileRegion mRegionStack[64] {};
+	uint64 mFrameStartTime = 0;
+	uint64 mRegionStartTime = 0;
+	double mTicksToPixels = 0;
+};
+
+void ATWxPerformanceProfiler::OnEvent(ATProfileEvent event) {
+	if (event != kATProfileEvent_BeginFrame) return;
+	mRegionStackHt = 0;
+	mX = (mX + 1) & (kWidth - 1);
+	mFrameStartTime = VDGetPreciseTick();
+	mRegionStartTime = mFrameStartTime;
+	mTicksToPixels = VDGetPreciseSecondsPerTick() * (double)kHeight * 30.0;
+
+	Column& col = mColumns[mX];
+	for (int i = 0; i < kATProfileRegionCount; i++)
+		col.regionPixels[i] = 0;
+}
+
+void ATWxPerformanceProfiler::BeginRegion(ATProfileRegion region) {
+	if (mRegionStackHt < 64) {
+		if (mRegionStackHt > 0) {
+			uint64 now = VDGetPreciseTick();
+			int pixels = (int)((double)(now - mRegionStartTime) * mTicksToPixels);
+			if (pixels > 0)
+				mColumns[mX].regionPixels[mRegionStack[mRegionStackHt - 1]] += pixels;
+			mRegionStartTime = now;
+		}
+		mRegionStack[mRegionStackHt++] = region;
+		mRegionStartTime = VDGetPreciseTick();
+	}
+}
+
+void ATWxPerformanceProfiler::EndRegion(ATProfileRegion region) {
+	if (mRegionStackHt > 0) {
+		uint64 now = VDGetPreciseTick();
+		int pixels = (int)((double)(now - mRegionStartTime) * mTicksToPixels);
+		if (pixels > 0)
+			mColumns[mX].regionPixels[mRegionStack[mRegionStackHt - 1]] += pixels;
+		--mRegionStackHt;
+		mRegionStartTime = now;
+	}
+}
+
+static ATWxPerformanceProfiler *s_pPerfProfiler = nullptr;
+
+class ATWxPerformancePanel : public wxPanel {
+public:
+	ATWxPerformancePanel(wxWindow *parent);
+	~ATWxPerformancePanel();
+
+private:
+	void OnPaint(wxPaintEvent& event);
+
+	wxDECLARE_EVENT_TABLE();
+};
+
+wxBEGIN_EVENT_TABLE(ATWxPerformancePanel, wxPanel)
+	EVT_PAINT(ATWxPerformancePanel::OnPaint)
+wxEND_EVENT_TABLE()
+
+ATWxPerformancePanel::ATWxPerformancePanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+		wxFULL_REPAINT_ON_RESIZE | wxBORDER_NONE)
+{
+	SetBackgroundStyle(wxBG_STYLE_PAINT);
+	SetMinSize(wxSize(ATWxPerformanceProfiler::kWidth + 16, ATWxPerformanceProfiler::kHeight + 120));
+
+	if (!s_pPerfProfiler) {
+		s_pPerfProfiler = new ATWxPerformanceProfiler;
+		s_pPerfProfiler->mFrameStartTime = VDGetPreciseTick();
+		s_pPerfProfiler->mTicksToPixels = VDGetPreciseSecondsPerTick() * (double)ATWxPerformanceProfiler::kHeight * 30.0;
+		g_pATProfiler = s_pPerfProfiler;
+	}
+}
+
+ATWxPerformancePanel::~ATWxPerformancePanel() {
+	if (s_pPerfProfiler) {
+		if (g_pATProfiler == s_pPerfProfiler)
+			g_pATProfiler = nullptr;
+		delete s_pPerfProfiler;
+		s_pPerfProfiler = nullptr;
+	}
+}
+
+void ATWxPerformancePanel::OnPaint(wxPaintEvent&) {
+	wxAutoBufferedPaintDC dc(this);
+	wxSize sz = GetSize();
+
+	dc.SetBackground(wxBrush(wxColour(30, 30, 30)));
+	dc.Clear();
+
+	if (!s_pPerfProfiler) return;
+
+	static const wxColour kRegionColors[kATProfileRegionCount] = {
+		wxColour(128, 128, 128),  // Idle
+		wxColour(255, 255, 255),  // IdleFrameDelay
+		wxColour(64, 96, 224),    // Simulation
+		wxColour(224, 32, 16),    // NativeEvents
+		wxColour(0, 0, 0),        // NativeMessage (hidden)
+		wxColour(0, 0, 0),        // DisplayPost (hidden)
+		wxColour(32, 224, 16),    // DisplayTick
+		wxColour(255, 224, 16),   // DisplayPresent
+	};
+
+	static const char *kRegionNames[kATProfileRegionCount] = {
+		"Idle", "Idle (delay)", "Simulation", "Native events",
+		nullptr, nullptr, "Display tick", "Display present",
+	};
+
+	constexpr int kW = ATWxPerformanceProfiler::kWidth;
+	constexpr int kH = ATWxPerformanceProfiler::kHeight;
+
+	int xOff = 8;
+	int yOff = 4;
+
+	// Background rectangle
+	dc.SetPen(*wxTRANSPARENT_PEN);
+	dc.SetBrush(wxBrush(wxColour(0, 0, 0)));
+	dc.DrawRectangle(xOff, yOff, kW, kH);
+
+	// Draw stacked columns
+	int curX = s_pPerfProfiler->mX;
+	for (int col = 0; col < kW; col++) {
+		int idx = (curX + 1 + col) & (kW - 1);
+		const auto& c = s_pPerfProfiler->mColumns[idx];
+
+		int y = yOff + kH;
+
+		for (int r = 0; r < kATProfileRegionCount; r++) {
+			if (c.regionPixels[r] <= 0) continue;
+			if (r == kATProfileRegion_NativeMessage || r == kATProfileRegion_DisplayPost) continue;
+
+			int h = c.regionPixels[r];
+			if (h > kH) h = kH;
+
+			dc.SetBrush(wxBrush(kRegionColors[r]));
+			dc.DrawRectangle(xOff + col, y - h, 1, h);
+			y -= h;
+		}
+	}
+
+	// Border
+	dc.SetPen(wxPen(wxColour(255, 255, 255, 80)));
+	dc.SetBrush(*wxTRANSPARENT_BRUSH);
+	dc.DrawRectangle(xOff, yOff, kW, kH);
+
+	// Legend
+	dc.SetFont(GetFont().IsOk() ? GetFont() : wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+	int legendY = yOff + kH + 8;
+	for (int i = 0; i < kATProfileRegionCount; i++) {
+		if (!kRegionNames[i]) continue;
+		dc.SetPen(*wxTRANSPARENT_PEN);
+		dc.SetBrush(wxBrush(kRegionColors[i]));
+		dc.DrawRectangle(xOff, legendY, 12, 12);
+		dc.SetTextForeground(wxColour(200, 200, 200));
+		dc.DrawText(kRegionNames[i], xOff + 16, legendY);
+		legendY += 16;
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Trace Viewer panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxTracePanel : public wxPanel {
+public:
+	ATWxTracePanel(wxWindow *parent);
+
+private:
+	void OnStartStop(wxCommandEvent& event);
+	void OnClear(wxCommandEvent& event);
+	void OnZoomFit(wxCommandEvent& event);
+	void OnPaint(wxPaintEvent& event);
+	void OnMouseWheel(wxMouseEvent& event);
+	void OnMouseMiddleDrag(wxMouseEvent& event);
+
+	wxCheckBox *mpCpuCB = nullptr;
+	wxCheckBox *mpVideoCB = nullptr;
+	wxCheckBox *mpBasicCB = nullptr;
+	wxButton *mpStartStopBtn = nullptr;
+	wxPanel *mpCanvas = nullptr;
+
+	bool mRecording = false;
+	bool mHasData = false;
+	vdrefptr<ATTraceCollection> mpCollection;
+	double mTotalDuration = 0;
+	double mViewStart = 0;
+	double mViewEnd = 1.0;
+	int mLastMouseX = 0;
+
+	enum { ID_START_STOP = 4900, ID_CLEAR, ID_ZOOM_FIT };
+
+	wxDECLARE_EVENT_TABLE();
+};
+
+wxBEGIN_EVENT_TABLE(ATWxTracePanel, wxPanel)
+wxEND_EVENT_TABLE()
+
+ATWxTracePanel::ATWxTracePanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY)
+{
+	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
+
+	wxBoxSizer *toolbar = new wxBoxSizer(wxHORIZONTAL);
+	mpStartStopBtn = new wxButton(this, ID_START_STOP, "Start Recording", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+	toolbar->Add(mpStartStopBtn, 0, wxRIGHT, 4);
+	mpCpuCB = new wxCheckBox(this, wxID_ANY, "CPU"); mpCpuCB->SetValue(true);
+	toolbar->Add(mpCpuCB, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 4);
+	mpVideoCB = new wxCheckBox(this, wxID_ANY, "Video");
+	toolbar->Add(mpVideoCB, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 4);
+	mpBasicCB = new wxCheckBox(this, wxID_ANY, "BASIC");
+	toolbar->Add(mpBasicCB, 0, wxRIGHT | wxALIGN_CENTER_VERTICAL, 4);
+	toolbar->Add(new wxButton(this, ID_CLEAR, "Clear", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0, wxRIGHT, 2);
+	toolbar->Add(new wxButton(this, ID_ZOOM_FIT, "Zoom Fit", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
+	top->Add(toolbar, 0, wxEXPAND | wxALL, 2);
+
+	mpCanvas = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+		wxFULL_REPAINT_ON_RESIZE | wxBORDER_NONE);
+	mpCanvas->SetBackgroundStyle(wxBG_STYLE_PAINT);
+	top->Add(mpCanvas, 1, wxEXPAND);
+
+	SetSizer(top);
+
+	Bind(wxEVT_BUTTON, &ATWxTracePanel::OnStartStop, this, ID_START_STOP);
+	Bind(wxEVT_BUTTON, &ATWxTracePanel::OnClear, this, ID_CLEAR);
+	Bind(wxEVT_BUTTON, &ATWxTracePanel::OnZoomFit, this, ID_ZOOM_FIT);
+	mpCanvas->Bind(wxEVT_PAINT, &ATWxTracePanel::OnPaint, this);
+	mpCanvas->Bind(wxEVT_MOUSEWHEEL, &ATWxTracePanel::OnMouseWheel, this);
+	mpCanvas->Bind(wxEVT_MIDDLE_DOWN, &ATWxTracePanel::OnMouseMiddleDrag, this);
+	mpCanvas->Bind(wxEVT_MOTION, &ATWxTracePanel::OnMouseMiddleDrag, this);
+}
+
+void ATWxTracePanel::OnStartStop(wxCommandEvent&) {
+	if (!mRecording) {
+		ATTraceSettings settings {};
+		settings.mbTraceCpuInsns = mpCpuCB->GetValue();
+		settings.mbTraceVideo = mpVideoCB->GetValue();
+		settings.mbTraceBasic = mpBasicCB->GetValue();
+		g_sim.StartTracing(settings);
+		mRecording = true;
+		mHasData = false;
+		mpStartStopBtn->SetLabel("Stop Recording");
+		mpCpuCB->Disable();
+		mpVideoCB->Disable();
+		mpBasicCB->Disable();
+	} else {
+		mpCollection = g_sim.GetTraceCollection();
+		g_sim.StopTracing();
+		mRecording = false;
+		mpStartStopBtn->SetLabel("Start Recording");
+		mpCpuCB->Enable();
+		mpVideoCB->Enable();
+		mpBasicCB->Enable();
+
+		if (mpCollection && mpCollection->GetGroupCount() > 0) {
+			mHasData = true;
+			mTotalDuration = 0;
+			for (size_t gi = 0; gi < mpCollection->GetGroupCount(); ++gi) {
+				double d = mpCollection->GetGroup(gi)->GetDuration();
+				if (d > mTotalDuration) mTotalDuration = d;
+			}
+			mViewStart = 0;
+			mViewEnd = mTotalDuration > 0 ? mTotalDuration : 1.0;
+		}
+		mpCanvas->Refresh(false);
+	}
+}
+
+void ATWxTracePanel::OnClear(wxCommandEvent&) {
+	mHasData = false;
+	mTotalDuration = 0;
+	mpCollection.clear();
+	mpCanvas->Refresh(false);
+}
+
+void ATWxTracePanel::OnZoomFit(wxCommandEvent&) {
+	if (mHasData) {
+		mViewStart = 0;
+		mViewEnd = mTotalDuration > 0 ? mTotalDuration : 1.0;
+		mpCanvas->Refresh(false);
+	}
+}
+
+void ATWxTracePanel::OnPaint(wxPaintEvent&) {
+	wxAutoBufferedPaintDC dc(mpCanvas);
+	wxSize sz = mpCanvas->GetSize();
+
+	dc.SetBackground(wxBrush(wxColour(30, 30, 30)));
+	dc.Clear();
+
+	if (!mHasData || !mpCollection) {
+		dc.SetTextForeground(wxColour(128, 128, 128));
+		dc.DrawText(mRecording ? "Recording..." : "No trace data", 8, 8);
+		return;
+	}
+
+	ATTraceCollection *tc = mpCollection;
+	double viewDuration = mViewEnd - mViewStart;
+	if (viewDuration <= 0) viewDuration = 1.0;
+	double pixelsPerSec = sz.GetWidth() / viewDuration;
+
+	// Ruler (24px)
+	const int rulerH = 24;
+	dc.SetPen(*wxTRANSPARENT_PEN);
+	dc.SetBrush(wxBrush(wxColour(32, 32, 32)));
+	dc.DrawRectangle(0, 0, sz.GetWidth(), rulerH);
+
+	// Tick marks
+	dc.SetFont(wxFont(8, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+	double tickSpacing = 1.0;
+	const char *tickFmt = "%.0fs";
+	double pixPerTick = tickSpacing * pixelsPerSec;
+	if (pixPerTick < 60) { tickSpacing = 0.1; tickFmt = "%.1fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+	if (pixPerTick < 60) { tickSpacing = 0.01; tickFmt = "%.2fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+	if (pixPerTick < 60) { tickSpacing = 0.001; tickFmt = "%.3fs"; pixPerTick = tickSpacing * pixelsPerSec; }
+	if (pixPerTick > 300) { tickSpacing *= 5; }
+
+	dc.SetPen(wxPen(wxColour(180, 180, 180)));
+	dc.SetTextForeground(wxColour(200, 200, 200));
+	double firstTick = std::ceil(mViewStart / tickSpacing) * tickSpacing;
+	for (double t = firstTick; t <= mViewEnd; t += tickSpacing) {
+		int x = (int)((t - mViewStart) * pixelsPerSec);
+		dc.DrawLine(x, rulerH - 6, x, rulerH);
+		char buf[32];
+		snprintf(buf, sizeof(buf), tickFmt, t);
+		dc.DrawText(buf, x + 2, 2);
+	}
+
+	// Channel rows
+	const int groupH = 22;
+	const int chanH = 20;
+	int y = rulerH;
+	int channelIdx = 0;
+
+	dc.SetFont(wxFont(9, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+
+	for (size_t gi = 0; gi < tc->GetGroupCount(); ++gi) {
+		ATTraceGroup *grp = tc->GetGroup(gi);
+		VDStringA groupName = VDTextWToU8(VDStringW(grp->GetName()));
+
+		// Group header
+		dc.SetPen(*wxTRANSPARENT_PEN);
+		dc.SetBrush(wxBrush(wxColour(50, 50, 60)));
+		dc.DrawRectangle(0, y, sz.GetWidth(), groupH);
+		dc.SetTextForeground(wxColour(220, 220, 255));
+		dc.DrawText(groupName.c_str(), 4, y + 3);
+		y += groupH;
+
+		for (size_t ci = 0; ci < grp->GetChannelCount(); ++ci) {
+			IATTraceChannel *ch = grp->GetChannel(ci);
+			VDStringA chName = VDTextWToU8(VDStringW(ch->GetName()));
+
+			// Channel background
+			wxColour bgCol = (channelIdx & 1) ? wxColour(34, 36, 36) : wxColour(38, 40, 40);
+			dc.SetBrush(wxBrush(bgCol));
+			dc.DrawRectangle(0, y, sz.GetWidth(), chanH);
+
+			// Channel name
+			dc.SetTextForeground(wxColour(160, 160, 160));
+			dc.DrawText(chName.c_str(), 2, y + 2);
+
+			// Draw events
+			double threshold = viewDuration / sz.GetWidth();
+			ch->StartIteration(mViewStart, mViewEnd, threshold);
+
+			ATTraceEvent ev;
+			while (ch->GetNextEvent(ev)) {
+				int x0 = (int)((ev.mEventStart - mViewStart) * pixelsPerSec);
+				int x1 = (int)((ev.mEventStop - mViewStart) * pixelsPerSec);
+				if (x1 < 0 || x0 > sz.GetWidth()) continue;
+				if (x0 < 0) x0 = 0;
+				if (x1 > sz.GetWidth()) x1 = sz.GetWidth();
+				if (x1 - x0 < 1) x1 = x0 + 1;
+
+				uint32 bg = ev.mBgColor;
+				dc.SetBrush(wxBrush(wxColour((bg >> 16) & 0xFF, (bg >> 8) & 0xFF, bg & 0xFF)));
+				dc.DrawRectangle(x0, y + 1, x1 - x0, chanH - 2);
+
+				// Label if wide enough
+				if (x1 - x0 > 40 && ev.mpName) {
+					VDStringA label = VDTextWToU8(VDStringW(ev.mpName));
+					uint32 fg = ev.mFgColor;
+					dc.SetTextForeground(wxColour((fg >> 16) & 0xFF, (fg >> 8) & 0xFF, fg & 0xFF));
+					dc.SetClippingRegion(x0, y, x1 - x0, chanH);
+					dc.DrawText(label.c_str(), x0 + 2, y + 2);
+					dc.DestroyClippingRegion();
+				}
+			}
+
+			y += chanH;
+			++channelIdx;
+		}
+	}
+}
+
+void ATWxTracePanel::OnMouseWheel(wxMouseEvent& event) {
+	if (!mHasData) return;
+
+	double viewDuration = mViewEnd - mViewStart;
+	double pixelsPerSec = mpCanvas->GetSize().GetWidth() / viewDuration;
+	double mouseTime = mViewStart + event.GetX() / pixelsPerSec;
+
+	if (event.ControlDown()) {
+		// Ctrl+wheel: zoom
+		double zoomFactor = 1.3;
+		double ratio = (mouseTime - mViewStart) / viewDuration;
+		if (event.GetWheelRotation() > 0) {
+			double newDuration = viewDuration / zoomFactor;
+			mViewStart = mouseTime - ratio * newDuration;
+			mViewEnd = mViewStart + newDuration;
+		} else {
+			double newDuration = viewDuration * zoomFactor;
+			mViewStart = mouseTime - ratio * newDuration;
+			mViewEnd = mViewStart + newDuration;
+		}
+	} else {
+		// Wheel: horizontal scroll
+		double scrollAmt = viewDuration * 0.1 * (event.GetWheelRotation() > 0 ? -1.0 : 1.0);
+		mViewStart += scrollAmt;
+		mViewEnd += scrollAmt;
+	}
+
+	// Clamp
+	if (mViewStart < 0) { mViewEnd -= mViewStart; mViewStart = 0; }
+	if (mViewEnd > mTotalDuration) { mViewStart -= (mViewEnd - mTotalDuration); mViewEnd = mTotalDuration; if (mViewStart < 0) mViewStart = 0; }
+
+	mpCanvas->Refresh(false);
+}
+
+void ATWxTracePanel::OnMouseMiddleDrag(wxMouseEvent& event) {
+	if (event.MiddleDown()) {
+		mLastMouseX = event.GetX();
+		return;
+	}
+	if (event.Dragging() && event.MiddleIsDown() && mHasData) {
+		int dx = event.GetX() - mLastMouseX;
+		mLastMouseX = event.GetX();
+		double viewDuration = mViewEnd - mViewStart;
+		double pixelsPerSec = mpCanvas->GetSize().GetWidth() / viewDuration;
+		double timeDelta = dx / pixelsPerSec;
+		mViewStart -= timeDelta;
+		mViewEnd -= timeDelta;
+		mpCanvas->Refresh(false);
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Debug Display (ANTIC visualization) panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxDebugDisplayPanel : public wxPanel {
+public:
+	ATWxDebugDisplayPanel(wxWindow *parent);
+	~ATWxDebugDisplayPanel();
+	void RefreshDisplay();
+
+private:
+	void OnPaint(wxPaintEvent& event);
+	void OnModeChange(wxCommandEvent& event);
+
+	wxChoice *mpModeChoice = nullptr;
+	wxChoice *mpPaletteChoice = nullptr;
+	wxPanel *mpCanvas = nullptr;
+
+	ATDebugDisplay *mpDebugDisplay = nullptr;
+	wxBitmap mBitmap;
+
+	enum { ID_MODE = 5300, ID_PALETTE };
+};
+
+ATWxDebugDisplayPanel::ATWxDebugDisplayPanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY)
+{
+	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
+
+	wxBoxSizer *toolbar = new wxBoxSizer(wxHORIZONTAL);
+	toolbar->Add(new wxStaticText(this, wxID_ANY, "Mode:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	mpModeChoice = new wxChoice(this, ID_MODE);
+	mpModeChoice->Append("ANTIC History");
+	mpModeChoice->Append("ANTIC History Start");
+	mpModeChoice->SetSelection(0);
+	toolbar->Add(mpModeChoice, 0, wxRIGHT, 8);
+
+	toolbar->Add(new wxStaticText(this, wxID_ANY, "Palette:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	mpPaletteChoice = new wxChoice(this, ID_PALETTE);
+	mpPaletteChoice->Append("Registers");
+	mpPaletteChoice->Append("Analysis");
+	mpPaletteChoice->SetSelection(0);
+	toolbar->Add(mpPaletteChoice, 0);
+	top->Add(toolbar, 0, wxEXPAND | wxALL, 2);
+
+	mpCanvas = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxSize(376, 240),
+		wxFULL_REPAINT_ON_RESIZE | wxBORDER_SIMPLE);
+	mpCanvas->SetBackgroundStyle(wxBG_STYLE_PAINT);
+	top->Add(mpCanvas, 0, wxALL, 4);
+
+	SetSizer(top);
+
+	mpDebugDisplay = new ATDebugDisplay;
+	mpDebugDisplay->Init(g_sim.GetMemoryManager(), &g_sim.GetAntic(), &g_sim.GetGTIA(), nullptr);
+
+	mpCanvas->Bind(wxEVT_PAINT, &ATWxDebugDisplayPanel::OnPaint, this);
+	Bind(wxEVT_CHOICE, &ATWxDebugDisplayPanel::OnModeChange, this, ID_MODE);
+	Bind(wxEVT_CHOICE, &ATWxDebugDisplayPanel::OnModeChange, this, ID_PALETTE);
+}
+
+ATWxDebugDisplayPanel::~ATWxDebugDisplayPanel() {
+	if (mpDebugDisplay) {
+		mpDebugDisplay->Shutdown();
+		delete mpDebugDisplay;
+	}
+}
+
+void ATWxDebugDisplayPanel::RefreshDisplay() {
+	if (!mpDebugDisplay) return;
+
+	mpDebugDisplay->SetMode((ATDebugDisplay::Mode)mpModeChoice->GetSelection());
+	mpDebugDisplay->SetPaletteMode((ATDebugDisplay::PaletteMode)mpPaletteChoice->GetSelection());
+	mpDebugDisplay->Update();
+
+	const VDPixmapBuffer& buf = mpDebugDisplay->GetFrameBuffer();
+	if (!buf.data || !buf.palette) return;
+
+	// Create or recreate bitmap
+	if (!mBitmap.IsOk() || mBitmap.GetWidth() != 376 || mBitmap.GetHeight() != 240)
+		mBitmap.Create(376, 240, 24);
+
+	wxNativePixelData data(mBitmap);
+	if (!data) return;
+
+	wxNativePixelData::Iterator p(data);
+	for (int row = 0; row < 240; ++row) {
+		p.MoveTo(data, 0, row);
+		const uint8 *src = (const uint8 *)buf.data + buf.pitch * row;
+		for (int x = 0; x < 376; ++x, ++p) {
+			uint32 pal = buf.palette[src[x]];
+			// Palette is 0x00BBGGRR format
+			p.Red()   = (pal >> 16) & 0xFF;
+			p.Green() = (pal >> 8)  & 0xFF;
+			p.Blue()  = pal & 0xFF;
+		}
+	}
+
+	mpCanvas->Refresh(false);
+}
+
+void ATWxDebugDisplayPanel::OnPaint(wxPaintEvent&) {
+	wxPaintDC dc(mpCanvas);
+	if (mBitmap.IsOk())
+		dc.DrawBitmap(mBitmap, 0, 0, false);
+}
+
+void ATWxDebugDisplayPanel::OnModeChange(wxCommandEvent&) {
+	RefreshDisplay();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// CPU Profiler panel
+///////////////////////////////////////////////////////////////////////////
+
+class ATWxProfilerPanel : public wxPanel {
+public:
+	ATWxProfilerPanel(wxWindow *parent);
+
+	void UpdateFromState(const ATDebuggerSystemState& state);
+
+private:
+	void OnStartStop(wxCommandEvent& event);
+	void OnExport(wxCommandEvent& event);
+	void Repopulate();
+
+	wxChoice *mpModeChoice = nullptr;
+	wxButton *mpStartStopBtn = nullptr;
+	wxListCtrl *mpList = nullptr;
+	wxStaticText *mpStatusText = nullptr;
+
+	bool mProfiling = false;
+	vdrefptr<ATProfileMergedFrame> mpMerged;
+	ATProfileSession mSession;
+	bool mHasSession = false;
+
+	enum { ID_START_STOP = 5400, ID_EXPORT, ID_MODE };
+};
+
+ATWxProfilerPanel::ATWxProfilerPanel(wxWindow *parent)
+	: wxPanel(parent, wxID_ANY)
+{
+	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
+
+	wxBoxSizer *toolbar = new wxBoxSizer(wxHORIZONTAL);
+	mpStartStopBtn = new wxButton(this, ID_START_STOP, "Start Profiling", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+	toolbar->Add(mpStartStopBtn, 0, wxRIGHT, 4);
+	toolbar->Add(new wxStaticText(this, wxID_ANY, "Mode:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	mpModeChoice = new wxChoice(this, ID_MODE);
+	mpModeChoice->Append("Instructions");
+	mpModeChoice->Append("Functions");
+	mpModeChoice->Append("Call Graph");
+	mpModeChoice->Append("Basic Block");
+	mpModeChoice->Append("Basic Lines");
+	mpModeChoice->SetSelection(1);
+	toolbar->Add(mpModeChoice, 0, wxRIGHT, 4);
+	toolbar->Add(new wxButton(this, ID_EXPORT, "Export CSV", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
+	top->Add(toolbar, 0, wxEXPAND | wxALL, 2);
+
+	mpStatusText = new wxStaticText(this, wxID_ANY, "Profiler idle");
+	top->Add(mpStatusText, 0, wxLEFT | wxBOTTOM, 4);
+
+	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+		wxLC_REPORT | wxLC_SINGLE_SEL);
+	mpList->AppendColumn("Address", wxLIST_FORMAT_LEFT, 70);
+	mpList->AppendColumn("Symbol", wxLIST_FORMAT_LEFT, 150);
+	mpList->AppendColumn("Calls", wxLIST_FORMAT_RIGHT, 70);
+	mpList->AppendColumn("Insns", wxLIST_FORMAT_RIGHT, 80);
+	mpList->AppendColumn("Cycles", wxLIST_FORMAT_RIGHT, 80);
+	mpList->AppendColumn("Cycles%", wxLIST_FORMAT_RIGHT, 70);
+	mpList->AppendColumn("CPI", wxLIST_FORMAT_RIGHT, 50);
+
+	wxFont mono(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
+	mpList->SetFont(mono);
+	top->Add(mpList, 1, wxEXPAND);
+
+	SetSizer(top);
+
+	Bind(wxEVT_BUTTON, &ATWxProfilerPanel::OnStartStop, this, ID_START_STOP);
+	Bind(wxEVT_BUTTON, &ATWxProfilerPanel::OnExport, this, ID_EXPORT);
+}
+
+void ATWxProfilerPanel::OnStartStop(wxCommandEvent&) {
+	ATCPUProfiler *profiler = g_sim.GetProfiler();
+	if (!profiler) return;
+
+	if (!mProfiling) {
+		// Map mode choice index to ATProfileMode enum
+		int modeIdx = mpModeChoice->GetSelection();
+		ATProfileMode mode = (ATProfileMode)modeIdx;
+
+		g_sim.SetProfilingEnabled(true);
+		profiler->Start(mode, kATProfileCounterMode_None, kATProfileCounterMode_None);
+		mProfiling = true;
+		mpStartStopBtn->SetLabel("Stop Profiling");
+		mpStatusText->SetLabel("Profiling...");
+	} else {
+		// Stop profiling and retrieve session data
+		if (profiler->IsRunning()) {
+			profiler->End();
+			profiler->GetSession(mSession);
+			mHasSession = true;
+
+			// Merge all frames
+			uint32 frameCount = (uint32)mSession.mpFrames.size();
+			if (frameCount > 0) {
+				ATProfileMergedFrame *merged = nullptr;
+				ATProfileMergeFrames(mSession, 0, frameCount, &merged);
+				mpMerged.clear();
+				mpMerged.set(merged);
+				Repopulate();
+			}
+		}
+		g_sim.SetProfilingEnabled(false);
+
+		mProfiling = false;
+		mpStartStopBtn->SetLabel("Start Profiling");
+
+		if (!mpMerged) {
+			mpStatusText->SetLabel("No profile data collected");
+		}
+	}
+}
+
+void ATWxProfilerPanel::OnExport(wxCommandEvent&) {
+	if (!mpMerged) return;
+
+	wxFileDialog dlg(this, "Export Profiler CSV", "", "profile.csv",
+		"CSV files (*.csv)|*.csv", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	if (dlg.ShowModal() != wxID_OK) return;
+
+	std::ofstream ofs(dlg.GetPath().utf8_str().data());
+	if (!ofs.is_open()) return;
+
+	ofs << "Address,Symbol,Calls,Instructions,Cycles,UnhaltedCycles\n";
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	for (const ATProfileRecord& rec : mpMerged->mRecords) {
+		const char *symName = "";
+		ATSymbol sym;
+		if (dbs && dbs->LookupSymbol(rec.mAddress, kATSymbol_Execute, sym))
+			symName = sym.mpName;
+		ofs << "$" << std::hex << rec.mAddress << std::dec << ","
+			<< symName << ","
+			<< rec.mCalls << "," << rec.mInsns << ","
+			<< rec.mCycles << "," << rec.mUnhaltedCycles << "\n";
+	}
+}
+
+void ATWxProfilerPanel::Repopulate() {
+	mpList->DeleteAllItems();
+	if (!mpMerged) return;
+
+	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
+
+	uint32 totalCycles = mpMerged->mTotalCycles;
+	if (totalCycles == 0) totalCycles = 1;
+
+	// Sort records by cycles (descending)
+	std::vector<const ATProfileRecord *> sorted;
+	sorted.reserve(mpMerged->mRecords.size());
+	for (const auto& r : mpMerged->mRecords)
+		sorted.push_back(&r);
+	std::sort(sorted.begin(), sorted.end(),
+		[](const ATProfileRecord *a, const ATProfileRecord *b) { return a->mCycles > b->mCycles; });
+
+	int row = 0;
+	for (const ATProfileRecord *rec : sorted) {
+		if (row >= 500) break;  // Limit display for performance
+
+		char addrBuf[16];
+		snprintf(addrBuf, sizeof(addrBuf), "$%04X", rec->mAddress);
+		long idx = mpList->InsertItem(row, addrBuf);
+
+		if (dbs) {
+			ATSymbol sym;
+			if (dbs->LookupSymbol(rec->mAddress, kATSymbol_Execute, sym))
+				mpList->SetItem(idx, 1, sym.mpName);
+		}
+
+		char buf[32];
+		snprintf(buf, sizeof(buf), "%u", rec->mCalls);
+		mpList->SetItem(idx, 2, buf);
+
+		snprintf(buf, sizeof(buf), "%u", rec->mInsns);
+		mpList->SetItem(idx, 3, buf);
+
+		snprintf(buf, sizeof(buf), "%u", rec->mCycles);
+		mpList->SetItem(idx, 4, buf);
+
+		float pct = (float)rec->mCycles * 100.0f / (float)totalCycles;
+		snprintf(buf, sizeof(buf), "%.1f%%", pct);
+		mpList->SetItem(idx, 5, buf);
+
+		float cpi = rec->mInsns > 0 ? (float)rec->mCycles / (float)rec->mInsns : 0;
+		snprintf(buf, sizeof(buf), "%.1f", cpi);
+		mpList->SetItem(idx, 6, buf);
+
+		++row;
+	}
+
+	char statusBuf[128];
+	snprintf(statusBuf, sizeof(statusBuf), "%u records, %u total cycles, %u frames",
+		(uint32)mpMerged->mRecords.size(), mpMerged->mTotalCycles,
+		(uint32)mSession.mpFrames.size());
+	mpStatusText->SetLabel(statusBuf);
+}
+
+void ATWxProfilerPanel::UpdateFromState(const ATDebuggerSystemState&) {
+	// Could refresh profiler status here if needed
+}
+
+///////////////////////////////////////////////////////////////////////////
 // Debugger frame (top-level window with AUI manager)
 ///////////////////////////////////////////////////////////////////////////
 
@@ -1018,6 +2175,7 @@ public:
 	~ATWxDebuggerFrame();
 
 	void AppendConsoleText(const char *s);
+	bool NavigateSourceToAddress(uint32 addr);
 
 private:
 	void OnClose(wxCloseEvent& event);
@@ -1041,6 +2199,12 @@ private:
 	ATWxCallStackPanel *mpCallStack = nullptr;
 	ATWxWatchPanel *mpWatch = nullptr;
 	ATWxHistoryPanel *mpHistory = nullptr;
+	ATWxSourcePanel *mpSource = nullptr;
+	ATWxPrinterPanel *mpPrinter = nullptr;
+	ATWxPerformancePanel *mpPerformance = nullptr;
+	ATWxTracePanel *mpTrace = nullptr;
+	ATWxDebugDisplayPanel *mpDebugDisplay = nullptr;
+	ATWxProfilerPanel *mpProfiler = nullptr;
 
 	bool mbJustBroke = false;
 
@@ -1057,7 +2221,13 @@ private:
 		ID_VIEW_BREAKPOINTS,
 		ID_VIEW_CALLSTACK,
 		ID_VIEW_WATCH,
-		ID_VIEW_HISTORY
+		ID_VIEW_HISTORY,
+		ID_VIEW_SOURCE,
+		ID_VIEW_PRINTER,
+		ID_VIEW_PERFORMANCE,
+		ID_VIEW_TRACE,
+		ID_VIEW_DEBUG_DISPLAY,
+		ID_VIEW_PROFILER
 	};
 };
 
@@ -1087,9 +2257,25 @@ ATWxDebuggerFrame::ATWxDebuggerFrame(wxWindow *parent)
 	viewMenu->AppendCheckItem(ID_VIEW_CALLSTACK, "Call Stack");
 	viewMenu->AppendCheckItem(ID_VIEW_WATCH, "Watch");
 	viewMenu->AppendCheckItem(ID_VIEW_HISTORY, "History");
+	viewMenu->AppendSeparator();
+	viewMenu->AppendCheckItem(ID_VIEW_SOURCE, "Source Code");
+	viewMenu->AppendCheckItem(ID_VIEW_PRINTER, "Printer Output");
+	viewMenu->AppendCheckItem(ID_VIEW_PERFORMANCE, "Performance");
+	viewMenu->AppendCheckItem(ID_VIEW_TRACE, "Trace Viewer");
+	viewMenu->AppendCheckItem(ID_VIEW_DEBUG_DISPLAY, "Debug Display");
+	viewMenu->AppendCheckItem(ID_VIEW_PROFILER, "CPU Profiler");
 	mb->Append(viewMenu, "&View");
 
 	SetMenuBar(mb);
+
+	// Create toolbar
+	wxToolBar *tb = CreateToolBar(wxTB_HORIZONTAL | wxTB_TEXT | wxTB_NOICONS);
+	tb->AddTool(ID_RUN_STOP, "Run/Break", wxNullBitmap, "Run or break execution (F5)");
+	tb->AddSeparator();
+	tb->AddTool(ID_STEP_INTO, "Step Into", wxNullBitmap, "Step into (F11)");
+	tb->AddTool(ID_STEP_OVER, "Step Over", wxNullBitmap, "Step over (F10)");
+	tb->AddTool(ID_STEP_OUT, "Step Out", wxNullBitmap, "Step out (Shift+F11)");
+	tb->Realize();
 
 	// Create panels
 	mpRegisters = new ATWxRegistersPanel(this);
@@ -1100,6 +2286,12 @@ ATWxDebuggerFrame::ATWxDebuggerFrame(wxWindow *parent)
 	mpCallStack = new ATWxCallStackPanel(this);
 	mpWatch = new ATWxWatchPanel(this);
 	mpHistory = new ATWxHistoryPanel(this);
+	mpSource = new ATWxSourcePanel(this);
+	mpPrinter = new ATWxPrinterPanel(this);
+	mpPerformance = new ATWxPerformancePanel(this);
+	mpTrace = new ATWxTracePanel(this);
+	mpDebugDisplay = new ATWxDebugDisplayPanel(this);
+	mpProfiler = new ATWxProfilerPanel(this);
 
 	// Add panes with AUI layout
 	mAuiMgr.AddPane(mpDisassembly, wxAuiPaneInfo().Name("disassembly")
@@ -1133,6 +2325,30 @@ ATWxDebuggerFrame::ATWxDebuggerFrame(wxWindow *parent)
 		.Caption("History").Left().Position(1).CloseButton(true)
 		.BestSize(250, 250).MinSize(200, 100));
 
+	mAuiMgr.AddPane(mpSource, wxAuiPaneInfo().Name("source")
+		.Caption("Source Code").Center().Position(1).CloseButton(true).Hide()
+		.BestSize(600, 400).MinSize(300, 200));
+
+	mAuiMgr.AddPane(mpPrinter, wxAuiPaneInfo().Name("printer")
+		.Caption("Printer Output").Bottom().Position(2).CloseButton(true).Hide()
+		.BestSize(400, 200).MinSize(200, 100));
+
+	mAuiMgr.AddPane(mpPerformance, wxAuiPaneInfo().Name("performance")
+		.Caption("Performance").Right().Position(3).CloseButton(true).Hide()
+		.BestSize(280, 340).MinSize(270, 280));
+
+	mAuiMgr.AddPane(mpTrace, wxAuiPaneInfo().Name("trace")
+		.Caption("Trace Viewer").Bottom().Position(3).CloseButton(true).Hide()
+		.BestSize(800, 300).MinSize(400, 150));
+
+	mAuiMgr.AddPane(mpDebugDisplay, wxAuiPaneInfo().Name("debugdisplay")
+		.Caption("Debug Display").Right().Position(4).CloseButton(true).Hide()
+		.BestSize(400, 310).MinSize(390, 280));
+
+	mAuiMgr.AddPane(mpProfiler, wxAuiPaneInfo().Name("profiler")
+		.Caption("CPU Profiler").Center().Position(2).CloseButton(true).Hide()
+		.BestSize(600, 400).MinSize(400, 200));
+
 	mAuiMgr.Update();
 
 	// Bind events
@@ -1142,7 +2358,7 @@ ATWxDebuggerFrame::ATWxDebuggerFrame(wxWindow *parent)
 	Bind(wxEVT_MENU, &ATWxDebuggerFrame::OnStepInto, this, ID_STEP_INTO);
 	Bind(wxEVT_MENU, &ATWxDebuggerFrame::OnStepOver, this, ID_STEP_OVER);
 	Bind(wxEVT_MENU, &ATWxDebuggerFrame::OnStepOut, this, ID_STEP_OUT);
-	Bind(wxEVT_MENU, &ATWxDebuggerFrame::OnViewPane, this, ID_VIEW_REGISTERS, ID_VIEW_HISTORY);
+	Bind(wxEVT_MENU, &ATWxDebuggerFrame::OnViewPane, this, ID_VIEW_REGISTERS, ID_VIEW_PROFILER);
 
 	// Enable the debugger if not already
 	IATDebugger *dbg = ATGetDebugger();
@@ -1169,6 +2385,19 @@ ATWxDebuggerFrame::~ATWxDebuggerFrame() {
 void ATWxDebuggerFrame::AppendConsoleText(const char *s) {
 	if (mpConsole)
 		mpConsole->AppendText(s);
+}
+
+bool ATWxDebuggerFrame::NavigateSourceToAddress(uint32 addr) {
+	if (!mpSource) return false;
+
+	// Make the source pane visible
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(mpSource);
+	if (!pane.IsShown()) {
+		pane.Show();
+		mAuiMgr.Update();
+	}
+
+	return mpSource->NavigateToAddress(addr);
 }
 
 void ATWxDebuggerFrame::OnClose(wxCloseEvent&) {
@@ -1214,6 +2443,12 @@ void ATWxDebuggerFrame::OnTimer(wxTimerEvent&) {
 			viewMenu->Check(ID_VIEW_CALLSTACK, mAuiMgr.GetPane("callstack").IsShown());
 			viewMenu->Check(ID_VIEW_WATCH, mAuiMgr.GetPane("watch").IsShown());
 			viewMenu->Check(ID_VIEW_HISTORY, mAuiMgr.GetPane("history").IsShown());
+			viewMenu->Check(ID_VIEW_SOURCE, mAuiMgr.GetPane("source").IsShown());
+			viewMenu->Check(ID_VIEW_PRINTER, mAuiMgr.GetPane("printer").IsShown());
+			viewMenu->Check(ID_VIEW_PERFORMANCE, mAuiMgr.GetPane("performance").IsShown());
+			viewMenu->Check(ID_VIEW_TRACE, mAuiMgr.GetPane("trace").IsShown());
+			viewMenu->Check(ID_VIEW_DEBUG_DISPLAY, mAuiMgr.GetPane("debugdisplay").IsShown());
+			viewMenu->Check(ID_VIEW_PROFILER, mAuiMgr.GetPane("profiler").IsShown());
 		}
 	}
 }
@@ -1238,6 +2473,21 @@ void ATWxDebuggerFrame::UpdateAllPanes() {
 
 	if (mpHistory && mAuiMgr.GetPane("history").IsShown())
 		mpHistory->UpdateFromState(state);
+
+	if (mpSource && mAuiMgr.GetPane("source").IsShown())
+		mpSource->UpdateFromState(state);
+
+	if (mpPrinter && mAuiMgr.GetPane("printer").IsShown())
+		mpPrinter->Refresh();
+
+	if (mpPerformance && mAuiMgr.GetPane("performance").IsShown())
+		mpPerformance->Refresh();
+
+	if (mpDebugDisplay && mAuiMgr.GetPane("debugdisplay").IsShown())
+		mpDebugDisplay->RefreshDisplay();
+
+	if (mpProfiler && mAuiMgr.GetPane("profiler").IsShown())
+		mpProfiler->UpdateFromState(state);
 }
 
 void ATWxDebuggerFrame::OnRunStop(wxCommandEvent&) {
@@ -1272,14 +2522,20 @@ void ATWxDebuggerFrame::OnStepOut(wxCommandEvent&) {
 void ATWxDebuggerFrame::OnViewPane(wxCommandEvent& event) {
 	const char *paneName = nullptr;
 	switch (event.GetId()) {
-		case ID_VIEW_REGISTERS:   paneName = "registers"; break;
-		case ID_VIEW_DISASSEMBLY: paneName = "disassembly"; break;
-		case ID_VIEW_MEMORY:      paneName = "memory"; break;
-		case ID_VIEW_CONSOLE:     paneName = "console"; break;
-		case ID_VIEW_BREAKPOINTS: paneName = "breakpoints"; break;
-		case ID_VIEW_CALLSTACK:   paneName = "callstack"; break;
-		case ID_VIEW_WATCH:       paneName = "watch"; break;
-		case ID_VIEW_HISTORY:     paneName = "history"; break;
+		case ID_VIEW_REGISTERS:     paneName = "registers"; break;
+		case ID_VIEW_DISASSEMBLY:   paneName = "disassembly"; break;
+		case ID_VIEW_MEMORY:        paneName = "memory"; break;
+		case ID_VIEW_CONSOLE:       paneName = "console"; break;
+		case ID_VIEW_BREAKPOINTS:   paneName = "breakpoints"; break;
+		case ID_VIEW_CALLSTACK:     paneName = "callstack"; break;
+		case ID_VIEW_WATCH:         paneName = "watch"; break;
+		case ID_VIEW_HISTORY:       paneName = "history"; break;
+		case ID_VIEW_SOURCE:        paneName = "source"; break;
+		case ID_VIEW_PRINTER:       paneName = "printer"; break;
+		case ID_VIEW_PERFORMANCE:   paneName = "performance"; break;
+		case ID_VIEW_TRACE:         paneName = "trace"; break;
+		case ID_VIEW_DEBUG_DISPLAY: paneName = "debugdisplay"; break;
+		case ID_VIEW_PROFILER:      paneName = "profiler"; break;
 		default: return;
 	}
 
@@ -1317,6 +2573,12 @@ void ATWxDebuggerAppendConsole(const char *s) {
 	// Thread-safe: buffer text for later flush
 	std::lock_guard<std::mutex> lock(s_consoleMutex);
 	s_consolePending += s;
+}
+
+bool ATWxDebuggerNavigateSource(uint32 addr) {
+	if (s_pDebugFrame)
+		return s_pDebugFrame->NavigateSourceToAddress(addr);
+	return false;
 }
 
 bool ATWxDebuggerDidBreak() {

@@ -28,12 +28,17 @@
 #include <vd2/system/text.h>
 #include <vd2/system/filesys.h>
 
+#include <vd2/system/Fraction.h>
+#include <at/ataudio/audiooutput.h>
+
 #include "simulator.h"
 #include "settings.h"
 #include "cheatengine.h"
 #include "compatdb.h"
 #include "oshelper.h"
 #include "resource.h"
+#include "videowriter.h"
+#include "gtia.h"
 
 #include "dialogs_wx.h"
 
@@ -84,6 +89,7 @@ ATProfileManagerDialog::ATProfileManagerDialog(wxWindow *parent)
 	Bind(wxEVT_BUTTON, &ATProfileManagerDialog::OnNew, this, ID_NEW);
 	Bind(wxEVT_BUTTON, &ATProfileManagerDialog::OnRename, this, ID_RENAME);
 	Bind(wxEVT_BUTTON, &ATProfileManagerDialog::OnDelete, this, ID_DELETE);
+	Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { EndModal(wxID_CLOSE); }, wxID_CLOSE);
 
 	PopulateList();
 }
@@ -193,21 +199,283 @@ void ATShowProfileManagerDialog(wxWindow *parent) {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// Video Recording — stub (complex IATVideoWriter Init API requires
-// careful integration; recording is handled by the ImGui build for now)
+// Video Recording
 ///////////////////////////////////////////////////////////////////////////
 
+static IATVideoWriter *s_pVideoWriter = nullptr;
+
 void ATStopVideoRecording() {
-	// TODO: Implement video recording for wxWidgets build
+	if (s_pVideoWriter) {
+		g_sim.GetAudioOutput()->SetAudioTap(nullptr);
+		g_sim.GetGTIA().RemoveVideoTap(s_pVideoWriter->AsVideoTap());
+		s_pVideoWriter->Shutdown();
+		delete s_pVideoWriter;
+		s_pVideoWriter = nullptr;
+	}
 }
 
 bool ATIsVideoRecording() {
-	return false;
+	return s_pVideoWriter != nullptr;
+}
+
+bool ATIsVideoRecordingPaused() {
+	return s_pVideoWriter && s_pVideoWriter->IsPaused();
+}
+
+void ATPauseVideoRecording() {
+	if (s_pVideoWriter)
+		s_pVideoWriter->Pause();
+}
+
+void ATResumeVideoRecording() {
+	if (s_pVideoWriter)
+		s_pVideoWriter->Resume();
+}
+
+class ATVideoRecordDialog : public wxDialog {
+public:
+	ATVideoRecordDialog(wxWindow *parent);
+
+private:
+	void OnRecord(wxCommandEvent&);
+	void OnCodecChanged(wxCommandEvent&);
+	void OnScalingChanged(wxCommandEvent&);
+	void UpdateVisibility();
+
+	wxChoice *mpCodec;
+	wxSlider *mpBitrate;
+	wxStaticText *mpBitrateLabel;
+	wxChoice *mpScaling;
+	wxChoice *mpResampling;
+	wxStaticText *mpResamplingLabel;
+	wxCheckBox *mpHalfRate;
+	wxCheckBox *mpEncodeAll;
+};
+
+ATVideoRecordDialog::ATVideoRecordDialog(wxWindow *parent)
+	: wxDialog(parent, wxID_ANY, "Record Video", wxDefaultPosition, wxDefaultSize,
+		wxDEFAULT_DIALOG_STYLE)
+{
+	wxBoxSizer *mainSizer = new wxBoxSizer(wxVERTICAL);
+	wxFlexGridSizer *grid = new wxFlexGridSizer(2, wxSize(8, 4));
+	grid->AddGrowableCol(1, 1);
+
+	// Codec
+	grid->Add(new wxStaticText(this, wxID_ANY, "Codec:"), 0, wxALIGN_CENTER_VERTICAL);
+	wxArrayString codecs;
+	codecs.Add("ZMBV (Lossless)");
+	codecs.Add("Raw (Uncompressed)");
+	codecs.Add("RLE (Palette only)");
+#ifdef AT_HAVE_FFMPEG
+	codecs.Add("H.264+AAC (MP4)");
+#endif
+	mpCodec = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, codecs);
+	mpCodec->SetSelection(0);
+	grid->Add(mpCodec, 0, wxEXPAND);
+
+	// Bitrate (H.264 only)
+	mpBitrateLabel = new wxStaticText(this, wxID_ANY, "Video Bitrate:");
+	grid->Add(mpBitrateLabel, 0, wxALIGN_CENTER_VERTICAL);
+	mpBitrate = new wxSlider(this, wxID_ANY, 2000, 500, 8000);
+	grid->Add(mpBitrate, 0, wxEXPAND);
+
+	// Scaling
+	grid->Add(new wxStaticText(this, wxID_ANY, "Scaling:"), 0, wxALIGN_CENTER_VERTICAL);
+	wxArrayString scaling;
+	scaling.Add("None (Native)");
+	scaling.Add("480p Narrow (640x480)");
+	scaling.Add("480p Wide (854x480)");
+	scaling.Add("720p Narrow (960x720)");
+	scaling.Add("720p Wide (1280x720)");
+	mpScaling = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, scaling);
+	mpScaling->SetSelection(0);
+	grid->Add(mpScaling, 0, wxEXPAND);
+
+	// Resampling (visible when scaling != None)
+	mpResamplingLabel = new wxStaticText(this, wxID_ANY, "Resampling:");
+	grid->Add(mpResamplingLabel, 0, wxALIGN_CENTER_VERTICAL);
+	wxArrayString resampling;
+	resampling.Add("Nearest");
+	resampling.Add("Sharp Bilinear");
+	resampling.Add("Bilinear");
+	mpResampling = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, resampling);
+	mpResampling->SetSelection(0);
+	grid->Add(mpResampling, 0, wxEXPAND);
+
+	mainSizer->Add(grid, 0, wxEXPAND | wxALL, 10);
+
+	// Checkboxes
+	wxBoxSizer *checkSizer = new wxBoxSizer(wxVERTICAL);
+	mpHalfRate = new wxCheckBox(this, wxID_ANY, "Half frame rate");
+	mpEncodeAll = new wxCheckBox(this, wxID_ANY, "Encode all frames");
+	checkSizer->Add(mpHalfRate, 0, wxBOTTOM, 4);
+	checkSizer->Add(mpEncodeAll, 0);
+	mainSizer->Add(checkSizer, 0, wxLEFT | wxRIGHT, 10);
+
+	// Buttons
+	mainSizer->AddSpacer(8);
+	wxBoxSizer *btnSizer = new wxBoxSizer(wxHORIZONTAL);
+	wxButton *recordBtn = new wxButton(this, wxID_OK, "Record...");
+	wxButton *cancelBtn = new wxButton(this, wxID_CANCEL, "Cancel");
+	btnSizer->Add(recordBtn, 0, wxRIGHT, 8);
+	btnSizer->Add(cancelBtn);
+	mainSizer->Add(btnSizer, 0, wxALIGN_RIGHT | wxALL, 10);
+
+	SetSizerAndFit(mainSizer);
+
+	mpCodec->Bind(wxEVT_CHOICE, &ATVideoRecordDialog::OnCodecChanged, this);
+	mpScaling->Bind(wxEVT_CHOICE, &ATVideoRecordDialog::OnScalingChanged, this);
+	recordBtn->Bind(wxEVT_BUTTON, &ATVideoRecordDialog::OnRecord, this);
+
+	UpdateVisibility();
+}
+
+void ATVideoRecordDialog::OnCodecChanged(wxCommandEvent&) {
+	UpdateVisibility();
+}
+
+void ATVideoRecordDialog::OnScalingChanged(wxCommandEvent&) {
+	UpdateVisibility();
+}
+
+void ATVideoRecordDialog::UpdateVisibility() {
+	bool isH264 = false;
+#ifdef AT_HAVE_FFMPEG
+	isH264 = (mpCodec->GetSelection() == 3);
+#endif
+	mpBitrateLabel->Show(isH264);
+	mpBitrate->Show(isH264);
+
+	bool hasScaling = (mpScaling->GetSelection() > 0);
+	mpResamplingLabel->Show(hasScaling);
+	mpResampling->Show(hasScaling);
+
+	Layout();
+	Fit();
+}
+
+void ATVideoRecordDialog::OnRecord(wxCommandEvent&) {
+	int codecIdx = mpCodec->GetSelection();
+
+#ifdef AT_HAVE_FFMPEG
+	static const ATVideoEncoding kCodecs[] = {
+		kATVideoEncoding_ZMBV, kATVideoEncoding_Raw,
+		kATVideoEncoding_RLE, kATVideoEncoding_H264_AAC
+	};
+#else
+	static const ATVideoEncoding kCodecs[] = {
+		kATVideoEncoding_ZMBV, kATVideoEncoding_Raw,
+		kATVideoEncoding_RLE
+	};
+#endif
+
+	ATVideoEncoding encoding = kCodecs[codecIdx];
+	bool isMP4 = (encoding == kATVideoEncoding_H264_AAC);
+
+	wxString filter = isMP4
+		? "MP4 Video (*.mp4)|*.mp4|All Files (*)|*"
+		: "AVI Video (*.avi)|*.avi|All Files (*)|*";
+
+	wxFileDialog dlg(this, "Record Video", "", "",
+		filter, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+
+	wxString wxPath = dlg.GetPath();
+
+	// Auto-append extension if missing
+	if (!wxPath.Contains('.'))
+		wxPath += isMP4 ? ".mp4" : ".avi";
+
+	VDStringW path = VDTextU8ToW(VDStringA(wxPath.utf8_str()));
+
+	try {
+		ATGTIAEmulator& gtia = g_sim.GetGTIA();
+
+		IATVideoWriter *writer = nullptr;
+		ATCreateVideoWriter(&writer);
+		s_pVideoWriter = writer;
+
+		int w, h;
+		bool rgb32;
+		gtia.GetRawFrameFormat(w, h, rgb32);
+
+		uint32 palette[256];
+		if (!rgb32)
+			gtia.GetPalette(palette);
+
+		const bool hz50 = g_sim.IsVideo50Hz();
+		VDFraction frameRate = hz50
+			? VDFraction(1773447, 114 * 312)
+			: VDFraction(3579545, 2 * 114 * 262);
+		double samplingRate = hz50 ? 1773447.0 / 28.0 : 3579545.0 / 56.0;
+		double par = gtia.GetPixelAspectRatio();
+		double timestampRate = hz50 ? 1773447.0 : 1789772.5;
+
+		static const ATVideoRecordingScalingMode kScaling[] = {
+			ATVideoRecordingScalingMode::None,
+			ATVideoRecordingScalingMode::Scale480Narrow,
+			ATVideoRecordingScalingMode::Scale480Wide,
+			ATVideoRecordingScalingMode::Scale720Narrow,
+			ATVideoRecordingScalingMode::Scale720Wide
+		};
+		ATVideoRecordingScalingMode scalingMode = kScaling[mpScaling->GetSelection()];
+
+		static const ATVideoRecordingResamplingMode kResampling[] = {
+			ATVideoRecordingResamplingMode::Nearest,
+			ATVideoRecordingResamplingMode::SharpBilinear,
+			ATVideoRecordingResamplingMode::Bilinear
+		};
+		ATVideoRecordingResamplingMode resamplingMode = kResampling[mpResampling->GetSelection()];
+
+		uint32 videoBitRate = 0, audioBitRate = 0;
+		if (encoding == kATVideoEncoding_H264_AAC) {
+			videoBitRate = mpBitrate->GetValue() * 1000;
+			audioBitRate = 128000;
+		}
+
+		s_pVideoWriter->Init(path.c_str(), encoding, videoBitRate, audioBitRate,
+			w, h, frameRate, par, resamplingMode, scalingMode,
+			rgb32 ? nullptr : palette,
+			samplingRate, g_sim.IsDualPokeysEnabled(),
+			timestampRate, mpHalfRate->IsChecked(), mpEncodeAll->IsChecked(),
+			g_sim.GetUIRenderer());
+
+		g_sim.GetAudioOutput()->SetAudioTap(s_pVideoWriter->AsAudioTap());
+		gtia.AddVideoTap(s_pVideoWriter->AsVideoTap());
+
+		EndModal(wxID_OK);
+	} catch (const std::exception& e) {
+		if (s_pVideoWriter) {
+			s_pVideoWriter->Shutdown();
+			delete s_pVideoWriter;
+			s_pVideoWriter = nullptr;
+		}
+		wxMessageBox(wxString::Format("Video recording failed: %s", e.what()),
+			"Error", wxOK | wxICON_ERROR, this);
+	} catch (...) {
+		if (s_pVideoWriter) {
+			s_pVideoWriter->Shutdown();
+			delete s_pVideoWriter;
+			s_pVideoWriter = nullptr;
+		}
+		wxMessageBox("Failed to start video recording.",
+			"Error", wxOK | wxICON_ERROR, this);
+	}
 }
 
 void ATShowVideoRecordDialog(wxWindow *parent) {
-	wxMessageBox("Video recording is not yet available in the wxWidgets build.",
-		"Not Implemented", wxOK | wxICON_INFORMATION, parent);
+	if (ATIsVideoRecording()) {
+		int result = wxMessageBox("Video recording is in progress. Stop recording?",
+			"Recording Active", wxYES_NO | wxICON_QUESTION, parent);
+		if (result == wxYES)
+			ATStopVideoRecording();
+		return;
+	}
+
+	ATVideoRecordDialog dlg(parent);
+	dlg.ShowModal();
 }
 
 ///////////////////////////////////////////////////////////////////////////

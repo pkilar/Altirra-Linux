@@ -10,6 +10,9 @@
 #include <stdafx.h>
 #include "dialogs_wx.h"
 
+#include <algorithm>
+#include <cstring>
+
 #include <wx/button.h>
 #include <wx/choice.h>
 #include <wx/filedlg.h>
@@ -48,9 +51,14 @@ static const DefaultFirmwareEntry kDefaultEntries[] = {
 	{ "XEGS OS",        kATFirmwareType_KernelXEGS },
 };
 
+} // anonymous namespace
+
 class ATFirmwareManagerDialog : public wxDialog {
 public:
 	ATFirmwareManagerDialog(wxWindow *parent);
+	~ATFirmwareManagerDialog();
+
+	static ATFirmwareManagerDialog *sInstance;
 
 private:
 	void PopulateFirmwareList();
@@ -59,7 +67,9 @@ private:
 	void OnAddFile(wxCommandEvent& event);
 	void OnRemove(wxCommandEvent& event);
 	void OnDefaultChanged(wxCommandEvent& event);
-	void OnClose(wxCommandEvent& event);
+	void OnCloseButton(wxCommandEvent& event);
+	void OnWindowClose(wxCloseEvent& event);
+	void ApplyAndClose();
 
 	wxListCtrl *mpFirmwareList = nullptr;
 	wxChoice *mpDefaults[5] = {};
@@ -82,10 +92,14 @@ private:
 	enum { ID_SCAN = 3100, ID_ADD, ID_REMOVE };
 };
 
+ATFirmwareManagerDialog *ATFirmwareManagerDialog::sInstance = nullptr;
+
 ATFirmwareManagerDialog::ATFirmwareManagerDialog(wxWindow *parent)
 	: wxDialog(parent, wxID_ANY, "Firmware Manager", wxDefaultPosition,
 		wxSize(650, 500), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 {
+	sInstance = this;
+
 	wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
 	// Toolbar
@@ -130,8 +144,14 @@ ATFirmwareManagerDialog::ATFirmwareManagerDialog(wxWindow *parent)
 	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnScanDirs, this, ID_SCAN);
 	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnAddFile, this, ID_ADD);
 	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnRemove, this, ID_REMOVE);
-	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnClose, this, wxID_CLOSE);
+	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnCloseButton, this, wxID_CLOSE);
 	Bind(wxEVT_CHOICE, &ATFirmwareManagerDialog::OnDefaultChanged, this);
+	Bind(wxEVT_CLOSE_WINDOW, &ATFirmwareManagerDialog::OnWindowClose, this);
+}
+
+ATFirmwareManagerDialog::~ATFirmwareManagerDialog() {
+	if (sInstance == this)
+		sInstance = nullptr;
 }
 
 void ATFirmwareManagerDialog::PopulateFirmwareList() {
@@ -178,17 +198,31 @@ void ATFirmwareManagerDialog::PopulateDefaultChoices() {
 		ATFirmwareType targetType = kDefaultEntries[i].type;
 		uint64 currentDefault = fwMgr->GetDefaultFirmware(targetType);
 
-		int sel = 0;
-		int choiceIdx = 1;
+		// Collect matching firmware entries, then sort alphabetically
+		struct SortEntry {
+			uint64 id;
+			VDStringA name;
+		};
+		std::vector<SortEntry> sorted;
+
 		for (const auto& fw : fwList) {
 			if (!fw.mbVisible || fw.mType != targetType)
 				continue;
+			sorted.push_back({ fw.mId, VDTextWToU8(fw.mName) });
+		}
 
-			VDStringA name = VDTextWToU8(fw.mName);
-			mpDefaults[i]->Append(name.c_str());
-			mDefaultChoiceData[i].ids.push_back(fw.mId);
+		std::sort(sorted.begin(), sorted.end(),
+			[](const SortEntry& a, const SortEntry& b) {
+				return strcasecmp(a.name.c_str(), b.name.c_str()) < 0;
+			});
 
-			if (fw.mId == currentDefault)
+		int sel = 0;
+		int choiceIdx = 1;
+		for (const auto& entry : sorted) {
+			mpDefaults[i]->Append(entry.name.c_str());
+			mDefaultChoiceData[i].ids.push_back(entry.id);
+
+			if (entry.id == currentDefault)
 				sel = choiceIdx;
 			++choiceIdx;
 		}
@@ -341,19 +375,30 @@ void ATFirmwareManagerDialog::OnDefaultChanged(wxCommandEvent&) {
 	mDefaultsChanged = true;
 }
 
-void ATFirmwareManagerDialog::OnClose(wxCommandEvent&) {
+void ATFirmwareManagerDialog::OnCloseButton(wxCommandEvent&) {
+	Close();
+}
+
+void ATFirmwareManagerDialog::OnWindowClose(wxCloseEvent&) {
+	ApplyAndClose();
+}
+
+void ATFirmwareManagerDialog::ApplyAndClose() {
 	if (mDefaultsChanged) {
 		if (g_sim.LoadROMs()) {
 			g_sim.ColdReset();
 			g_sim.Resume();
 		}
 	}
-	EndModal(wxID_CLOSE);
+	Destroy();
 }
 
-} // anonymous namespace
-
 void ATShowFirmwareManagerDialog(wxWindow *parent) {
-	ATFirmwareManagerDialog dlg(parent);
-	dlg.ShowModal();
+	if (ATFirmwareManagerDialog::sInstance) {
+		ATFirmwareManagerDialog::sInstance->Raise();
+		return;
+	}
+
+	auto *dlg = new ATFirmwareManagerDialog(parent);
+	dlg->Show();
 }

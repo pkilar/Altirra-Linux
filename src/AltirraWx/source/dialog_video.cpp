@@ -13,6 +13,7 @@
 #include <wx/button.h>
 #include <wx/checkbox.h>
 #include <wx/choice.h>
+#include <wx/frame.h>
 #include <wx/notebook.h>
 #include <wx/panel.h>
 #include <wx/sizer.h>
@@ -93,15 +94,18 @@ static const char *kLumaRampNames[] = {
 	"XL",
 };
 
-class ATVideoSettingsDialog : public wxDialog {
+class ATVideoSettingsFrame : public wxFrame {
 public:
-	ATVideoSettingsDialog(wxWindow *parent);
+	ATVideoSettingsFrame(wxWindow *parent);
+	~ATVideoSettingsFrame();
 
 private:
 	void PopulateFromState();
 	void ApplyToState();
-	void OnOK(wxCommandEvent& event);
+	void OnChanged(wxCommandEvent& event);
+	void OnSliderChanged(wxCommandEvent& event);
 	void OnResetColors(wxCommandEvent& event);
+	void OnClose(wxCloseEvent& event);
 
 	// Display tab
 	wxChoice *mpFilter = nullptr;
@@ -141,11 +145,15 @@ private:
 	wxChoice *mpLumaRamp = nullptr;
 	wxCheckBox *mpPALQuirks = nullptr;
 	wxCheckBox *mpUsePALParams = nullptr;
+
+	bool mPopulating = false;
 };
 
-ATVideoSettingsDialog::ATVideoSettingsDialog(wxWindow *parent)
-	: wxDialog(parent, wxID_ANY, "Video Settings", wxDefaultPosition, wxDefaultSize,
-		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+static ATVideoSettingsFrame *spVideoSettingsFrame = nullptr;
+
+ATVideoSettingsFrame::ATVideoSettingsFrame(wxWindow *parent)
+	: wxFrame(parent, wxID_ANY, "Video Settings", wxDefaultPosition, wxSize(520, 480),
+		wxDEFAULT_FRAME_STYLE)
 {
 	wxBoxSizer *topSizer = new wxBoxSizer(wxVERTICAL);
 
@@ -317,23 +325,31 @@ ATVideoSettingsDialog::ATVideoSettingsDialog(wxWindow *parent)
 
 	wxButton *resetBtn = new wxButton(colorPage, wxID_ANY, "Reset to Defaults");
 	colorSizer->Add(resetBtn, 0, wxLEFT | wxBOTTOM, 10);
-	resetBtn->Bind(wxEVT_BUTTON, &ATVideoSettingsDialog::OnResetColors, this);
+	resetBtn->Bind(wxEVT_BUTTON, &ATVideoSettingsFrame::OnResetColors, this);
 
 	colorPage->SetSizer(colorSizer);
 	notebook->AddPage(colorPage, "Color");
 
 	topSizer->Add(notebook, 1, wxEXPAND | wxALL, 5);
 
-	// OK/Cancel
-	topSizer->Add(CreateStdDialogButtonSizer(wxOK | wxCANCEL), 0, wxEXPAND | wxALL, 5);
-
-	SetSizerAndFit(topSizer);
+	SetSizer(topSizer);
 
 	PopulateFromState();
-	Bind(wxEVT_BUTTON, &ATVideoSettingsDialog::OnOK, this, wxID_OK);
+
+	// Bind live-apply events for all controls
+	Bind(wxEVT_CHECKBOX, &ATVideoSettingsFrame::OnChanged, this);
+	Bind(wxEVT_CHOICE, &ATVideoSettingsFrame::OnChanged, this);
+	Bind(wxEVT_SLIDER, &ATVideoSettingsFrame::OnSliderChanged, this);
+	Bind(wxEVT_CLOSE_WINDOW, &ATVideoSettingsFrame::OnClose, this);
 }
 
-void ATVideoSettingsDialog::PopulateFromState() {
+ATVideoSettingsFrame::~ATVideoSettingsFrame() {
+	spVideoSettingsFrame = nullptr;
+}
+
+void ATVideoSettingsFrame::PopulateFromState() {
+	mPopulating = true;
+
 	ATGTIAEmulator& gtia = g_sim.GetGTIA();
 
 	mpFilter->SetSelection((int)ATUIGetDisplayFilterMode());
@@ -374,9 +390,11 @@ void ATVideoSettingsDialog::PopulateFromState() {
 	mpColorMatch->SetSelection((int)params.mColorMatchingMode);
 	mpLumaRamp->SetSelection((int)params.mLumaRampMode);
 	mpPALQuirks->SetValue(params.mbUsePALQuirks);
+
+	mPopulating = false;
 }
 
-void ATVideoSettingsDialog::ApplyToState() {
+void ATVideoSettingsFrame::ApplyToState() {
 	ATGTIAEmulator& gtia = g_sim.GetGTIA();
 
 	ATUISetDisplayFilterMode((ATDisplayFilterMode)mpFilter->GetSelection());
@@ -421,21 +439,41 @@ void ATVideoSettingsDialog::ApplyToState() {
 	gtia.SetColorSettings(cs);
 }
 
-void ATVideoSettingsDialog::OnOK(wxCommandEvent&) {
-	ApplyToState();
-	EndModal(wxID_OK);
+void ATVideoSettingsFrame::OnChanged(wxCommandEvent&) {
+	if (!mPopulating)
+		ApplyToState();
 }
 
-void ATVideoSettingsDialog::OnResetColors(wxCommandEvent&) {
+void ATVideoSettingsFrame::OnSliderChanged(wxCommandEvent&) {
+	if (!mPopulating)
+		ApplyToState();
+}
+
+void ATVideoSettingsFrame::OnResetColors(wxCommandEvent&) {
 	ATGTIAEmulator& gtia = g_sim.GetGTIA();
 	ATColorSettings defaults = gtia.GetDefaultColorSettings();
 	gtia.SetColorSettings(defaults);
 	PopulateFromState();
 }
 
+void ATVideoSettingsFrame::OnClose(wxCloseEvent&) {
+	Destroy();
+}
+
 } // anonymous namespace
 
 void ATShowVideoSettingsDialog(wxWindow *parent) {
-	ATVideoSettingsDialog dlg(parent);
-	dlg.ShowModal();
+	if (spVideoSettingsFrame) {
+		spVideoSettingsFrame->Raise();
+		return;
+	}
+	spVideoSettingsFrame = new ATVideoSettingsFrame(parent);
+	spVideoSettingsFrame->Show();
+}
+
+void ATCloseVideoSettingsWindow() {
+	if (spVideoSettingsFrame) {
+		spVideoSettingsFrame->Destroy();
+		spVideoSettingsFrame = nullptr;
+	}
 }

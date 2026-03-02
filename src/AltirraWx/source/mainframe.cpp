@@ -19,7 +19,9 @@
 #include "mainframe.h"
 #include "menu_ids.h"
 #include <display_wx.h>
+#include <statusbar_wx.h>
 
+#include <wx/dnd.h>
 #include <wx/sizer.h>
 #include <wx/msgdlg.h>
 #include <time.h>
@@ -30,6 +32,7 @@
 #include <vd2/system/text.h>
 #include <at/atcore/device.h>
 #include <at/atcore/devicevideo.h>
+#include <at/atcore/media.h>
 #include <at/atcore/profile.h>
 
 #include "simulator.h"
@@ -47,6 +50,12 @@
 
 #include <SDL3/SDL.h>
 
+// From dialogs_wx.h
+void ATCloseAllNonModalWindows();
+
+// From main_wx.cpp
+void ATLinuxClearDisplay();
+
 // External symbols
 extern ATSimulator g_sim;
 
@@ -62,11 +71,49 @@ IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine();
 // Toast notification (defined in main_wx.cpp)
 void ATImGuiShowToast(const char *message);
 
+// MRU list (defined in menubar.cpp)
+void MRUAdd(const wchar_t *path);
+
+///////////////////////////////////////////////////////////////////////////
+// Drag-and-drop file loading
+///////////////////////////////////////////////////////////////////////////
+
+class ATFileDropTarget : public wxFileDropTarget {
+public:
+	bool OnDropFiles(wxCoord, wxCoord, const wxArrayString& filenames) override {
+		if (filenames.empty())
+			return false;
+
+		// Load the first dropped file
+		const char *utf8 = filenames[0].utf8_str().data();
+		VDStringW path = VDTextU8ToW(VDStringA(utf8));
+
+		try {
+			g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+			MRUAdd(path.c_str());
+
+			const char *fname = strrchr(utf8, '/');
+			char msg[256];
+			snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : utf8);
+			ATImGuiShowToast(msg);
+		} catch (const std::exception& e) {
+			char msg[512];
+			snprintf(msg, sizeof(msg), "Drop failed: %s", e.what());
+			ATImGuiShowToast(msg);
+		} catch (...) {
+			ATImGuiShowToast("Failed to load dropped file");
+		}
+
+		return true;
+	}
+};
+
 ///////////////////////////////////////////////////////////////////////////
 
 wxBEGIN_EVENT_TABLE(ATMainFrame, wxFrame)
 	EVT_CLOSE(ATMainFrame::OnClose)
 	EVT_IDLE(ATMainFrame::OnIdle)
+	EVT_ACTIVATE(ATMainFrame::OnActivate)
 	EVT_TIMER(ID_GAMEPAD_TIMER_ID, ATMainFrame::OnGamepadTimer)
 wxEND_EVENT_TABLE()
 
@@ -123,14 +170,26 @@ ATMainFrame::ATMainFrame()
 	// Build and attach the menu bar
 	SetMenuBar(CreateMenuBar());
 
-	// Bind menu events for our ID range (1000-2000)
+	// Bind menu events for our ID range (1000-2100)
 	Bind(wxEVT_MENU, &ATMainFrame::OnMenuCommand, this, ID_SYSTEM_WARM_RESET, ID_GAMEPAD_TIMER_ID);
 	Bind(wxEVT_UPDATE_UI, &ATMainFrame::OnMenuUpdateUI, this, ID_SYSTEM_WARM_RESET, ID_GAMEPAD_TIMER_ID);
+
+	// Rebuild MRU submenu when any menu bar opens
+	Bind(wxEVT_MENU_OPEN, &ATMainFrame::OnMenuOpen, this);
+
+	// Create status bar
+	mpStatusBar = new ATStatusBar(this);
+	mpStatusBar->SetDisplay(mpDisplay);
+	mpStatusBar->SetVisible(ATUIGetShowStatusBar());
 
 	// Use a sizer so the canvas fills the frame on resize
 	wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
 	sizer->Add(mpCanvas, 1, wxEXPAND);
+	sizer->Add(mpStatusBar, 0, wxEXPAND);
 	SetSizer(sizer);
+
+	// Enable drag-and-drop file loading
+	SetDropTarget(new ATFileDropTarget());
 
 	// Give the canvas initial keyboard focus
 	mpCanvas->SetFocus();
@@ -161,6 +220,16 @@ void ATMainFrame::StartEmulation() {
 
 	// Kick the idle loop
 	wxWakeUpIdle();
+}
+
+void ATMainFrame::StopEmulation() {
+	mEmulationRunning = false;
+	mGamepadTimer.Stop();
+
+	// Disconnect input from the simulator's input manager while it's
+	// still alive.  The deferred destructor runs after g_sim.Shutdown(),
+	// so we must unregister here.  ATInputWx::Shutdown() is idempotent.
+	mInputWx.Shutdown();
 }
 
 void ATMainFrame::OnClose(wxCloseEvent& event) {
@@ -200,8 +269,18 @@ void ATMainFrame::OnClose(wxCloseEvent& event) {
 		}
 	}
 
-	mEmulationRunning = false;
-	mGamepadTimer.Stop();
+	// Stop emulation and disconnect from the simulator while it's still
+	// alive.  After Destroy() the frame may be deleted during idle
+	// processing (before OnExit runs), so all simulator access must
+	// happen here.
+	StopEmulation();
+
+	// Disconnect GTIA video output so nothing renders after this point
+	g_sim.GetGTIA().SetVideoOutput(nullptr);
+	ATLinuxClearDisplay();
+
+	// Close non-modal tool windows so the event loop can exit
+	ATCloseAllNonModalWindows();
 
 	// Save window geometry before shutdown
 	VDRegistryAppKey wkey("Window", true);
@@ -217,6 +296,28 @@ void ATMainFrame::OnClose(wxCloseEvent& event) {
 	}
 
 	Destroy();
+}
+
+void ATMainFrame::OnActivate(wxActivateEvent& event) {
+	event.Skip();
+
+	if (!ATUIGetPauseWhenInactive())
+		return;
+
+	if (event.GetActive()) {
+		// Regained focus — resume if we paused it
+		if (mPausedByFocusLoss) {
+			mPausedByFocusLoss = false;
+			if (g_sim.IsPaused())
+				g_sim.Resume();
+		}
+	} else {
+		// Lost focus — pause if running
+		if (!g_sim.IsPaused()) {
+			mPausedByFocusLoss = true;
+			g_sim.Pause();
+		}
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -587,7 +688,7 @@ void ATMainFrame::UpdateWindowTitle() {
 }
 
 void ATMainFrame::RenderAndPresent() {
-	if (!mpDisplay)
+	if (!mpDisplay || !mEmulationRunning)
 		return;
 
 	// Update window title
@@ -611,4 +712,8 @@ void ATMainFrame::RenderAndPresent() {
 
 	// Render emulation frame and swap buffers
 	mpDisplay->PresentFrame();
+
+	// Tick status bar frame counter and hold counters
+	if (mpStatusBar)
+		mpStatusBar->TickFrame();
 }

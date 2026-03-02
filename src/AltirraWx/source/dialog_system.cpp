@@ -215,8 +215,13 @@ void ATSystemConfigDialog::OnApply(wxCommandEvent&) {
 		kATMediaWriteMode_RW,
 	};
 	int wmIdx = mpWriteMode->GetSelection();
-	if (wmIdx >= 0 && wmIdx < 4)
+	if (wmIdx >= 0 && wmIdx < 4) {
+		auto prev = g_ATOptions;
 		g_ATOptions.mDefaultWriteMode = kWriteModes[wmIdx];
+		ATOptionsRunUpdateCallbacks(&prev);
+		g_ATOptions.mbDirty = true;
+		ATOptionsSave();
+	}
 
 	g_sim.LoadROMs();
 	g_sim.ColdReset();
@@ -237,8 +242,13 @@ void ATSystemConfigDialog::OnOK(wxCommandEvent& event) {
 		kATMediaWriteMode_RW,
 	};
 	int wmIdx = mpWriteMode->GetSelection();
-	if (wmIdx >= 0 && wmIdx < 4)
+	if (wmIdx >= 0 && wmIdx < 4) {
+		auto prev = g_ATOptions;
 		g_ATOptions.mDefaultWriteMode = kWriteModes[wmIdx];
+		ATOptionsRunUpdateCallbacks(&prev);
+		g_ATOptions.mbDirty = true;
+		ATOptionsSave();
+	}
 
 	EndModal(wxID_OK);
 }

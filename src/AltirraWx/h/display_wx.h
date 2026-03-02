@@ -133,12 +133,14 @@ public:
 	void RequestCapture(vdfunction<void(const VDPixmap *)> fn) override;
 
 private:
+	void EnsureTextureCreated();
 	void UploadTexture();
 	void RenderQuad();
 
 	ATDisplayCanvas *mpCanvas;
 
 	GLuint mTexture = 0;
+	bool mTextureInitialized = false;
 	int mTexWidth = 0;
 	int mTexHeight = 0;
 

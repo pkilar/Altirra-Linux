@@ -25,6 +25,7 @@
 
 class ATDisplayCanvas;
 class ATDisplayWx;
+class ATStatusBar;
 
 class ATMainFrame : public wxFrame {
 public:
@@ -36,12 +37,16 @@ public:
 	// Start the emulation idle loop
 	void StartEmulation();
 
+	// Stop emulation and disconnect from simulator (safe for shutdown)
+	void StopEmulation();
+
 	// Initialize input system (called after input manager is ready)
 	void InitInput();
 
 private:
 	void OnClose(wxCloseEvent& event);
 	void OnIdle(wxIdleEvent& event);
+	void OnActivate(wxActivateEvent& event);
 
 	// Keyboard event handlers (bound to canvas)
 	void OnKeyDown(wxKeyEvent& event);
@@ -65,12 +70,19 @@ private:
 	wxMenuBar *CreateMenuBar();
 	void OnMenuCommand(wxCommandEvent& event);
 	void OnMenuUpdateUI(wxUpdateUIEvent& event);
+	void OnMenuOpen(wxMenuEvent& event);
 
 	void UpdateWindowTitle();
 	void RenderAndPresent();
 
 	ATDisplayCanvas *mpCanvas = nullptr;
 	ATDisplayWx *mpDisplay = nullptr;
+	ATStatusBar *mpStatusBar = nullptr;
+	wxMenu *mpMRUMenu = nullptr;
+	wxMenu *mpKernelMenu = nullptr;
+	wxMenu *mpProfilesMenu = nullptr;
+	wxMenu *mpDeviceButtonsMenu = nullptr;
+	wxMenu *mpDiskDrivesMenu = nullptr;
 	ATInputWx mInputWx;
 
 	// Gamepad polling timer (4ms = ~250Hz)
@@ -92,6 +104,7 @@ private:
 	uint32 mFrameTimeErrorAccum = 0;
 	uint64 mLastFrameTime = 0;
 	bool mEmulationRunning = false;
+	bool mPausedByFocusLoss = false;
 
 	wxDECLARE_EVENT_TABLE();
 };

@@ -193,6 +193,18 @@ static bool g_debuggerAutoShowed = false;
 // Global accessor for the display backend — used by emulator_imgui.cpp
 ATDisplaySDL3 *ATGetLinuxDisplay() { return g_pDisplay; }
 
+// Type-safe display accessors used by stubs_linux.cpp (shared with wx build)
+void ATLinuxSetDisplayFilterMode(IVDVideoDisplay::FilterMode fm) {
+	if (g_pDisplay) g_pDisplay->SetFilterMode(fm);
+}
+void ATLinuxSetDisplayStretchMode(ATDisplayStretchMode m) {
+	if (g_pDisplay) g_pDisplay->SetStretchMode(m);
+}
+void ATLinuxGetDisplayWindowSize(int& w, int& h) {
+	if (g_pDisplay) g_pDisplay->GetWindowSize(w, h);
+	else { w = 0; h = 0; }
+}
+
 // SDL window pointer for fullscreen toggle callback
 static SDL_Window *g_pWindow = nullptr;
 

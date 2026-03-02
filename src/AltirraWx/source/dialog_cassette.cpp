@@ -121,8 +121,10 @@ private:
 	wxTimer mUpdateTimer;
 	bool mUpdatingSlider = false;
 
+	void OnPositionSlider(wxCommandEvent& event);
+
 	enum { ID_TIMER = 3000, ID_LOAD, ID_NEW, ID_UNLOAD, ID_RWD, ID_PLAY, ID_REC,
-	       ID_STOP_BTN, ID_SKIPB, ID_SKIPF, ID_APPLY_OPTS };
+	       ID_STOP_BTN, ID_SKIPB, ID_SKIPF, ID_APPLY_OPTS, ID_POS_SLIDER };
 };
 
 ATCassetteControlDialog::ATCassetteControlDialog(wxWindow *parent)
@@ -146,7 +148,7 @@ ATCassetteControlDialog::ATCassetteControlDialog(wxWindow *parent)
 	// Position
 	mpPositionText = new wxStaticText(this, wxID_ANY, "Position: 0:00.0 / 0:00.0");
 	topSizer->Add(mpPositionText, 0, wxALL, 5);
-	mpPositionSlider = new wxSlider(this, wxID_ANY, 0, 0, 1000);
+	mpPositionSlider = new wxSlider(this, ID_POS_SLIDER, 0, 0, 1000);
 	topSizer->Add(mpPositionSlider, 0, wxEXPAND | wxLEFT | wxRIGHT, 5);
 
 	// Transport controls
@@ -249,6 +251,7 @@ ATCassetteControlDialog::ATCassetteControlDialog(wxWindow *parent)
 	Bind(wxEVT_BUTTON, &ATCassetteControlDialog::OnSkipBack, this, ID_SKIPB);
 	Bind(wxEVT_BUTTON, &ATCassetteControlDialog::OnSkipFwd, this, ID_SKIPF);
 	Bind(wxEVT_BUTTON, &ATCassetteControlDialog::OnClose, this, wxID_CLOSE);
+	Bind(wxEVT_SLIDER, &ATCassetteControlDialog::OnPositionSlider, this, ID_POS_SLIDER);
 	Bind(wxEVT_TIMER, &ATCassetteControlDialog::OnTimer, this, ID_TIMER);
 
 	// Apply options on any checkbox/choice change
@@ -380,6 +383,21 @@ void ATCassetteControlDialog::OnSkipBack(wxCommandEvent&) {
 
 void ATCassetteControlDialog::OnSkipFwd(wxCommandEvent&) {
 	g_sim.GetCassette().SkipForward(10.0f);
+}
+
+void ATCassetteControlDialog::OnPositionSlider(wxCommandEvent&) {
+	ATCassetteEmulator& cas = g_sim.GetCassette();
+	if (!cas.IsLoaded())
+		return;
+
+	float len = cas.GetLength();
+	if (len <= 0.0f)
+		return;
+
+	mUpdatingSlider = true;
+	float newPos = (float)mpPositionSlider->GetValue() / 1000.0f * len;
+	cas.SeekToTime(newPos);
+	mUpdatingSlider = false;
 }
 
 void ATCassetteControlDialog::OnApplyOptions(wxCommandEvent&) {

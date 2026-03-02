@@ -54,8 +54,22 @@ bool ATDisplayCanvas::InitGL() {
 	mpGLContext = new wxGLContext(this, nullptr, &ctxAttrs);
 	if (!mpGLContext->IsOK()) {
 		delete mpGLContext;
-		mpGLContext = nullptr;
-		return false;
+
+		// Retry without explicit version — let the driver pick
+		wxGLContextAttrs ctxAttrs2;
+		ctxAttrs2.CompatibilityProfile().EndList();
+		mpGLContext = new wxGLContext(this, nullptr, &ctxAttrs2);
+		if (!mpGLContext->IsOK()) {
+			delete mpGLContext;
+
+			// Last resort: default context
+			mpGLContext = new wxGLContext(this);
+			if (!mpGLContext->IsOK()) {
+				delete mpGLContext;
+				mpGLContext = nullptr;
+				return false;
+			}
+		}
 	}
 
 	return true;
@@ -89,22 +103,12 @@ void ATDisplayCanvas::OnSize(wxSizeEvent& evt) {
 ATDisplayWx::ATDisplayWx(ATDisplayCanvas *canvas)
 	: mpCanvas(canvas)
 {
-	wxGLContext *ctx = canvas->GetGLContext();
-	if (ctx) {
-		canvas->SetCurrent(*ctx);
-
-		glGenTextures(1, &mTexture);
-		glBindTexture(GL_TEXTURE_2D, mTexture);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glBindTexture(GL_TEXTURE_2D, 0);
-	}
+	// GL texture creation is deferred to EnsureTextureCreated(), called from
+	// RenderFrame(). wxGLCanvas context is not usable until the window is shown.
 }
 
 ATDisplayWx::~ATDisplayWx() {
-	if (mTexture && mpCanvas && mpCanvas->GetGLContext()) {
+	if (mTextureInitialized && mTexture && mpCanvas && mpCanvas->GetGLContext()) {
 		mpCanvas->SetCurrent(*mpCanvas->GetGLContext());
 		glDeleteTextures(1, &mTexture);
 		mTexture = 0;
@@ -117,8 +121,34 @@ void ATDisplayWx::PresentFrame() {
 		mpCanvas->SwapBuffers();
 }
 
+void ATDisplayWx::EnsureTextureCreated() {
+	if (mTextureInitialized)
+		return;
+
+	if (!mpCanvas || !mpCanvas->GetGLContext())
+		return;
+
+	mpCanvas->SetCurrent(*mpCanvas->GetGLContext());
+
+	glGenTextures(1, &mTexture);
+	if (mTexture) {
+		glBindTexture(GL_TEXTURE_2D, mTexture);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+		GLint filter = (mFilterMode == kFilterPoint) ? GL_NEAREST : GL_LINEAR;
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, filter);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, filter);
+		glBindTexture(GL_TEXTURE_2D, 0);
+		mTextureInitialized = true;
+	}
+}
+
 void ATDisplayWx::RenderFrame() {
-	if (!mpCanvas || !mpCanvas->GetGLContext() || !mTexture)
+	if (!mpCanvas || !mpCanvas->GetGLContext())
+		return;
+
+	EnsureTextureCreated();
+	if (!mTexture)
 		return;
 
 	mpCanvas->SetCurrent(*mpCanvas->GetGLContext());
@@ -253,10 +283,11 @@ void ATDisplayWx::RenderQuad() {
 // IVDVideoDisplay implementation
 
 void ATDisplayWx::Destroy() {
-	if (mTexture && mpCanvas && mpCanvas->GetGLContext()) {
+	if (mTextureInitialized && mTexture && mpCanvas && mpCanvas->GetGLContext()) {
 		mpCanvas->SetCurrent(*mpCanvas->GetGLContext());
 		glDeleteTextures(1, &mTexture);
 		mTexture = 0;
+		mTextureInitialized = false;
 	}
 }
 
@@ -442,7 +473,7 @@ IVDVideoDisplay::FilterMode ATDisplayWx::GetFilterMode() {
 void ATDisplayWx::SetFilterMode(FilterMode mode) {
 	mFilterMode = mode;
 
-	if (mTexture && mpCanvas && mpCanvas->GetGLContext()) {
+	if (mTextureInitialized && mTexture && mpCanvas && mpCanvas->GetGLContext()) {
 		mpCanvas->SetCurrent(*mpCanvas->GetGLContext());
 		glBindTexture(GL_TEXTURE_2D, mTexture);
 		GLint filter = (mode == kFilterPoint) ? GL_NEAREST : GL_LINEAR;

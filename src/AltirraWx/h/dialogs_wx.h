@@ -39,6 +39,25 @@ void ATShowVideoRecordDialog(wxWindow *parent);
 void ATShowCompatBrowserDialog(wxWindow *parent);
 void ATShowCheaterDialog(wxWindow *parent);
 
+// Input setup dialog (modal).
+void ATShowInputSetupDialog(wxWindow *parent);
+
+// Audio monitor/scope windows (non-modal, toggled).
+void ATShowAudioMonitorWindow(wxWindow *parent);
+void ATShowAudioScopeWindow(wxWindow *parent);
+
+// Tape editor dialog (modal).
+void ATShowTapeEditorDialog(wxWindow *parent);
+
+// Disk explorer dialog (modal).
+void ATShowDiskExplorerDialog(wxWindow *parent);
+
+// Close all non-modal windows before shutdown.
+void ATCloseAllNonModalWindows();
+
 // Video recording control (used by menu stop command).
 void ATStopVideoRecording();
 bool ATIsVideoRecording();
+bool ATIsVideoRecordingPaused();
+void ATPauseVideoRecording();
+void ATResumeVideoRecording();

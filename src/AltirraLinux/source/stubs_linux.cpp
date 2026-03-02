@@ -285,25 +285,20 @@ void ATUISetConstrainMouseFullScreen(bool v) {
 void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) {
 	s_displayFilterMode = m;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
-	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-	if (disp) {
-		IVDVideoDisplay::FilterMode fm =
-			(m == kATDisplayFilterMode_Point)
-				? IVDVideoDisplay::kFilterPoint
-				: IVDVideoDisplay::kFilterBilinear;
-		disp->SetFilterMode(fm);
-	}
+	extern void ATLinuxSetDisplayFilterMode(IVDVideoDisplay::FilterMode);
+	IVDVideoDisplay::FilterMode fm =
+		(m == kATDisplayFilterMode_Point)
+			? IVDVideoDisplay::kFilterPoint
+			: IVDVideoDisplay::kFilterBilinear;
+	ATLinuxSetDisplayFilterMode(fm);
 }
 void ATUISetDisplayIndicators(bool v) { s_displayIndicators = v; }
 void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
 void ATUISetDisplayPanOffset(const vdfloat2& v) { s_displayPanOffset = v; }
 void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	s_displayStretchMode = m;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
-	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-	if (disp)
-		disp->SetStretchMode(m);
+	extern void ATLinuxSetDisplayStretchMode(ATDisplayStretchMode);
+	ATLinuxSetDisplayStretchMode(m);
 }
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
@@ -328,7 +323,7 @@ static ATLinuxEnhancedTextOutput g_enhancedTextOutput;
 
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 	extern ATSimulator g_sim;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
+	extern void ATLinuxGetDisplayWindowSize(int&, int&);
 
 	ATUIEnhancedTextMode oldMode = s_enhancedTextMode;
 	s_enhancedTextMode = v;
@@ -371,13 +366,10 @@ void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 			g_pEnhancedTextEngine->Init(&g_enhancedTextOutput, &g_sim);
 
 			// Initialize with current window size
-			ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-			if (disp) {
-				int w = 0, h = 0;
-				disp->GetWindowSize(w, h);
-				if (w > 0 && h > 0)
-					g_pEnhancedTextEngine->OnSize(w, h);
-			}
+			int w = 0, h = 0;
+			ATLinuxGetDisplayWindowSize(w, h);
+			if (w > 0 && h > 0)
+				g_pEnhancedTextEngine->OnSize(w, h);
 		}
 	}
 }

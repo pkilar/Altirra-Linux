@@ -28,6 +28,9 @@ void ATWxDebuggerAppendConsole(const char *s);
 // Check if the debugger just hit a breakpoint (for auto-focus).
 bool ATWxDebuggerDidBreak();
 
+// Navigate the debugger source panel to show the source for a given address.
+bool ATWxDebuggerNavigateSource(uint32 addr);
+
 // Initialize/shutdown debugger hooks (called from wxApp OnInit/OnExit).
 void ATWxDebuggerInit();
 void ATWxDebuggerShutdown();
