@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Altirra VERSION 4.40 LANGUAGES CXX)
+project(Altirra VERSION 4.40.1 LANGUAGES CXX)
 
 # Frontend selection: ImGui (default) or wxWidgets
 option(AT_USE_WX "Build wxWidgets frontend instead of ImGui" OFF)

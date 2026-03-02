@@ -1,3 +1,10 @@
+altirra (4.40.1-1) unstable; urgency=medium
+
+  * Migrate from SDL2 to SDL3.
+  * Fix CI: install SDL3 properly on Ubuntu 24.04.
+
+ -- pkilar <pkilar@users.noreply.github.com>  Mon, 02 Mar 2026 00:00:00 +0000
+
 altirra (4.40-1) unstable; urgency=medium
 
   * Initial packaging of Altirra Linux port.

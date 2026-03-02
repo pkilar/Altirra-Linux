@@ -1,6 +1,6 @@
 # Maintainer: pkilar <pkilar@users.noreply.github.com>
 pkgname=altirra
-pkgver=4.40
+pkgver=4.40.1
 pkgrel=1
 pkgdesc="Atari 8-bit computer emulator (800/XL/XE/5200)"
 arch=('x86_64')
