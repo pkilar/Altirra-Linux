@@ -15,20 +15,20 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#include <display_sdl2.h>
+#include <display_sdl3.h>
 #include <vd2/system/text.h>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
 
-ATDisplaySDL2::ATDisplaySDL2() {
+ATDisplaySDL3::ATDisplaySDL3() {
 }
 
-ATDisplaySDL2::~ATDisplaySDL2() {
+ATDisplaySDL3::~ATDisplaySDL3() {
 	Shutdown();
 }
 
-bool ATDisplaySDL2::Init(SDL_Window *window, SDL_GLContext glContext) {
+bool ATDisplaySDL3::Init(SDL_Window *window, SDL_GLContext glContext) {
 	mpWindow = window;
 	mGLContext = glContext;
 
@@ -43,7 +43,7 @@ bool ATDisplaySDL2::Init(SDL_Window *window, SDL_GLContext glContext) {
 	return true;
 }
 
-void ATDisplaySDL2::Shutdown() {
+void ATDisplaySDL3::Shutdown() {
 	if (mTexture) {
 		glDeleteTextures(1, &mTexture);
 		mTexture = 0;
@@ -52,13 +52,13 @@ void ATDisplaySDL2::Shutdown() {
 	mGLContext = nullptr;
 }
 
-void ATDisplaySDL2::PresentFrame() {
+void ATDisplaySDL3::PresentFrame() {
 	RenderFrame();
 	if (mpWindow)
 		SDL_GL_SwapWindow(mpWindow);
 }
 
-void ATDisplaySDL2::RenderFrame() {
+void ATDisplaySDL3::RenderFrame() {
 	if (!mpWindow || !mTexture)
 		return;
 
@@ -71,16 +71,16 @@ void ATDisplaySDL2::RenderFrame() {
 		RenderQuad();
 }
 
-void ATDisplaySDL2::GetWindowSize(int& w, int& h) const {
+void ATDisplaySDL3::GetWindowSize(int& w, int& h) const {
 	if (mpWindow)
-		SDL_GL_GetDrawableSize(mpWindow, &w, &h);
+		SDL_GetWindowSizeInPixels(mpWindow, &w, &h);
 	else {
 		w = 0;
 		h = 0;
 	}
 }
 
-void ATDisplaySDL2::UploadTexture() {
+void ATDisplaySDL3::UploadTexture() {
 	VDCriticalSection::AutoLock lock(mStagingLock);
 
 	int w = mStagingBuffer.w;
@@ -112,7 +112,7 @@ void ATDisplaySDL2::UploadTexture() {
 	glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void ATDisplaySDL2::RenderQuad() {
+void ATDisplaySDL3::RenderQuad() {
 	int winW, winH;
 	GetWindowSize(winW, winH);
 	if (winW <= 0 || winH <= 0)
@@ -199,11 +199,11 @@ void ATDisplaySDL2::RenderQuad() {
 
 // IVDVideoDisplay implementation
 
-void ATDisplaySDL2::Destroy() {
+void ATDisplaySDL3::Destroy() {
 	Shutdown();
 }
 
-void ATDisplaySDL2::Reset() {
+void ATDisplaySDL3::Reset() {
 	VDCriticalSection::AutoLock lock(mStagingLock);
 	mStagingBuffer.clear();
 	mSourceW = 0;
@@ -211,18 +211,18 @@ void ATDisplaySDL2::Reset() {
 	mFrameReady = false;
 }
 
-void ATDisplaySDL2::SetSourceMessage(const wchar_t *msg) {
+void ATDisplaySDL3::SetSourceMessage(const wchar_t *msg) {
 	if (msg)
 		mSourceMessage = VDTextWToU8(VDStringW(msg));
 	else
 		mSourceMessage.clear();
 }
 
-bool ATDisplaySDL2::SetSource(bool bAutoUpdate, const VDPixmap& src, bool bAllowConversion) {
+bool ATDisplaySDL3::SetSource(bool bAutoUpdate, const VDPixmap& src, bool bAllowConversion) {
 	return SetSourcePersistent(bAutoUpdate, src, bAllowConversion, nullptr, nullptr);
 }
 
-bool ATDisplaySDL2::SetSourcePersistent(bool bAutoUpdate, const VDPixmap& src, bool bAllowConversion,
+bool ATDisplaySDL3::SetSourcePersistent(bool bAutoUpdate, const VDPixmap& src, bool bAllowConversion,
 	const VDVideoDisplayScreenFXInfo *screenFX, IVDVideoDisplayScreenFXEngine *screenFXEngine) {
 	VDCriticalSection::AutoLock lock(mStagingLock);
 
@@ -261,11 +261,11 @@ bool ATDisplaySDL2::SetSourcePersistent(bool bAutoUpdate, const VDPixmap& src, b
 	return true;
 }
 
-void ATDisplaySDL2::SetSourceSubrect(const vdrect32 *r) {
+void ATDisplaySDL3::SetSourceSubrect(const vdrect32 *r) {
 	// Stub — subrect not supported yet
 }
 
-void ATDisplaySDL2::SetSourceSolidColor(uint32 color) {
+void ATDisplaySDL3::SetSourceSolidColor(uint32 color) {
 	VDCriticalSection::AutoLock lock(mStagingLock);
 
 	if (mStagingBuffer.w > 0 && mStagingBuffer.h > 0) {
@@ -279,36 +279,36 @@ void ATDisplaySDL2::SetSourceSolidColor(uint32 color) {
 	}
 }
 
-void ATDisplaySDL2::SetReturnFocus(bool enable) {}
-void ATDisplaySDL2::SetTouchEnabled(bool enable) {}
-void ATDisplaySDL2::SetUse16Bit(bool enable) {}
-void ATDisplaySDL2::SetHDREnabled(bool hdr) {}
+void ATDisplaySDL3::SetReturnFocus(bool enable) {}
+void ATDisplaySDL3::SetTouchEnabled(bool enable) {}
+void ATDisplaySDL3::SetUse16Bit(bool enable) {}
+void ATDisplaySDL3::SetHDREnabled(bool hdr) {}
 
-void ATDisplaySDL2::SetFullScreen(bool fs, uint32 width, uint32 height, uint32 refresh) {
+void ATDisplaySDL3::SetFullScreen(bool fs, uint32 width, uint32 height, uint32 refresh) {
 	mFullScreen = fs;
 	if (mpWindow) {
 		if (fs)
-			SDL_SetWindowFullscreen(mpWindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
+			SDL_SetWindowFullscreen(mpWindow, true);
 		else
-			SDL_SetWindowFullscreen(mpWindow, 0);
+			SDL_SetWindowFullscreen(mpWindow, false);
 	}
 }
 
-void ATDisplaySDL2::SetCustomDesiredRefreshRate(float hz, float hzmin, float hzmax) {}
+void ATDisplaySDL3::SetCustomDesiredRefreshRate(float hz, float hzmin, float hzmax) {}
 
-void ATDisplaySDL2::SetDestRect(const vdrect32 *r, uint32 backgroundColor) {
+void ATDisplaySDL3::SetDestRect(const vdrect32 *r, uint32 backgroundColor) {
 	mBackgroundColor = backgroundColor;
 }
 
-void ATDisplaySDL2::SetDestRectF(const vdrect32f *r, uint32 backgroundColor) {
+void ATDisplaySDL3::SetDestRectF(const vdrect32f *r, uint32 backgroundColor) {
 	mBackgroundColor = backgroundColor;
 }
 
-void ATDisplaySDL2::SetPixelSharpness(float xfactor, float yfactor) {}
-void ATDisplaySDL2::SetCompositor(IVDDisplayCompositor *compositor) {}
-void ATDisplaySDL2::SetSDRBrightness(float nits) {}
+void ATDisplaySDL3::SetPixelSharpness(float xfactor, float yfactor) {}
+void ATDisplaySDL3::SetCompositor(IVDDisplayCompositor *compositor) {}
+void ATDisplaySDL3::SetSDRBrightness(float nits) {}
 
-void ATDisplaySDL2::PostBuffer(VDVideoDisplayFrame *frame) {
+void ATDisplaySDL3::PostBuffer(VDVideoDisplayFrame *frame) {
 	if (!frame)
 		return;
 
@@ -355,42 +355,42 @@ void ATDisplaySDL2::PostBuffer(VDVideoDisplayFrame *frame) {
 		mOnFrameStatusUpdated(0);
 }
 
-bool ATDisplaySDL2::RevokeBuffer(bool allowFrameSkip, VDVideoDisplayFrame **ppFrame) {
+bool ATDisplaySDL3::RevokeBuffer(bool allowFrameSkip, VDVideoDisplayFrame **ppFrame) {
 	if (ppFrame)
 		*ppFrame = nullptr;
 	return false;
 }
 
-void ATDisplaySDL2::FlushBuffers() {
+void ATDisplaySDL3::FlushBuffers() {
 	VDCriticalSection::AutoLock lock(mStagingLock);
 	mFrameReady = false;
 }
 
-void ATDisplaySDL2::Invalidate() {
+void ATDisplaySDL3::Invalidate() {
 	// Mark for redraw on next PresentFrame
 }
 
-void ATDisplaySDL2::Update(int mode) {
+void ATDisplaySDL3::Update(int mode) {
 	// Immediate update — the main loop calls PresentFrame regularly
 }
 
-void ATDisplaySDL2::Cache() {}
+void ATDisplaySDL3::Cache() {}
 
-void ATDisplaySDL2::SetCallback(IVDVideoDisplayCallback *p) {
+void ATDisplaySDL3::SetCallback(IVDVideoDisplayCallback *p) {
 	mpCallback = p;
 }
 
-void ATDisplaySDL2::SetOnFrameStatusUpdated(vdfunction<void(int)> fn) {
+void ATDisplaySDL3::SetOnFrameStatusUpdated(vdfunction<void(int)> fn) {
 	mOnFrameStatusUpdated = std::move(fn);
 }
 
-void ATDisplaySDL2::SetAccelerationMode(AccelerationMode mode) {}
+void ATDisplaySDL3::SetAccelerationMode(AccelerationMode mode) {}
 
-IVDVideoDisplay::FilterMode ATDisplaySDL2::GetFilterMode() {
+IVDVideoDisplay::FilterMode ATDisplaySDL3::GetFilterMode() {
 	return mFilterMode;
 }
 
-void ATDisplaySDL2::SetFilterMode(FilterMode mode) {
+void ATDisplaySDL3::SetFilterMode(FilterMode mode) {
 	mFilterMode = mode;
 
 	if (mTexture) {
@@ -402,34 +402,37 @@ void ATDisplaySDL2::SetFilterMode(FilterMode mode) {
 	}
 }
 
-float ATDisplaySDL2::GetSyncDelta() const {
+float ATDisplaySDL3::GetSyncDelta() const {
 	return 0.0f;
 }
 
-int ATDisplaySDL2::GetQueuedFrames() const {
+int ATDisplaySDL3::GetQueuedFrames() const {
 	return mFrameReady ? 1 : 0;
 }
 
-bool ATDisplaySDL2::IsFramePending() const {
+bool ATDisplaySDL3::IsFramePending() const {
 	return mFrameReady;
 }
 
-VDDVSyncStatus ATDisplaySDL2::GetVSyncStatus() const {
+VDDVSyncStatus ATDisplaySDL3::GetVSyncStatus() const {
 	VDDVSyncStatus status;
 	// Query actual display refresh rate from SDL
-	SDL_DisplayMode mode;
-	if (mpWindow && SDL_GetCurrentDisplayMode(SDL_GetWindowDisplayIndex(mpWindow), &mode) == 0) {
-		status.mRefreshRate = (float)mode.refresh_rate;
+	if (mpWindow) {
+		SDL_DisplayID displayID = SDL_GetDisplayForWindow(mpWindow);
+		const SDL_DisplayMode *mode = SDL_GetCurrentDisplayMode(displayID);
+		if (mode) {
+			status.mRefreshRate = mode->refresh_rate;
+		}
 	}
 	return status;
 }
 
-vdrect32 ATDisplaySDL2::GetMonitorRect() {
+vdrect32 ATDisplaySDL3::GetMonitorRect() {
 	vdrect32 r;
 	if (mpWindow) {
-		int idx = SDL_GetWindowDisplayIndex(mpWindow);
+		SDL_DisplayID displayID = SDL_GetDisplayForWindow(mpWindow);
 		SDL_Rect bounds;
-		if (SDL_GetDisplayBounds(idx, &bounds) == 0) {
+		if (SDL_GetDisplayBounds(displayID, &bounds)) {
 			r.left = bounds.x;
 			r.top = bounds.y;
 			r.right = bounds.x + bounds.w;
@@ -444,25 +447,25 @@ vdrect32 ATDisplaySDL2::GetMonitorRect() {
 	return r;
 }
 
-bool ATDisplaySDL2::IsScreenFXPreferred() const {
+bool ATDisplaySDL3::IsScreenFXPreferred() const {
 	return false;
 }
 
-VDDHDRAvailability ATDisplaySDL2::IsHDRCapable() const {
+VDDHDRAvailability ATDisplaySDL3::IsHDRCapable() const {
 	return VDDHDRAvailability::NoMinidriverSupport;
 }
 
-bool ATDisplaySDL2::MapNormSourcePtToDest(vdfloat2& pt) const {
+bool ATDisplaySDL3::MapNormSourcePtToDest(vdfloat2& pt) const {
 	return true;
 }
 
-bool ATDisplaySDL2::MapNormDestPtToSource(vdfloat2& pt) const {
+bool ATDisplaySDL3::MapNormDestPtToSource(vdfloat2& pt) const {
 	return true;
 }
 
-void ATDisplaySDL2::SetProfileHook(const vdfunction<void(ProfileEvent, uintptr)>& profileHook) {}
+void ATDisplaySDL3::SetProfileHook(const vdfunction<void(ProfileEvent, uintptr)>& profileHook) {}
 
-void ATDisplaySDL2::RequestCapture(vdfunction<void(const VDPixmap *)> fn) {
+void ATDisplaySDL3::RequestCapture(vdfunction<void(const VDPixmap *)> fn) {
 	if (fn) {
 		VDCriticalSection::AutoLock lock(mStagingLock);
 		if (mStagingBuffer.w > 0 && mStagingBuffer.h > 0) {

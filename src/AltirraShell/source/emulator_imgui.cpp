@@ -32,7 +32,7 @@
 #include <imgui.h>
 #include <emulator_imgui.h>
 #include <debugger_imgui.h>
-#include <display_sdl2.h>
+#include <display_sdl3.h>
 #include <filedialog_linux.h>
 #include <error_imgui.h>
 #include <cartridge_names.h>
@@ -78,7 +78,7 @@ class ATIRQController;
 #include "options.h"
 #include "resource.h"
 
-#include <SDL.h>
+#include <SDL3/SDL.h>
 
 #include <cstdio>
 #include <cstring>
@@ -105,7 +105,7 @@ extern ATSimulator g_sim;
 extern ATUIKeyboardOptions g_kbdOpts;
 
 // Display backend accessor (defined in main_linux.cpp)
-extern ATDisplaySDL2 *ATGetLinuxDisplay();
+extern ATDisplaySDL3 *ATGetLinuxDisplay();
 
 // Quick save state (in-memory)
 static vdrefptr<IATSerializable> s_pQuickState;
@@ -967,7 +967,7 @@ static void DrawToasts() {
 }
 
 static void DrawSourceMessage() {
-	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 	if (!disp)
 		return;
 
@@ -2656,7 +2656,7 @@ static void DrawMenuBar() {
 		if (ImGui::MenuItem("Exit")) {
 			// Signal main loop to quit
 			SDL_Event quit;
-			quit.type = SDL_QUIT;
+			quit.type = SDL_EVENT_QUIT;
 			SDL_PushEvent(&quit);
 		}
 
@@ -2691,7 +2691,7 @@ static void DrawMenuBar() {
 					ATUISetDisplayFilterMode((ATDisplayFilterMode)i);
 
 					// Apply to GL backend
-					ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+					ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 					if (disp) {
 						IVDVideoDisplay::FilterMode fm =
 							(i == kATDisplayFilterMode_Point)
@@ -3325,7 +3325,7 @@ static void DrawSystemConfig() {
 // ============= Status Bar =============
 
 static void DrawStatusBar() {
-	ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 
 	if (!ATUIGetShowStatusBar()) {
 		if (disp)
@@ -4128,7 +4128,7 @@ static void DrawAbout() {
 	ImGui::Separator();
 	ImGui::TextWrapped(
 		"Atari 800/800XL/5200 emulator by Avery Lee.\n"
-		"Linux port by Paul Kilar using SDL2, OpenGL, and Dear ImGui.\n"
+		"Linux port by Paul Kilar using SDL3, OpenGL, and Dear ImGui.\n"
 		"\n"
 		"This program is free software under the GNU General "
 		"Public License v2 or later."
@@ -6464,11 +6464,12 @@ static void DrawInputSetup() {
 
 	// --- Detected controllers ---
 	if (ImGui::CollapsingHeader("Detected Controllers", ImGuiTreeNodeFlags_DefaultOpen)) {
-		int numJoysticks = SDL_NumJoysticks();
-		if (numJoysticks > 0) {
+		int numJoysticks = 0;
+		SDL_JoystickID *joysticks = SDL_GetJoysticks(&numJoysticks);
+		if (joysticks && numJoysticks > 0) {
 			for (int i = 0; i < numJoysticks; ++i) {
-				const char *name = SDL_JoystickNameForIndex(i);
-				if (SDL_IsGameController(i)) {
+				const char *name = SDL_GetJoystickNameForID(joysticks[i]);
+				if (SDL_IsGamepad(joysticks[i])) {
 					ImGui::BulletText("Gamepad %d: %s", i + 1, name ? name : "(unknown)");
 				} else {
 					ImGui::BulletText("Joystick %d: %s", i + 1, name ? name : "(unknown)");
@@ -6477,6 +6478,7 @@ static void DrawInputSetup() {
 		} else {
 			ImGui::TextDisabled("No joysticks/gamepads detected");
 		}
+		SDL_free(joysticks);
 
 		if (ImGui::Button("Rescan")) {
 			IATJoystickManager *jm = g_sim.GetJoystickManager();
@@ -7197,7 +7199,7 @@ static void DrawVideoConfig() {
 		if (ImGui::Combo("##filter", &filterMode, kDisplayFilterNames, 5)) {
 			ATUISetDisplayFilterMode((ATDisplayFilterMode)filterMode);
 
-			ATDisplaySDL2 *disp = ATGetLinuxDisplay();
+			ATDisplaySDL3 *disp = ATGetLinuxDisplay();
 			if (disp) {
 				IVDVideoDisplay::FilterMode fm =
 					(filterMode == kATDisplayFilterMode_Point)

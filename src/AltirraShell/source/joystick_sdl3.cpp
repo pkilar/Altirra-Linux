@@ -17,13 +17,13 @@
 
 #include <joystick.h>
 #include <inputmanager.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstring>
 
-class ATJoystickManagerSDL2 final : public IATJoystickManager {
+class ATJoystickManagerSDL3 final : public IATJoystickManager {
 public:
-	ATJoystickManagerSDL2();
-	~ATJoystickManagerSDL2() override;
+	ATJoystickManagerSDL3();
+	~ATJoystickManagerSDL3() override;
 
 	bool Init(void *hwnd, ATInputManager *inputMan) override;
 	void Shutdown() override;
@@ -47,7 +47,7 @@ private:
 	vdfunction<void()> mOnActivity;
 };
 
-ATJoystickManagerSDL2::ATJoystickManagerSDL2() {
+ATJoystickManagerSDL3::ATJoystickManagerSDL3() {
 	mTransforms.mStickAnalogDeadZone = 6554;    // ~10%
 	mTransforms.mStickDigitalDeadZone = 19661;  // ~30%
 	mTransforms.mStickAnalogPower = 1.0f;
@@ -56,68 +56,70 @@ ATJoystickManagerSDL2::ATJoystickManagerSDL2() {
 	mTransforms.mTriggerAnalogPower = 1.0f;
 }
 
-ATJoystickManagerSDL2::~ATJoystickManagerSDL2() {
+ATJoystickManagerSDL3::~ATJoystickManagerSDL3() {
 	Shutdown();
 }
 
-bool ATJoystickManagerSDL2::Init(void *hwnd, ATInputManager *inputMan) {
+bool ATJoystickManagerSDL3::Init(void *hwnd, ATInputManager *inputMan) {
 	mpInputManager = inputMan;
 
-	if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) < 0)
+	if (!SDL_InitSubSystem(SDL_INIT_GAMEPAD))
 		return false;
 
 	return true;
 }
 
-void ATJoystickManagerSDL2::Shutdown() {
+void ATJoystickManagerSDL3::Shutdown() {
 	mpInputManager = nullptr;
-	SDL_QuitSubSystem(SDL_INIT_GAMECONTROLLER);
+	SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
 }
 
-ATJoystickTransforms ATJoystickManagerSDL2::GetTransforms() const {
+ATJoystickTransforms ATJoystickManagerSDL3::GetTransforms() const {
 	return mTransforms;
 }
 
-void ATJoystickManagerSDL2::SetTransforms(const ATJoystickTransforms& transforms) {
+void ATJoystickManagerSDL3::SetTransforms(const ATJoystickTransforms& transforms) {
 	mTransforms = transforms;
 }
 
-void ATJoystickManagerSDL2::SetCaptureMode(bool capture) {
+void ATJoystickManagerSDL3::SetCaptureMode(bool capture) {
 	mbCaptureMode = capture;
 }
 
-void ATJoystickManagerSDL2::SetOnActivity(const vdfunction<void()>& fn) {
+void ATJoystickManagerSDL3::SetOnActivity(const vdfunction<void()>& fn) {
 	mOnActivity = fn;
 }
 
-void ATJoystickManagerSDL2::RescanForDevices() {
-	// SDL2 handles device enumeration via events (SDL_CONTROLLERDEVICEADDED/REMOVED)
-	// which are processed through the ATInputSDL2 event loop
+void ATJoystickManagerSDL3::RescanForDevices() {
+	// SDL3 handles device enumeration via events (SDL_EVENT_GAMEPAD_ADDED/REMOVED)
+	// which are processed through the ATInputSDL3 event loop
 }
 
-IATJoystickManager::PollResult ATJoystickManagerSDL2::Poll() {
-	// Actual polling is done via SDL event loop in ATInputSDL2::ProcessEvent()
-	int numJoysticks = SDL_NumJoysticks();
-	if (numJoysticks <= 0)
+IATJoystickManager::PollResult ATJoystickManagerSDL3::Poll() {
+	// Actual polling is done via SDL event loop in ATInputSDL3::ProcessEvent()
+	int count = 0;
+	SDL_JoystickID *gamepads = SDL_GetGamepads(&count);
+	SDL_free(gamepads);
+	if (count <= 0)
 		return kPollResult_NoControllers;
 
 	return kPollResult_OK;
 }
 
-bool ATJoystickManagerSDL2::PollForCapture(int& unit, uint32& inputCode, uint32& inputCode2) {
+bool ATJoystickManagerSDL3::PollForCapture(int& unit, uint32& inputCode, uint32& inputCode2) {
 	// Capture mode for input binding — will be implemented in Phase 6
 	return false;
 }
 
-const ATJoystickState *ATJoystickManagerSDL2::PollForCapture(uint32& n) {
+const ATJoystickState *ATJoystickManagerSDL3::PollForCapture(uint32& n) {
 	n = 0;
 	return nullptr;
 }
 
-uint32 ATJoystickManagerSDL2::GetJoystickPortStates() const {
+uint32 ATJoystickManagerSDL3::GetJoystickPortStates() const {
 	return 0;
 }
 
-IATJoystickManager *ATCreateJoystickManagerSDL2() {
-	return new ATJoystickManagerSDL2;
+IATJoystickManager *ATCreateJoystickManagerSDL3() {
+	return new ATJoystickManagerSDL3;
 }

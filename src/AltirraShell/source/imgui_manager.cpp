@@ -1,9 +1,9 @@
 #include <imgui_manager.h>
 
 #include <imgui.h>
-#include <imgui_impl_sdl2.h>
-#include <imgui_impl_opengl2.h>
-#include <SDL.h>
+#include <imgui_impl_sdl3.h>
+#include <imgui_impl_opengl3.h>
+#include <SDL3/SDL.h>
 
 ATImGuiManager::ATImGuiManager() {
 }
@@ -34,10 +34,10 @@ bool ATImGuiManager::Init(SDL_Window *window, SDL_GLContext glContext, const cha
 	ImGuiStyle& style = ImGui::GetStyle();
 	style.Alpha = 0.95f;
 
-	if (!ImGui_ImplSDL2_InitForOpenGL(window, glContext))
+	if (!ImGui_ImplSDL3_InitForOpenGL(window, glContext))
 		return false;
 
-	if (!ImGui_ImplOpenGL2_Init())
+	if (!ImGui_ImplOpenGL3_Init("#version 120"))
 		return false;
 
 	mbInitialized = true;
@@ -48,8 +48,8 @@ void ATImGuiManager::Shutdown() {
 	if (!mbInitialized)
 		return;
 
-	ImGui_ImplOpenGL2_Shutdown();
-	ImGui_ImplSDL2_Shutdown();
+	ImGui_ImplOpenGL3_Shutdown();
+	ImGui_ImplSDL3_Shutdown();
 	ImGui::DestroyContext();
 	mbInitialized = false;
 }
@@ -58,8 +58,8 @@ void ATImGuiManager::NewFrame() {
 	if (!mbInitialized)
 		return;
 
-	ImGui_ImplOpenGL2_NewFrame();
-	ImGui_ImplSDL2_NewFrame();
+	ImGui_ImplOpenGL3_NewFrame();
+	ImGui_ImplSDL3_NewFrame();
 	ImGui::NewFrame();
 }
 
@@ -68,14 +68,14 @@ void ATImGuiManager::Render() {
 		return;
 
 	ImGui::Render();
-	ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+	ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 void ATImGuiManager::ProcessEvent(SDL_Event &event) {
 	if (!mbInitialized)
 		return;
 
-	ImGui_ImplSDL2_ProcessEvent(&event);
+	ImGui_ImplSDL3_ProcessEvent(&event);
 }
 
 bool ATImGuiManager::WantCaptureMouse() const {

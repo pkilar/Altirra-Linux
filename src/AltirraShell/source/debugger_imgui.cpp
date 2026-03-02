@@ -35,7 +35,7 @@ class ATIRQController;
 #include "memorymanager.h"
 #include "antic.h"
 #include "gtia.h"
-#include <display_sdl2.h>
+#include <display_sdl3.h>
 
 #include <algorithm>
 #include <cstdio>

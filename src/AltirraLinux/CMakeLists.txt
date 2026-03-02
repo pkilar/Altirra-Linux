@@ -3,7 +3,7 @@
 # Strategy: GLOB all .cpp from Altirra/source, exclude Windows-only UI files,
 # add our Linux replacement implementations, link against all Phase 0-5 libraries.
 
-find_package(SDL2 REQUIRED)
+find_package(SDL3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(ZLIB REQUIRED)
 
@@ -408,14 +408,13 @@ target_include_directories(altirra BEFORE
 		# Altirra autogen (generated firmware .inl files)
 		${CMAKE_SOURCE_DIR}/src/Altirra/autogen
 
-		# AltirraShell headers (display_sdl2.h, input_sdl2.h)
+		# AltirraShell headers (display_sdl3.h, input_sdl3.h)
 		${CMAKE_SOURCE_DIR}/src/AltirraShell/h
 
 		# Foundation headers
 		${CMAKE_SOURCE_DIR}/src/h
 
-		# SDL2
-		${SDL2_INCLUDE_DIRS}
+		# SDL3 (headers provided via target_link_libraries)
 )
 
 # Link all libraries
@@ -442,7 +441,7 @@ target_link_libraries(altirra
 		vdjson
 
 		# External libraries
-		SDL2::SDL2
+		SDL3::SDL3
 		OpenGL::GL
 		ZLIB::ZLIB
 

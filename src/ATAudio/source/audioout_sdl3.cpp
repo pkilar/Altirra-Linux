@@ -19,7 +19,7 @@
 #include <vd2/system/vdstl.h>
 #include <vd2/system/atomic.h>
 #include <at/ataudio/audioout.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
 
@@ -32,10 +32,10 @@
 #define AT_COMPILER_BARRIER() do {} while(0)
 #endif
 
-class VDAudioOutputSDL2 final : public IVDAudioOutput {
+class VDAudioOutputSDL3 final : public IVDAudioOutput {
 public:
-	VDAudioOutputSDL2();
-	~VDAudioOutputSDL2() override;
+	VDAudioOutputSDL3();
+	~VDAudioOutputSDL3() override;
 
 	uint32 GetPreferredSamplingRate(const wchar_t *preferredDevice) const override;
 
@@ -61,10 +61,10 @@ public:
 	bool Finalize(uint32 timeout) override;
 
 private:
-	static void AudioCallback(void *userdata, Uint8 *stream, int len);
-	void FillBuffer(Uint8 *stream, int len);
+	static void SDLCALL StreamCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount);
+	void FillStream(SDL_AudioStream *stream, int additional_amount);
 
-	SDL_AudioDeviceID mDeviceID = 0;
+	SDL_AudioStream *mpStream = nullptr;
 	uint32 mMixingRate = 48000;
 	uint32 mBlockAlign = 4;    // 2 channels * 2 bytes
 
@@ -84,18 +84,18 @@ private:
 	VDAtomicInt mUnderflowDetected{0};
 };
 
-VDAudioOutputSDL2::VDAudioOutputSDL2() {
+VDAudioOutputSDL3::VDAudioOutputSDL3() {
 }
 
-VDAudioOutputSDL2::~VDAudioOutputSDL2() {
+VDAudioOutputSDL3::~VDAudioOutputSDL3() {
 	Shutdown();
 }
 
-uint32 VDAudioOutputSDL2::GetPreferredSamplingRate(const wchar_t *preferredDevice) const {
+uint32 VDAudioOutputSDL3::GetPreferredSamplingRate(const wchar_t *preferredDevice) const {
 	return 48000;
 }
 
-bool VDAudioOutputSDL2::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATEX *wf, const wchar_t *preferredDevice) {
+bool VDAudioOutputSDL3::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATEX *wf, const wchar_t *preferredDevice) {
 	if (mbInitialized)
 		Shutdown();
 
@@ -130,121 +130,122 @@ bool VDAudioOutputSDL2::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATE
 	mTotalRead = 0;
 	memset(mRingBuffer.data(), 0, ringSize);
 
-	// Open SDL2 audio device
-	SDL_AudioSpec desired {};
-	desired.freq = mMixingRate;
-	desired.format = AUDIO_S16SYS;
-	desired.channels = fmt->nChannels;
-	desired.samples = 1024;  // ~21ms at 48kHz
-	desired.callback = AudioCallback;
-	desired.userdata = this;
+	// Open SDL3 audio device stream
+	SDL_AudioSpec spec;
+	spec.format = SDL_AUDIO_S16;
+	spec.channels = fmt->nChannels;
+	spec.freq = mMixingRate;
 
-	SDL_AudioSpec obtained {};
-	mDeviceID = SDL_OpenAudioDevice(nullptr, 0, &desired, &obtained, 0);
-	if (mDeviceID == 0)
+	mpStream = SDL_OpenAudioDeviceStream(
+		SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+		&spec,
+		StreamCallback,
+		this
+	);
+
+	if (!mpStream)
 		return false;
 
-	// Update mixing rate to what we actually got
-	mMixingRate = obtained.freq;
+	// SDL3 OpenAudioDeviceStream uses the requested format directly
 	mbSilent = false;
 	mbInitialized = true;
 
 	return true;
 }
 
-void VDAudioOutputSDL2::Shutdown() {
-	if (mDeviceID) {
-		SDL_CloseAudioDevice(mDeviceID);
-		mDeviceID = 0;
+void VDAudioOutputSDL3::Shutdown() {
+	if (mpStream) {
+		SDL_DestroyAudioStream(mpStream);
+		mpStream = nullptr;
 	}
 	mbStarted = false;
 	mbInitialized = false;
 	mbSilent = true;
 }
 
-void VDAudioOutputSDL2::GoSilent() {
+void VDAudioOutputSDL3::GoSilent() {
 	mbSilent = true;
-	if (mDeviceID) {
-		SDL_PauseAudioDevice(mDeviceID, 1);
+	if (mpStream) {
+		SDL_PauseAudioStreamDevice(mpStream);
 
-		SDL_LockAudioDevice(mDeviceID);
+		SDL_LockAudioStream(mpStream);
 		mReadPos = 0;
 		mWritePos = 0;
-		SDL_UnlockAudioDevice(mDeviceID);
+		SDL_UnlockAudioStream(mpStream);
 	}
 }
 
-bool VDAudioOutputSDL2::IsSilent() {
+bool VDAudioOutputSDL3::IsSilent() {
 	return mbSilent;
 }
 
-bool VDAudioOutputSDL2::IsFrozen() {
+bool VDAudioOutputSDL3::IsFrozen() {
 	return false;
 }
 
-uint32 VDAudioOutputSDL2::GetAvailSpace() {
+uint32 VDAudioOutputSDL3::GetAvailSpace() {
 	uint32 used = (uint32)(mWritePos - mReadPos) & mRingMask;
 	uint32 avail = mRingMask + 1 - used - mBlockAlign;
 	return avail;
 }
 
-uint32 VDAudioOutputSDL2::GetBufferLevel() {
+uint32 VDAudioOutputSDL3::GetBufferLevel() {
 	return (uint32)(mWritePos - mReadPos) & mRingMask;
 }
 
-uint32 VDAudioOutputSDL2::EstimateHWBufferLevel(bool *underflowDetected) {
+uint32 VDAudioOutputSDL3::EstimateHWBufferLevel(bool *underflowDetected) {
 	if (underflowDetected)
 		*underflowDetected = (mUnderflowDetected.xchg(0) != 0);
 	return GetBufferLevel();
 }
 
-sint32 VDAudioOutputSDL2::GetPosition() {
+sint32 VDAudioOutputSDL3::GetPosition() {
 	return (sint32)(mTotalRead / mBlockAlign);
 }
 
-sint32 VDAudioOutputSDL2::GetPositionBytes() {
+sint32 VDAudioOutputSDL3::GetPositionBytes() {
 	return (sint32)(uint32)mTotalRead;
 }
 
-double VDAudioOutputSDL2::GetPositionTime() {
+double VDAudioOutputSDL3::GetPositionTime() {
 	return (double)(sint32)(uint32)mTotalRead / (double)(mMixingRate * mBlockAlign);
 }
 
-uint32 VDAudioOutputSDL2::GetMixingRate() const {
+uint32 VDAudioOutputSDL3::GetMixingRate() const {
 	return mMixingRate;
 }
 
-bool VDAudioOutputSDL2::Start() {
-	if (!mDeviceID)
+bool VDAudioOutputSDL3::Start() {
+	if (!mpStream)
 		return false;
 
-	SDL_PauseAudioDevice(mDeviceID, 0);
+	SDL_ResumeAudioStreamDevice(mpStream);
 	mbStarted = true;
 	mbSilent = false;
 	return true;
 }
 
-bool VDAudioOutputSDL2::Stop() {
-	if (!mDeviceID)
+bool VDAudioOutputSDL3::Stop() {
+	if (!mpStream)
 		return false;
 
-	SDL_PauseAudioDevice(mDeviceID, 1);
+	SDL_PauseAudioStreamDevice(mpStream);
 
-	SDL_LockAudioDevice(mDeviceID);
+	SDL_LockAudioStream(mpStream);
 	mReadPos = 0;
 	mWritePos = 0;
-	SDL_UnlockAudioDevice(mDeviceID);
+	SDL_UnlockAudioStream(mpStream);
 
 	mbStarted = false;
 	return true;
 }
 
-bool VDAudioOutputSDL2::Flush() {
-	// SDL2 callback model doesn't need explicit flush
+bool VDAudioOutputSDL3::Flush() {
+	// SDL3 stream model doesn't need explicit flush
 	return true;
 }
 
-bool VDAudioOutputSDL2::Write(const void *data, uint32 len) {
+bool VDAudioOutputSDL3::Write(const void *data, uint32 len) {
 	if (!mbInitialized || mbSilent)
 		return true;
 
@@ -280,31 +281,36 @@ bool VDAudioOutputSDL2::Write(const void *data, uint32 len) {
 	return true;
 }
 
-bool VDAudioOutputSDL2::Finalize(uint32 timeout) {
+bool VDAudioOutputSDL3::Finalize(uint32 timeout) {
 	return true;
 }
 
-void VDAudioOutputSDL2::AudioCallback(void *userdata, Uint8 *stream, int len) {
-	static_cast<VDAudioOutputSDL2 *>(userdata)->FillBuffer(stream, len);
+void SDLCALL VDAudioOutputSDL3::StreamCallback(void *userdata, SDL_AudioStream *stream, int additional_amount, int total_amount) {
+	static_cast<VDAudioOutputSDL3 *>(userdata)->FillStream(stream, additional_amount);
 }
 
-void VDAudioOutputSDL2::FillBuffer(Uint8 *stream, int len) {
+void VDAudioOutputSDL3::FillStream(SDL_AudioStream *stream, int additional_amount) {
+	if (additional_amount <= 0)
+		return;
+
 	uint32 rp = (uint32)mReadPos;
 	uint32 wp = (uint32)mWritePos;
 	uint32 available = (wp - rp) & mRingMask;
 
 	// Only consume complete frames to maintain stereo alignment
-	uint32 toRead = std::min((uint32)len, available);
+	uint32 toRead = std::min((uint32)additional_amount, available);
 	toRead -= toRead % mBlockAlign;
 
 	uint32 ringSize = mRingMask + 1;
 
 	if (toRead > 0) {
 		uint32 firstChunk = std::min(toRead, ringSize - rp);
-		memcpy(stream, mRingBuffer.data() + rp, firstChunk);
+
+		// Push data into the audio stream in up to two chunks
+		SDL_PutAudioStreamData(stream, mRingBuffer.data() + rp, firstChunk);
 
 		if (toRead > firstChunk)
-			memcpy(stream + firstChunk, mRingBuffer.data(), toRead - firstChunk);
+			SDL_PutAudioStreamData(stream, mRingBuffer.data(), toRead - firstChunk);
 
 		// Ensure ring buffer reads complete before the writer can see
 		// the updated read position and overwrite what we just read.
@@ -315,14 +321,22 @@ void VDAudioOutputSDL2::FillBuffer(Uint8 *stream, int len) {
 	}
 
 	// Zero-fill any remaining space and flag underflow
-	if ((uint32)len > toRead) {
-		memset(stream + toRead, 0, len - toRead);
+	uint32 remaining = (uint32)additional_amount - toRead;
+	if (remaining > 0) {
+		// Push silence into the stream
+		uint8 silence[4096];
+		while (remaining > 0) {
+			uint32 chunk = std::min(remaining, (uint32)sizeof(silence));
+			memset(silence, 0, chunk);
+			SDL_PutAudioStreamData(stream, silence, chunk);
+			remaining -= chunk;
+		}
 
-		if (available < (uint32)len)
+		if (available < (uint32)additional_amount)
 			mUnderflowDetected = 1;
 	}
 }
 
-IVDAudioOutput *VDCreateAudioOutputSDL2() {
-	return new VDAudioOutputSDL2;
+IVDAudioOutput *VDCreateAudioOutputSDL3() {
+	return new VDAudioOutputSDL3;
 }

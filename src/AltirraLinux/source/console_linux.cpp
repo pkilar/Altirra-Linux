@@ -23,7 +23,7 @@
 #include <vd2/system/text.h>
 #include <imgui_manager.h>
 #include <debugger_imgui.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
@@ -104,7 +104,7 @@ bool ATConsoleShowSource(uint32 addr) {
 
 bool ATConsoleCheckBreak() {
 	SDL_PumpEvents();
-	const Uint8 *state = SDL_GetKeyboardState(nullptr);
+	const bool *state = SDL_GetKeyboardState(nullptr);
 	bool ctrl = state[SDL_SCANCODE_LCTRL] || state[SDL_SCANCODE_RCTRL];
 	return ctrl && (state[SDL_SCANCODE_PAUSE] || state[SDL_SCANCODE_C]);
 }

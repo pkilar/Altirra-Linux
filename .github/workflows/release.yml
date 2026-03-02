@@ -44,7 +44,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm
           pacman -S --noconfirm --needed \
-            cmake ninja gcc sdl2 mesa zlib libxslt fpc git
+            cmake ninja gcc sdl3 mesa zlib libxslt fpc git
 
       - name: Build MADS assembler
         run: |
@@ -93,7 +93,7 @@ jobs:
           dnf install -y \
             rpm-build rpmdevtools \
             cmake gcc-c++ ninja-build \
-            SDL2-devel mesa-libGL-devel zlib-devel \
+            SDL3-devel mesa-libGL-devel zlib-devel \
             libxslt fpc git
 
       - name: Build MADS assembler
@@ -141,9 +141,24 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends \
             build-essential debhelper devscripts \
-            cmake ninja-build g++-14 \
-            libsdl2-dev libgl-dev zlib1g-dev \
-            xsltproc fp-compiler git ca-certificates
+            cmake ninja-build g++-14 pkg-config \
+            libgl-dev zlib1g-dev \
+            xsltproc fp-compiler git ca-certificates \
+            libasound2-dev libpulse-dev libpipewire-0.3-dev \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev \
+            libxfixes-dev libxi-dev libxss-dev libxkbcommon-dev \
+            libdrm-dev libgbm-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libdbus-1-dev libudev-dev \
+            libwayland-dev libdecor-0-dev
+
+      - name: Build SDL3 from source
+        run: |
+          git clone --depth 1 --branch release-3.2.0 \
+            https://github.com/libsdl-org/SDL.git /tmp/SDL3
+          cmake -S /tmp/SDL3 -B /tmp/SDL3/build \
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+          cmake --build /tmp/SDL3/build -- -j$(nproc)
+          cmake --install /tmp/SDL3/build
 
       - name: Build MADS assembler
         run: |

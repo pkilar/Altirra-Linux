@@ -1,12 +1,12 @@
-# AltirraShell - SDL2/OpenGL Linux frontend library
+# AltirraShell - SDL3/OpenGL Linux frontend library
 
-find_package(SDL2 REQUIRED)
+find_package(SDL3 REQUIRED)
 find_package(OpenGL REQUIRED)
 
 set(ALTIRRASHELL_SOURCES
-	source/display_sdl2.cpp
-	source/input_sdl2.cpp
-	source/joystick_sdl2.cpp
+	source/display_sdl3.cpp
+	source/input_sdl3.cpp
+	source/joystick_sdl3.cpp
 	source/imgui_manager.cpp
 	source/debugger_imgui.cpp
 	source/emulator_imgui.cpp
@@ -37,7 +37,7 @@ target_link_libraries(altirrashell
 		ataudio
 		atio
 		atui
-		SDL2::SDL2
+		SDL3::SDL3
 		OpenGL::GL
 		imgui
 )

@@ -24,7 +24,7 @@
 #include <mmreg.h>
 #else
 #include <vd2/system/vdtypes.h>
-#include "audioout_sdl2.h"
+#include "audioout_sdl3.h"
 
 // WAVEFORMATEX-compatible struct for Linux
 struct WAVEFORMATEX {
@@ -1099,7 +1099,7 @@ bool ATAudioOutput::ReinitAudio(ATAudioApi api) {
 	else
 		mpAudioOut = VDCreateAudioOutputWaveOutW32();
 #else
-	mpAudioOut = VDCreateAudioOutputSDL2();
+	mpAudioOut = VDCreateAudioOutputSDL3();
 #endif
 
 	mActiveApi = api;

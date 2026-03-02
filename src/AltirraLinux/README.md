@@ -1,7 +1,7 @@
 # Altirra Linux Port
 
 Linux port of [Altirra](http://www.virtualdub.org/altirra.html), Avery Lee's
-cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL2 for
+cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL3 for
 display, audio, and input, OpenGL 2.1 for rendering, and Dear ImGui for the
 configuration and debugger overlay.
 
@@ -16,7 +16,7 @@ configuration and debugger overlay.
 | ---------- | --------------- | ---------------------------------------------- |
 | GCC        | 13+             | Must support C++23 (`if consteval`, etc.)      |
 | CMake      | 3.20            | Ninja generator recommended                    |
-| SDL2       | 2.0.20+         | `libsdl2-dev` on Debian/Ubuntu, `sdl2` on Arch |
+| SDL3       | 3.2.0+          | `libsdl3-dev` on Debian/Ubuntu, `sdl3` on Arch |
 | OpenGL     | 2.1             | `libgl-dev` / `mesa-libGL-devel`               |
 | FFmpeg     | 5.0+ (optional) | Enables H.264+AAC video recording to MP4       |
 
@@ -27,7 +27,7 @@ manual download needed.
 
 **Debian / Ubuntu:**
 ```sh
-sudo apt install build-essential cmake ninja-build libsdl2-dev libgl-dev
+sudo apt install build-essential cmake ninja-build libsdl3-dev libgl-dev
 
 # Optional: H.264 video recording
 sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev
@@ -35,7 +35,7 @@ sudo apt install libavcodec-dev libavformat-dev libavutil-dev libswscale-dev lib
 
 **Arch Linux:**
 ```sh
-sudo pacman -S base-devel cmake ninja sdl2 mesa
+sudo pacman -S base-devel cmake ninja sdl3 mesa
 
 # Optional: H.264 video recording
 sudo pacman -S ffmpeg
@@ -43,7 +43,7 @@ sudo pacman -S ffmpeg
 
 **Fedora:**
 ```sh
-sudo dnf install gcc-c++ cmake ninja-build SDL2-devel mesa-libGL-devel
+sudo dnf install gcc-c++ cmake ninja-build SDL3-devel mesa-libGL-devel
 
 # Optional: H.264 video recording
 sudo dnf install ffmpeg-free-devel
@@ -202,7 +202,7 @@ When the overlay is visible, debug shortcuts are also active:
 - **Video**: Artifact modes (NTSC/PAL/Auto), monitor modes (Color/Peritel/Mono variants), scanlines, interlace, deinterlace, PAL extended overscan
 - **Color**: Brightness, contrast, hue, saturation, gamma sliders
 - **Effects**: Frame blending (blend/mono persistence/linear), screen effects (bloom enable/radius/intensity, distortion angle/Y ratio)
-- **HiDPI**: Automatic high-DPI scaling via SDL2
+- **HiDPI**: Automatic high-DPI scaling via SDL3
 - **PAR correction**: Pixel aspect ratio correction each frame
 - **Adaptive vsync**: Tries adaptive (-1), falls back to standard (1)
 
@@ -278,25 +278,25 @@ src/AltirraLinux/
     at/atnativeui/
       uiframe.h           Linux shim (shadows Win32 uiframe.h)
   source/
-    main_linux.cpp         SDL2+OpenGL main loop, settings, CLI, event handling
+    main_linux.cpp         SDL3+OpenGL main loop, settings, CLI, event handling
     stubs_linux.cpp        Stub/shim implementations for ~120 Win32-only symbols
     oshelper_linux.cpp     xdg-open, clipboard, process helpers
     console_linux.cpp      Debugger console and source window integration
 
 src/AltirraShell/
-  CMakeLists.txt          SDL2/OpenGL frontend library
+  CMakeLists.txt          SDL3/OpenGL frontend library
   h/
-    display_sdl2.h        IVDVideoDisplay SDL2+GL implementation
-    input_sdl2.h          Keyboard/mouse/controller input
+    display_sdl3.h        IVDVideoDisplay SDL3+GL implementation
+    input_sdl3.h          Keyboard/mouse/controller input
     imgui_manager.h       ImGui lifecycle management
     debugger_imgui.h      Debugger windows (13 windows + toolbar)
     emulator_imgui.h      Emulator config UI (menus, dialogs, status bar)
     filedialog_linux.h    Native file dialog (zenity/kdialog/fallback)
     error_imgui.h         Thread-safe error queue for ImGui popups
   source/
-    display_sdl2.cpp      Double-buffered staging, GL texture upload, aspect-correct rendering
-    input_sdl2.cpp        SDL scancode -> ATInputCode mapping
-    joystick_sdl2.cpp     IATJoystickManager SDL2 implementation
+    display_sdl3.cpp      Double-buffered staging, GL texture upload, aspect-correct rendering
+    input_sdl3.cpp        SDL scancode -> ATInputCode mapping
+    joystick_sdl3.cpp     IATJoystickManager SDL3 implementation
     imgui_manager.cpp     ImGui frame management
     debugger_imgui.cpp    13 debugger windows + IATDebuggerClient
     emulator_imgui.cpp    Menu bar, all config dialogs, disk explorer, status bar

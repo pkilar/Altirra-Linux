@@ -15,20 +15,20 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef AT_INPUT_SDL2_H
-#define AT_INPUT_SDL2_H
+#ifndef AT_INPUT_SDL3_H
+#define AT_INPUT_SDL3_H
 
 #include <vd2/system/vdtypes.h>
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <vector>
 
 class ATInputManager;
 
-// Translates SDL2 events into ATInputManager calls
-class ATInputSDL2 {
+// Translates SDL3 events into ATInputManager calls
+class ATInputSDL3 {
 public:
-	ATInputSDL2();
-	~ATInputSDL2();
+	ATInputSDL3();
+	~ATInputSDL3();
 
 	void Init(ATInputManager *inputMan);
 	void Shutdown();
@@ -41,15 +41,15 @@ public:
 	static uint32 TranslateSDLScancode(SDL_Scancode sc);
 
 private:
-	void OnControllerAdded(int joystickIndex);
-	void OnControllerRemoved(SDL_JoystickID instanceID);
+	void OnGamepadAdded(SDL_JoystickID instanceID);
+	void OnGamepadRemoved(SDL_JoystickID instanceID);
 
 	ATInputManager *mpInputManager = nullptr;
 	int mKeyboardUnit = -1;
 	int mMouseUnit = -1;
 
 	struct ControllerEntry {
-		SDL_GameController *mpController;
+		SDL_Gamepad *mpController;
 		SDL_JoystickID mInstanceID;
 		int mInputUnit;
 	};
@@ -57,4 +57,4 @@ private:
 	std::vector<ControllerEntry> mControllers;
 };
 
-#endif // AT_INPUT_SDL2_H
+#endif // AT_INPUT_SDL3_H

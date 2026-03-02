@@ -17,8 +17,8 @@ add_library(imgui STATIC
 	${imgui_SOURCE_DIR}/imgui_tables.cpp
 	${imgui_SOURCE_DIR}/imgui_widgets.cpp
 	${imgui_SOURCE_DIR}/imgui_demo.cpp
-	${imgui_SOURCE_DIR}/backends/imgui_impl_sdl2.cpp
-	${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
+	${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
+	${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
 target_include_directories(imgui
@@ -27,11 +27,11 @@ target_include_directories(imgui
 		${imgui_SOURCE_DIR}/backends
 )
 
-find_package(SDL2 REQUIRED)
+find_package(SDL3 REQUIRED)
 find_package(OpenGL REQUIRED)
 
 target_link_libraries(imgui
 	PUBLIC
-		SDL2::SDL2
+		SDL3::SDL3
 		OpenGL::GL
 )

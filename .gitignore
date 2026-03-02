@@ -14,3 +14,4 @@ localconfig/active/
 
 # Memory audit backups
 memory-audit/
+.fastembed_cache/

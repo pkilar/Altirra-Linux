@@ -1,5 +1,5 @@
 Name:           altirra
-Version:        4.40
+Version:        4.40.1
 Release:        1%{?dist}
 Summary:        Atari 8-bit computer emulator (800/XL/XE/5200)
 License:        GPL-2.0-or-later
@@ -12,12 +12,12 @@ BuildRequires:  ninja-build
 BuildRequires:  mads
 BuildRequires:  pkg-config
 BuildRequires:  git
-BuildRequires:  SDL2-devel
+BuildRequires:  SDL3-devel
 BuildRequires:  mesa-libGL-devel
 BuildRequires:  zlib-devel
 BuildRequires:  libxslt
 
-Requires:       SDL2
+Requires:       SDL3
 Requires:       mesa-libGL
 Requires:       zlib
 
@@ -62,5 +62,9 @@ ATTest/attest all
 %{_docdir}/altirra/html
 
 %changelog
+* Mon Mar 02 2026 pkilar <pkilar@users.noreply.github.com> - 4.40.1-1
+- Migrate from SDL2 to SDL3
+- Fix CI: install SDL3 properly on Ubuntu 24.04
+
 * Sat Mar 01 2026 pkilar <pkilar@users.noreply.github.com> - 4.40-1
 - Initial Linux port release

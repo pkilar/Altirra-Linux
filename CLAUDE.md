@@ -12,7 +12,7 @@ Altirra is an Atari 8-bit computer emulator (800/XL/XE/5200) written in C++ by A
 
 **Toolchain**: CMake 3.20+, Ninja, GCC 13+ (tested with GCC 15.2.1), C++23
 
-**Dependencies**: libsdl2-dev, libgl-dev, zlib1g-dev, xsltproc, MADS 2.1.0+ (6502 assembler)
+**Dependencies**: libsdl3-dev, libgl-dev, zlib1g-dev, xsltproc, MADS 2.1.0+ (6502 assembler)
 
 **Building**:
 ```bash
@@ -106,7 +106,7 @@ The 32 projects form a layered architecture:
 
 **UI layer (Linux)**:
 - `AltirraShell` — ImGui-based UI: menus, config dialogs, disk explorer, status bar, 13-window debugger
-- `AltirraLinux` — Linux application: SDL2 window management, main loop, settings (INI), stubs for Windows-only symbols
+- `AltirraLinux` — Linux application: SDL3 window management, main loop, settings (INI), stubs for Windows-only symbols
 
 **Application (Windows)** (`Altirra`):
 - `ATSimulator` (simulator.h) — Central orchestrator connecting all emulation components
@@ -118,7 +118,7 @@ The 32 projects form a layered architecture:
 - Shares `ATSimulator` and all core emulation with Windows
 - `src/AltirraShell/source/emulator_imgui.cpp` — ImGui UI (menus, dialogs, status bar)
 - `src/AltirraShell/source/debugger_imgui.cpp` — ImGui debugger (13 windows + toolbar)
-- `src/AltirraShell/source/display_sdl2.cpp` — SDL2+OpenGL display backend
+- `src/AltirraShell/source/display_sdl3.cpp` — SDL3+OpenGL display backend
 - `src/AltirraShell/source/commands_linux.cpp` — Linux UI command handlers
 - `src/AltirraLinux/source/main_linux.cpp` — Main loop, window management, settings
 
@@ -183,7 +183,7 @@ Copy examples from `localconfig/example/` to `localconfig/active/`:
 ## Platform Notes
 
 - **Windows**: Win32 API, Direct3D, COM throughout. VS2022 .sln/.vcxproj build.
-- **Linux**: SDL2+OpenGL display, Dear ImGui UI, POSIX sockets, inotify. CMake/Ninja build. ~99.9% feature-complete.
+- **Linux**: SDL3+OpenGL display, Dear ImGui UI, POSIX sockets, inotify. CMake/Ninja build. ~99.9% feature-complete.
 - Linux porting uses separate `*_linux.cpp` files and `#ifdef VD_PLATFORM_LINUX` guards to keep platform code isolated
 - The `vd2/system` library provides platform abstraction (threading, file I/O, registry) with Linux implementations in `*_linux.cpp` files
 - SIMD: separate code paths for SSE2 (x86/x64) and NEON (ARM64)

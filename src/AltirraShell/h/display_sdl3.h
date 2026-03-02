@@ -15,8 +15,8 @@
 //	You should have received a copy of the GNU General Public License along
 //	with this program. If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef AT_DISPLAY_SDL2_H
-#define AT_DISPLAY_SDL2_H
+#ifndef AT_DISPLAY_SDL3_H
+#define AT_DISPLAY_SDL3_H
 
 #include <vd2/system/thread.h>
 #include <vd2/system/atomic.h>
@@ -24,13 +24,13 @@
 #include <vd2/Kasumi/pixmaputils.h>
 #include <vd2/VDDisplay/display.h>
 #include "uitypes.h"
-#include <SDL.h>
+#include <SDL3/SDL.h>
 #include <GL/gl.h>
 
-class ATDisplaySDL2 final : public IVDVideoDisplay {
+class ATDisplaySDL3 final : public IVDVideoDisplay {
 public:
-	ATDisplaySDL2();
-	~ATDisplaySDL2();
+	ATDisplaySDL3();
+	~ATDisplaySDL3();
 
 	bool Init(SDL_Window *window, SDL_GLContext glContext);
 	void Shutdown();
@@ -137,4 +137,4 @@ private:
 	vdfunction<void(int)> mOnFrameStatusUpdated;
 };
 
-#endif // AT_DISPLAY_SDL2_H
+#endif // AT_DISPLAY_SDL3_H

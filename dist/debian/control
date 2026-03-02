@@ -9,7 +9,7 @@ Build-Depends: debhelper-compat (= 13),
                mads,
                pkg-config,
                git,
-               libsdl2-dev,
+               libsdl3-dev,
                libgl-dev,
                zlib1g-dev,
                xsltproc
