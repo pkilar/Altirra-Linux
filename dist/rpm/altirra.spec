@@ -16,10 +16,12 @@ BuildRequires:  SDL3-devel
 BuildRequires:  mesa-libGL-devel
 BuildRequires:  zlib-devel
 BuildRequires:  libxslt
+BuildRequires:  wxGTK3-devel >= 3.2
 
 Requires:       SDL3
 Requires:       mesa-libGL
 Requires:       zlib
+Requires:       wxGTK3 >= 3.2
 
 Recommends:     ffmpeg-free
 
@@ -34,7 +36,7 @@ support, and an integrated debugger with disassembler, profiler, and trace viewe
 %autosetup -n Altirra-Linux-%{version}
 
 %build
-%cmake -G Ninja
+%cmake -G Ninja -DAT_USE_WX=ON
 %cmake_build
 
 %check

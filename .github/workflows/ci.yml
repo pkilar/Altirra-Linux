@@ -19,7 +19,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             cmake ninja-build g++-14 \
             libsdl3-dev libgl-dev zlib1g-dev \
-            xsltproc fp-compiler
+            xsltproc fp-compiler \
+            libwxgtk3.2-dev
 
       - name: Build MADS assembler
         run: |
@@ -39,3 +40,13 @@ jobs:
 
       - name: Test
         run: cd build/src && ATTest/attest all
+
+      - name: Configure wxWidgets build
+        run: |
+          cmake -B build-wx -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_CXX_COMPILER=g++-14 \
+            -DAT_USE_WX=ON
+
+      - name: Build wxWidgets frontend
+        run: cmake --build build-wx

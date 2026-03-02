@@ -6,7 +6,7 @@ pkgdesc="Atari 8-bit computer emulator (800/XL/XE/5200)"
 arch=('x86_64')
 url="https://www.virtualdub.org/altirra.html"
 license=('GPL-2.0-or-later')
-depends=('sdl3' 'mesa' 'zlib')
+depends=('sdl3' 'mesa' 'zlib' 'wxwidgets-gtk3')
 optdepends=('ffmpeg: H.264 video recording')
 makedepends=('cmake' 'ninja' 'mads' 'gcc' 'git' 'pkg-config' 'libxslt')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/pkilar/Altirra-Linux/archive/refs/tags/v$pkgver.tar.gz")
@@ -16,7 +16,8 @@ build() {
 	cd "$srcdir/Altirra-Linux-$pkgver"
 	cmake -B build -G Ninja \
 		-DCMAKE_BUILD_TYPE=Release \
-		-DCMAKE_INSTALL_PREFIX=/usr
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DAT_USE_WX=ON
 	cmake --build build
 }
 
