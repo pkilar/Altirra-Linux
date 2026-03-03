@@ -62,6 +62,9 @@ void ATShowColorSettingsDialog(wxWindow *parent);
 // Advanced configuration editor (modal).
 void ATShowAdvancedConfigDialog(wxWindow *parent);
 
+// Update checker (queries GitHub releases API).
+void ATCheckForUpdates(wxWindow *parent);
+
 // Close all non-modal windows before shutdown.
 void ATCloseAllNonModalWindows();
 

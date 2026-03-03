@@ -678,11 +678,27 @@ void ATMainFrame::UpdateWindowTitle() {
 		}
 	}
 
-	// Show turbo/paused indicator
+	// Show emulation state indicators
 	if (ATUIGetTurbo())
 		off += snprintf(title + off, sizeof(title) - off, " [TURBO]");
-	else if (g_sim.IsPaused())
+	else if (ATUIGetSlowMotion())
+		off += snprintf(title + off, sizeof(title) - off, " [SLOW]");
+
+	if (g_sim.IsPaused())
 		off += snprintf(title + off, sizeof(title) - off, " [PAUSED]");
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (dbg && dbg->IsEnabled() && !dbg->IsRunning())
+		off += snprintf(title + off, sizeof(title) - off, " [BREAK]");
+
+	// Show video standard
+	switch (g_sim.GetVideoStandard()) {
+		case kATVideoStandard_PAL:    off += snprintf(title + off, sizeof(title) - off, " (PAL)"); break;
+		case kATVideoStandard_SECAM:  off += snprintf(title + off, sizeof(title) - off, " (SECAM)"); break;
+		case kATVideoStandard_NTSC50: off += snprintf(title + off, sizeof(title) - off, " (NTSC50)"); break;
+		case kATVideoStandard_PAL60:  off += snprintf(title + off, sizeof(title) - off, " (PAL60)"); break;
+		default: break;  // NTSC is default, don't clutter title
+	}
 
 	SetTitle(title);
 }

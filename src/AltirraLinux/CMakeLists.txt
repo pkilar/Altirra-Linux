@@ -408,6 +408,7 @@ set(LINUX_SOURCES
 	source/joystick_sdl3.cpp
 	source/commands_linux.cpp
 	source/enhancedtext_linux.cpp
+	source/updatecheck_linux.cpp
 	${CMAKE_CURRENT_BINARY_DIR}/embedded_resources.cpp
 )
 

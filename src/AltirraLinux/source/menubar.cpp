@@ -727,6 +727,8 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	helpMenu->Append(ID_HELP_HOME_PAGE, "&Home Page...");
 	helpMenu->Append(ID_HELP_CHANGELOG, "Change &Log...");
 	helpMenu->AppendSeparator();
+	helpMenu->Append(ID_HELP_CHECK_FOR_UPDATES, "Check for &Updates...");
+	helpMenu->AppendSeparator();
 	helpMenu->Append(ID_HELP_ABOUT, "&About Altirra...");
 	menuBar->Append(helpMenu, "&Help");
 
@@ -1758,6 +1760,10 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 
 		case ID_HELP_CHANGELOG:
 			ATLaunchURL(L"https://www.virtualdub.org/altirra-changelog.html");
+			break;
+
+		case ID_HELP_CHECK_FOR_UPDATES:
+			ATCheckForUpdates(this);
 			break;
 
 		case ID_HELP_ABOUT: {
