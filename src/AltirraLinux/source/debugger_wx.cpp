@@ -947,11 +947,14 @@ public:
 
 private:
 	void OnToggleRecording(wxCommandEvent& event);
+	void OnViewModeChanged(wxCommandEvent& event);
 
 	wxListCtrl *mpList = nullptr;
 	wxCheckBox *mpRecordCB = nullptr;
+	wxChoice *mpViewMode = nullptr;
+	bool mDetailedView = false;
 
-	enum { ID_RECORD = 4600 };
+	enum { ID_RECORD = 4600, ID_VIEW_MODE };
 };
 
 ATWxHistoryPanel::ATWxHistoryPanel(wxWindow *parent)
@@ -959,11 +962,21 @@ ATWxHistoryPanel::ATWxHistoryPanel(wxWindow *parent)
 {
 	wxBoxSizer *top = new wxBoxSizer(wxVERTICAL);
 
+	wxBoxSizer *toolbar = new wxBoxSizer(wxHORIZONTAL);
 	mpRecordCB = new wxCheckBox(this, ID_RECORD, "Record History");
-	top->Add(mpRecordCB, 0, wxALL, 4);
+	toolbar->Add(mpRecordCB, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 8);
+
+	toolbar->Add(new wxStaticText(this, wxID_ANY, "View:"), 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
+	mpViewMode = new wxChoice(this, ID_VIEW_MODE);
+	mpViewMode->Append("Disassembly");
+	mpViewMode->Append("Registers");
+	mpViewMode->SetSelection(0);
+	mpViewMode->Bind(wxEVT_CHOICE, &ATWxHistoryPanel::OnViewModeChanged, this);
+	toolbar->Add(mpViewMode, 0, wxALIGN_CENTER_VERTICAL);
+	top->Add(toolbar, 0, wxALL, 4);
 
 	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-		wxLC_REPORT | wxLC_SINGLE_SEL | wxLC_NO_HEADER);
+		wxLC_REPORT | wxLC_SINGLE_SEL);
 	mpList->AppendColumn("History", wxLIST_FORMAT_LEFT, 500);
 
 	wxFont mono(10, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL);
@@ -1006,13 +1019,43 @@ void ATWxHistoryPanel::UpdateFromState(const ATDebuggerSystemState& state) {
 	const ATCPUHistoryEntry *hparray[maxLines];
 	uint32 fetched = hist->ExtractHistory(hparray, start, std::min(count, (uint32)maxLines));
 
-	ATDebugDisasmMode mode = target->GetDisasmMode();
-	for (uint32 i = 0; i < fetched; ++i) {
-		VDStringA line;
-		ATDisassembleInsn(line, target, mode, *hparray[i],
-			true, true, true, true, true, false, false, true, true, false);
+	if (mDetailedView) {
+		// Detailed register view: Cycle | PC | Instruction | A | X | Y | S | P
+		for (uint32 i = 0; i < fetched; ++i) {
+			const ATCPUHistoryEntry& h = *hparray[i];
 
-		mpList->InsertItem(i, line.c_str());
+			// Build instruction mnemonic via disassembler
+			VDStringA insn;
+			ATDebugDisasmMode mode = target->GetDisasmMode();
+			ATDisassembleInsn(insn, target, mode, h,
+				false, false, false, false, false, false, false, false, true, false);
+
+			char line[256];
+			snprintf(line, sizeof(line),
+				"%8u  $%04X  %-20s  A=%02X X=%02X Y=%02X S=%02X P=%02X%s%s%s%s%s%s%s%s",
+				h.mCycle, h.mPC, insn.c_str(),
+				h.mA, h.mX, h.mY, h.mS, h.mP,
+				(h.mP & 0x80) ? " N" : "",
+				(h.mP & 0x40) ? " V" : "",
+				(h.mP & 0x08) ? " D" : "",
+				(h.mP & 0x04) ? " I" : "",
+				(h.mP & 0x02) ? " Z" : "",
+				(h.mP & 0x01) ? " C" : "",
+				h.mbIRQ ? " [IRQ]" : "",
+				h.mbNMI ? " [NMI]" : "");
+
+			mpList->InsertItem(i, line);
+		}
+	} else {
+		// Original disassembly view
+		ATDebugDisasmMode mode = target->GetDisasmMode();
+		for (uint32 i = 0; i < fetched; ++i) {
+			VDStringA line;
+			ATDisassembleInsn(line, target, mode, *hparray[i],
+				true, true, true, true, true, false, false, true, true, false);
+
+			mpList->InsertItem(i, line.c_str());
+		}
 	}
 }
 
@@ -1025,6 +1068,17 @@ void ATWxHistoryPanel::OnToggleRecording(wxCommandEvent&) {
 	if (!hist) return;
 
 	hist->SetHistoryEnabled(!hist->GetHistoryEnabled());
+}
+
+void ATWxHistoryPanel::OnViewModeChanged(wxCommandEvent&) {
+	mDetailedView = (mpViewMode->GetSelection() == 1);
+
+	// Adjust column width for the view mode
+	if (mDetailedView) {
+		mpList->SetColumnWidth(0, 800);
+	} else {
+		mpList->SetColumnWidth(0, 500);
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1968,6 +2022,90 @@ void ATWxDebugDisplayPanel::OnModeChange(wxCommandEvent&) {
 // CPU Profiler panel
 ///////////////////////////////////////////////////////////////////////////
 
+///////////////////////////////////////////////////////////////////////////
+// Profile timeline bar chart canvas
+
+class ATWxProfileTimeline : public wxPanel {
+public:
+	ATWxProfileTimeline(wxWindow *parent)
+		: wxPanel(parent, wxID_ANY, wxDefaultPosition, wxSize(-1, 120))
+	{
+		SetBackgroundStyle(wxBG_STYLE_PAINT);
+		Bind(wxEVT_PAINT, &ATWxProfileTimeline::OnPaint, this);
+	}
+
+	void SetData(const std::vector<std::pair<VDStringA, uint32>>& bars, uint32 totalCycles) {
+		mBars = bars;
+		mTotalCycles = totalCycles;
+		Refresh();
+	}
+
+	void Clear() { mBars.clear(); mTotalCycles = 0; Refresh(); }
+
+private:
+	void OnPaint(wxPaintEvent&) {
+		wxAutoBufferedPaintDC dc(this);
+		wxSize sz = GetClientSize();
+
+		dc.SetBackground(wxBrush(wxColour(30, 30, 30)));
+		dc.Clear();
+
+		if (mBars.empty() || mTotalCycles == 0) {
+			dc.SetTextForeground(wxColour(128, 128, 128));
+			dc.DrawText("No profile data", 4, 4);
+			return;
+		}
+
+		dc.SetFont(wxFont(8, wxFONTFAMILY_TELETYPE, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
+
+		int barH = std::max(8, (sz.GetHeight() - 4) / (int)mBars.size() - 2);
+		int labelW = 100;
+		int barAreaW = sz.GetWidth() - labelW - 60;
+		if (barAreaW < 50) barAreaW = 50;
+
+		// Color palette for bars
+		static const wxColour colors[] = {
+			wxColour(0x48, 0x9E, 0xFF), wxColour(0xFF, 0x6B, 0x6B),
+			wxColour(0x6B, 0xFF, 0x6B), wxColour(0xFF, 0xD9, 0x3D),
+			wxColour(0xBF, 0x6B, 0xFF), wxColour(0xFF, 0xA5, 0x48),
+			wxColour(0x48, 0xD1, 0xCC), wxColour(0xFF, 0x80, 0xBF),
+		};
+
+		int y = 2;
+		for (size_t i = 0; i < mBars.size() && y + barH <= sz.GetHeight(); i++) {
+			const auto& [name, cycles] = mBars[i];
+			float pct = (float)cycles / (float)mTotalCycles;
+			int barW = (int)(pct * barAreaW);
+			if (barW < 1) barW = 1;
+
+			// Label
+			dc.SetTextForeground(wxColour(180, 180, 180));
+			dc.SetClippingRegion(0, y, labelW - 4, barH);
+			dc.DrawText(name.c_str(), 2, y);
+			dc.DestroyClippingRegion();
+
+			// Bar
+			dc.SetPen(*wxTRANSPARENT_PEN);
+			dc.SetBrush(wxBrush(colors[i % std::size(colors)]));
+			dc.DrawRectangle(labelW, y, barW, barH);
+
+			// Percentage
+			char buf[16];
+			snprintf(buf, sizeof(buf), "%.1f%%", pct * 100.0f);
+			dc.SetTextForeground(wxColour(200, 200, 200));
+			dc.DrawText(buf, labelW + barW + 4, y);
+
+			y += barH + 2;
+		}
+	}
+
+	std::vector<std::pair<VDStringA, uint32>> mBars;
+	uint32 mTotalCycles = 0;
+};
+
+///////////////////////////////////////////////////////////////////////////
+// CPU Profiler panel with timeline
+
 class ATWxProfilerPanel : public wxPanel {
 public:
 	ATWxProfilerPanel(wxWindow *parent);
@@ -1983,6 +2121,7 @@ private:
 	wxButton *mpStartStopBtn = nullptr;
 	wxListCtrl *mpList = nullptr;
 	wxStaticText *mpStatusText = nullptr;
+	ATWxProfileTimeline *mpTimeline = nullptr;
 
 	bool mProfiling = false;
 	vdrefptr<ATProfileMergedFrame> mpMerged;
@@ -2014,6 +2153,9 @@ ATWxProfilerPanel::ATWxProfilerPanel(wxWindow *parent)
 
 	mpStatusText = new wxStaticText(this, wxID_ANY, "Profiler idle");
 	top->Add(mpStatusText, 0, wxLEFT | wxBOTTOM, 4);
+
+	mpTimeline = new ATWxProfileTimeline(this);
+	top->Add(mpTimeline, 0, wxEXPAND | wxLEFT | wxRIGHT, 2);
 
 	mpList = new wxListCtrl(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
 		wxLC_REPORT | wxLC_SINGLE_SEL);
@@ -2104,7 +2246,7 @@ void ATWxProfilerPanel::OnExport(wxCommandEvent&) {
 
 void ATWxProfilerPanel::Repopulate() {
 	mpList->DeleteAllItems();
-	if (!mpMerged) return;
+	if (!mpMerged) { mpTimeline->Clear(); return; }
 
 	IATDebuggerSymbolLookup *dbs = ATGetDebuggerSymbolLookup();
 
@@ -2119,9 +2261,29 @@ void ATWxProfilerPanel::Repopulate() {
 	std::sort(sorted.begin(), sorted.end(),
 		[](const ATProfileRecord *a, const ATProfileRecord *b) { return a->mCycles > b->mCycles; });
 
+	// Build timeline bar data (top 15 hotspots)
+	std::vector<std::pair<VDStringA, uint32>> bars;
+	for (size_t i = 0; i < sorted.size() && i < 15; i++) {
+		const ATProfileRecord *rec = sorted[i];
+		VDStringA name;
+		if (dbs) {
+			ATSymbol sym;
+			if (dbs->LookupSymbol(rec->mAddress, kATSymbol_Execute, sym)) {
+				name = sym.mpName;
+			}
+		}
+		if (name.empty()) {
+			char buf[16];
+			snprintf(buf, sizeof(buf), "$%04X", rec->mAddress);
+			name = VDStringA(buf);
+		}
+		bars.push_back({name, rec->mCycles});
+	}
+	mpTimeline->SetData(bars, totalCycles);
+
 	int row = 0;
 	for (const ATProfileRecord *rec : sorted) {
-		if (row >= 500) break;  // Limit display for performance
+		if (row >= 500) break;
 
 		char addrBuf[16];
 		snprintf(addrBuf, sizeof(addrBuf), "$%04X", rec->mAddress);
