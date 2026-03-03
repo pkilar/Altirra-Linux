@@ -77,6 +77,7 @@ VDStringA SanitizeAtari83Name(const char *hostName) {
 class ATDiskExplorerDialog : public wxDialog {
 public:
 	ATDiskExplorerDialog(wxWindow *parent, int driveIdx, IATDiskImage *image, bool readOnly);
+	ATDiskExplorerDialog(wxWindow *parent, const wxString& title, IATDiskImage *image, bool readOnly);
 
 private:
 	void RefreshListing();
@@ -119,12 +120,17 @@ private:
 };
 
 ATDiskExplorerDialog::ATDiskExplorerDialog(wxWindow *parent, int driveIdx, IATDiskImage *image, bool readOnly)
-	: wxDialog(parent, wxID_ANY,
-		wxString::Format("Disk Explorer - D%d:", driveIdx + 1),
+	: ATDiskExplorerDialog(parent, wxString::Format("Disk Explorer - D%d:", driveIdx + 1), image, readOnly)
+{
+	mDriveIdx = driveIdx;
+}
+
+ATDiskExplorerDialog::ATDiskExplorerDialog(wxWindow *parent, const wxString& title, IATDiskImage *image, bool readOnly)
+	: wxDialog(parent, wxID_ANY, title,
 		wxDefaultPosition, wxSize(650, 500),
 		wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
 	, mbReadOnly(readOnly)
-	, mDriveIdx(driveIdx)
+	, mDriveIdx(-1)
 {
 	mpFS.reset(ATDiskMountImage(image, readOnly));
 	if (!mpFS) {
@@ -535,6 +541,22 @@ void ATShowDiskExplorerDialog(wxWindow *parent) {
 
 	try {
 		ATDiskExplorerDialog dlg(parent, driveIdx, image, readOnly);
+		dlg.ShowModal();
+	} catch (const MyError& e) {
+		wxMessageBox(wxString::Format("Error opening disk: %s", e.c_str()),
+			"Disk Explorer", wxOK | wxICON_ERROR, parent);
+	}
+}
+
+void ATShowDiskExplorerForImage(wxWindow *parent, IATDiskImage *image, const wchar_t *title, bool readOnly) {
+	if (!image)
+		return;
+
+	VDStringA u8title = VDTextWToU8(VDStringW(title));
+	wxString wxTitle = wxString::Format("Disk Explorer - %s", u8title.c_str());
+
+	try {
+		ATDiskExplorerDialog dlg(parent, wxTitle, image, readOnly);
 		dlg.ShowModal();
 	} catch (const MyError& e) {
 		wxMessageBox(wxString::Format("Error opening disk: %s", e.c_str()),

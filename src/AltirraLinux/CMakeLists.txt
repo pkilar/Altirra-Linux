@@ -119,7 +119,7 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"uiexportroms.cpp"
 	"uifileassoc.cpp"
 	"uifilebrowser.cpp"
-	"uifilefilters.cpp"
+	# uifilefilters.cpp — un-excluded (string constants only, no platform deps)
 	"uifirmware.cpp"
 	"uifirmwaremenu.cpp"
 	"uifirmwarescan.cpp"
@@ -147,7 +147,7 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"uiprofiler.cpp"
 	"uiprofiles.cpp"
 	"uiprogress.cpp"
-	"uiqueue.cpp"
+	# uiqueue.cpp — un-excluded (ATUIFuture base class needed by cmd*.cpp)
 	"uirender.cpp"
 	"uisavestate.cpp"
 	"uiscreeneffects.cpp"
@@ -184,18 +184,7 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 	"artifacting_ntsc_sse2.cpp"
 	"artifacting_pal_sse2.cpp"
 
-	# All command handlers — depend on Win32 UI dialogs/native UI
-	"cmdaudio.cpp"
-	"cmdcart.cpp"
-	"cmdcassette.cpp"
-	"cmdcpu.cpp"
-	"cmddebug.cpp"
-	"cmdinput.cpp"
-	"cmdoptions.cpp"
-	"cmds.cpp"
-	"cmdsystem.cpp"
-	"cmdtools.cpp"
-	"cmdview.cpp"
+	# Window commands — 100% ATNativeUI-specific (Window.Close/Undock/Next/PrevPane)
 	"cmdwindow.cpp"
 
 	# Windows-only implementations

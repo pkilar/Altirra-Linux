@@ -51,6 +51,8 @@ void ATShowTapeEditorDialog(wxWindow *parent);
 
 // Disk explorer dialog (modal).
 void ATShowDiskExplorerDialog(wxWindow *parent);
+class IATDiskImage;
+void ATShowDiskExplorerForImage(wxWindow *parent, IATDiskImage *image, const wchar_t *title, bool readOnly);
 
 // On-screen keyboard (non-modal, toggled).
 void ATShowOnScreenKeyboard(wxWindow *parent);
