@@ -382,6 +382,7 @@ private:
 
 	ATMainFrame *m_frame = nullptr;
 	IATJoystickManager *m_joystickMgr = nullptr;
+	bool m_firstRun = false;
 };
 
 wxIMPLEMENT_APP(ATApp);
@@ -453,6 +454,11 @@ bool ATApp::OnInit() {
 	ATWxDebuggerInit();
 	fprintf(stderr, "wxWidgets UI initialized\n");
 
+	// Show setup wizard on first run
+	if (m_firstRun) {
+		ATShowSetupWizard(m_frame);
+	}
+
 	// Cold reset and start emulation
 	g_sim.ColdReset();
 	g_sim.Resume();
@@ -469,6 +475,7 @@ void ATCloseVideoSettingsWindow();
 void ATCloseAllNonModalWindows() {
 	ATCloseAudioWindows();
 	ATCloseVideoSettingsWindow();
+	ATCloseOnScreenKeyboard();
 }
 
 int ATApp::OnExit() {
@@ -709,6 +716,7 @@ bool ATApp::InitRegistry(const ATLinuxOptions& opts) {
 		}
 	} else {
 		fprintf(stderr, "No settings file found, using defaults\n");
+		m_firstRun = true;
 	}
 
 	VDStringW configDir = ATGetLinuxConfigDir();

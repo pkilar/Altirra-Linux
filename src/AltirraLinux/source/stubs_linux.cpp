@@ -95,6 +95,79 @@
 #include <at/atcore/cio.h>
 #include <at/atcore/constants.h>
 #include "uienhancedtext.h"
+#include <at/atnativeui/genericdialog.h>
+
+#include <wx/msgdlg.h>
+
+///////////////////////////////////////////////////////////////////////////
+// 0. Generic dialog + main window (needed by browser.cpp and others)
+///////////////////////////////////////////////////////////////////////////
+
+VDGUIHandle ATUIGetMainWindow() {
+	return nullptr;
+}
+
+static VDStringW s_defaultGenericDialogCaption(L"Altirra");
+
+void ATUISetDefaultGenericDialogCaption(const wchar_t *s) {
+	s_defaultGenericDialogCaption = s ? s : L"Altirra";
+}
+
+void ATUIGenericDialogUndoAllIgnores() {
+}
+
+ATUIGenericResult ATUIShowGenericDialog(const ATUIGenericDialogOptions& opts) {
+	VDStringA msg = VDTextWToU8(VDStringW(opts.mpMessage ? opts.mpMessage : L""));
+	VDStringA title = VDTextWToU8(VDStringW(opts.mpTitle ? opts.mpTitle : s_defaultGenericDialogCaption.c_str()));
+
+	long style = 0;
+
+	if (opts.mResultMask & kATUIGenericResultMask_AllowDeny)
+		style = wxYES_NO;
+	else if (opts.mResultMask & (kATUIGenericResultMask_Yes | kATUIGenericResultMask_No))
+		style = wxYES_NO;
+	else if (opts.mResultMask & kATUIGenericResultMask_OKCancel)
+		style = wxOK | wxCANCEL;
+	else
+		style = wxOK;
+
+	switch (opts.mIconType) {
+		case kATUIGenericIconType_Info:    style |= wxICON_INFORMATION; break;
+		case kATUIGenericIconType_Warning: style |= wxICON_WARNING; break;
+		case kATUIGenericIconType_Error:   style |= wxICON_ERROR; break;
+		default: break;
+	}
+
+	int result = wxMessageBox(
+		wxString::FromUTF8(msg.c_str()),
+		wxString::FromUTF8(title.c_str()),
+		style);
+
+	if (opts.mResultMask & kATUIGenericResultMask_AllowDeny)
+		return (result == wxYES) ? kATUIGenericResult_Allow : kATUIGenericResult_Deny;
+	else if (opts.mResultMask & (kATUIGenericResultMask_Yes | kATUIGenericResultMask_No))
+		return (result == wxYES) ? kATUIGenericResult_Yes : kATUIGenericResult_No;
+	else if (opts.mResultMask & kATUIGenericResultMask_OKCancel)
+		return (result == wxOK) ? kATUIGenericResult_OK : kATUIGenericResult_Cancel;
+	else
+		return kATUIGenericResult_OK;
+}
+
+ATUIGenericResult ATUIShowGenericDialogAutoCenter(const ATUIGenericDialogOptions& opts) {
+	return ATUIShowGenericDialog(opts);
+}
+
+bool ATUIConfirm(VDGUIHandle, const char *, const wchar_t *message, const wchar_t *title) {
+	VDStringA msg = VDTextWToU8(VDStringW(message ? message : L""));
+	VDStringA cap = VDTextWToU8(VDStringW(title ? title : L"Altirra"));
+
+	int result = wxMessageBox(
+		wxString::FromUTF8(msg.c_str()),
+		wxString::FromUTF8(cap.c_str()),
+		wxYES_NO | wxICON_QUESTION);
+
+	return result == wxYES;
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -113,21 +186,20 @@ ATUIManager& g_ATUIManager = reinterpret_cast<ATUIManager&>(g_ATUIManager_storag
 extern ATUIKeyboardOptions g_kbdOpts;
 
 // Device definitions for Windows-only devices
-extern const ATDeviceDefinition g_ATDeviceDefBrowser = {
-	"browser", nullptr, L"Browser (B:)", nullptr, 0
-};
+// NOTE: g_ATDeviceDefBrowser is defined in browser.cpp (now compiled on Linux)
+
+void ATCreateDeviceIDEPhysDisk(const ATPropertySet& pset, IATDevice **dev) {
+	vdrefptr<ATIDEPhysicalDisk> p(new ATIDEPhysicalDisk);
+	*dev = p;
+	(*dev)->AddRef();
+}
 
 extern const ATDeviceDefinition g_ATDeviceDefIDEPhysDisk = {
-	"hdphysdisk", "harddisk", L"Hard disk image (physical disk)", nullptr, 0
+	"hdphysdisk", "harddisk", L"Hard disk image (physical disk)", ATCreateDeviceIDEPhysDisk, 0
 };
 
-extern const ATDeviceDefinition g_ATDeviceDefMidiMate = {
-	"midimate", nullptr, L"MidiMate", nullptr, 0
-};
-
-extern const ATDeviceDefinition g_ATDeviceDefPipeSerial = {
-	"pipeserial", "pipeserial", L"Named pipe serial port", nullptr, 0
-};
+// NOTE: g_ATDeviceDefMidiMate is defined in midimate_linux.cpp (ALSA implementation)
+// NOTE: g_ATDeviceDefPipeSerial is defined in pipeserial_linux.cpp (PTY implementation)
 
 ///////////////////////////////////////////////////////////////////////////
 // 2. ATUIManager methods (Windows display layer)
@@ -1495,23 +1567,49 @@ void ATDirectoryWatcher::NotifyAllChanged() {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 14. ATIDEPhysicalDisk (Windows physical disk I/O)
-//     This class inherits from IATBlockDevice and ATDevice, so we must
-//     provide all pure virtual method implementations for vtable.
+// 14. ATIDEPhysicalDisk (Linux physical disk I/O via /dev/sdX)
+//     Uses open() + pread()/pwrite() with O_DIRECT for raw disk access.
+//     Requires root or membership in the 'disk' group.
 ///////////////////////////////////////////////////////////////////////////
 
-bool ATIDEIsPhysicalDiskPath(const wchar_t *) {
-	return false;
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+
+bool ATIDEIsPhysicalDiskPath(const wchar_t *path) {
+	if (!path)
+		return false;
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+	// Linux block device paths: /dev/sd*, /dev/hd*, /dev/nvme*, /dev/loop*
+	return strncmp(u8.c_str(), "/dev/sd", 7) == 0
+		|| strncmp(u8.c_str(), "/dev/hd", 7) == 0
+		|| strncmp(u8.c_str(), "/dev/nvme", 9) == 0
+		|| strncmp(u8.c_str(), "/dev/loop", 9) == 0;
+}
+
+sint64 ATIDEGetPhysicalDiskSize(const wchar_t *path) {
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+	int fd = ::open(u8.c_str(), O_RDONLY);
+	if (fd < 0)
+		return -1;
+
+	uint64_t size = 0;
+	if (ioctl(fd, BLKGETSIZE64, &size) < 0) {
+		::close(fd);
+		return -1;
+	}
+	::close(fd);
+	return (sint64)size;
 }
 
 ATIDEPhysicalDisk::ATIDEPhysicalDisk()
-	: mhDisk(nullptr)
+	: mhDisk(reinterpret_cast<void *>(static_cast<intptr_t>(-1)))
 	, mpBuffer(nullptr)
 	, mSectorCount(0)
 {
 }
 
 ATIDEPhysicalDisk::~ATIDEPhysicalDisk() {
+	Shutdown();
 }
 
 int ATIDEPhysicalDisk::AddRef() {
@@ -1523,6 +1621,8 @@ int ATIDEPhysicalDisk::Release() {
 }
 
 void *ATIDEPhysicalDisk::AsInterface(uint32 iid) {
+	if (iid == IATBlockDevice::kTypeID)
+		return static_cast<IATBlockDevice *>(this);
 	return ATDevice::AsInterface(iid);
 }
 
@@ -1530,14 +1630,29 @@ void ATIDEPhysicalDisk::GetDeviceInfo(ATDeviceInfo& info) {
 	info.mpDef = &g_ATDeviceDefIDEPhysDisk;
 }
 
-void ATIDEPhysicalDisk::GetSettings(ATPropertySet&) {
+void ATIDEPhysicalDisk::GetSettings(ATPropertySet& settings) {
+	if (!mPath.empty())
+		settings.SetString("path", mPath.c_str());
 }
 
-bool ATIDEPhysicalDisk::SetSettings(const ATPropertySet&) {
-	return false;
+bool ATIDEPhysicalDisk::SetSettings(const ATPropertySet& settings) {
+	const wchar_t *path = settings.GetString("path");
+	if (path)
+		mPath = path;
+	return true;
 }
 
 void ATIDEPhysicalDisk::Shutdown() {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd >= 0) {
+		::close(fd);
+		mhDisk = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
+	}
+	if (mpBuffer) {
+		free(mpBuffer);
+		mpBuffer = nullptr;
+	}
+	mSectorCount = 0;
 }
 
 ATBlockDeviceGeometry ATIDEPhysicalDisk::GetGeometry() const {
@@ -1545,20 +1660,74 @@ ATBlockDeviceGeometry ATIDEPhysicalDisk::GetGeometry() const {
 }
 
 uint32 ATIDEPhysicalDisk::GetSerialNumber() const {
-	return 0;
+	if (mPath.empty())
+		return 0;
+	// Simple hash of path string for device identification
+	uint32 hash = 2166136261u;
+	for (auto ch : mPath) {
+		hash ^= (uint32)ch;
+		hash *= 16777619u;
+	}
+	return hash;
 }
 
-void ATIDEPhysicalDisk::Init(const wchar_t *) {
-	// Physical disk access not supported on Linux yet
+void ATIDEPhysicalDisk::Init(const wchar_t *path) {
+	Shutdown();
+
+	if (!path || !*path)
+		return;
+
+	mPath = path;
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+
+	int fd = ::open(u8.c_str(), O_RDONLY);
+	if (fd < 0)
+		return;
+
+	// Get disk size via ioctl
+	uint64_t diskSize = 0;
+	if (ioctl(fd, BLKGETSIZE64, &diskSize) < 0) {
+		::close(fd);
+		return;
+	}
+
+	mSectorCount = (uint32)(diskSize / 512);
+	mhDisk = reinterpret_cast<void *>(static_cast<intptr_t>(fd));
+
+	// Allocate a 16KB read buffer (32 sectors)
+	mpBuffer = malloc(512 * 32);
 }
 
 void ATIDEPhysicalDisk::Flush() {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd >= 0)
+		fsync(fd);
 }
 
-void ATIDEPhysicalDisk::ReadSectors(void *, uint32, uint32) {
+void ATIDEPhysicalDisk::ReadSectors(void *data, uint32 lba, uint32 n) {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd < 0 || !mpBuffer || !data)
+		return;
+
+	uint8 *dst = (uint8 *)data;
+	uint32 remaining = n;
+
+	while (remaining > 0) {
+		uint32 chunk = remaining > 32 ? 32 : remaining;
+		uint64_t offset = (uint64_t)lba * 512;
+		ssize_t bytesRead = ::pread(fd, mpBuffer, chunk * 512, (off_t)offset);
+		if (bytesRead <= 0)
+			break;
+		memcpy(dst, mpBuffer, (size_t)bytesRead);
+		uint32 sectorsRead = (uint32)bytesRead / 512;
+		dst += sectorsRead * 512;
+		lba += sectorsRead;
+		remaining -= sectorsRead;
+	}
 }
 
-void ATIDEPhysicalDisk::WriteSectors(const void *, uint32, uint32) {
+void ATIDEPhysicalDisk::WriteSectors(const void *data, uint32 lba, uint32 n) {
+	// Read-only device — writes not supported
 }
 
 ///////////////////////////////////////////////////////////////////////////

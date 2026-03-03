@@ -486,6 +486,7 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	configMenu->Append(ID_CONFIGURE_VIDEO, "&Video...");
 	configMenu->AppendSeparator();
 	configMenu->Append(ID_CONFIGURE_INPUT, "&Input Setup...");
+	configMenu->Append(ID_INPUT_ON_SCREEN_KEYBOARD, "On-Screen &Keyboard...");
 	systemMenu->AppendSubMenu(configMenu, "&Configure");
 
 	systemMenu->Append(ID_SYSTEM_CYCLE_QUICK_MAPS, "Cycle Quick &Maps\tShift+F1");
@@ -647,6 +648,7 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	viewMenu->Append(ID_VIEW_TOGGLE_AUDIO_MONITOR, "Audio &Monitor...");
 	viewMenu->Append(ID_VIEW_TOGGLE_AUDIO_SCOPE, "Audio Sc&ope...");
 	viewMenu->Append(ID_VIEW_VIDEO_SETTINGS, "&Video Settings...");
+	viewMenu->Append(ID_VIEW_COLOR_SETTINGS, "&Color Settings...");
 	viewMenu->AppendSeparator();
 	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FULLSCREEN, "F&ullscreen\tF11");
 	menuBar->Append(viewMenu, "&View");
@@ -711,6 +713,8 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	toolsMenu->Append(ID_TOOLS_EXPORT_ROM_SET, "&Export ROM Set...");
 	toolsMenu->Append(ID_TOOLS_CONVERT_SAP_TO_EXE, "Convert &SAP to EXE...");
 	toolsMenu->Append(ID_TOOLS_ANALYZE_TAPE_DECODING, "Analyze &Tape Decoding...");
+	toolsMenu->AppendSeparator();
+	toolsMenu->Append(ID_TOOLS_ADVANCED_CONFIG, "&Advanced Configuration...");
 	toolsMenu->AppendSeparator();
 	toolsMenu->Append(ID_TOOLS_OPEN_CONFIG_DIR, "Open &Config Directory");
 	toolsMenu->Append(ID_TOOLS_OPEN_FIRMWARE_DIR, "Open F&irmware Directory");
@@ -1278,6 +1282,9 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 		case ID_VIEW_VIDEO_SETTINGS:
 			ATShowVideoSettingsDialog(this);
 			break;
+		case ID_VIEW_COLOR_SETTINGS:
+			ATShowColorSettingsDialog(this);
+			break;
 
 		case ID_STRETCH_FIT:        ATUISetDisplayStretchMode(kATDisplayStretchMode_Unconstrained); break;
 		case ID_STRETCH_ASPECT:     ATUISetDisplayStretchMode(kATDisplayStretchMode_PreserveAspectRatio); break;
@@ -1692,6 +1699,10 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			break;
 		}
 
+		case ID_TOOLS_ADVANCED_CONFIG:
+			ATShowAdvancedConfigDialog(this);
+			break;
+
 		// ---- Help ----
 		case ID_HELP_KEYBOARD_SHORTCUTS: {
 			wxDialog dlg(this, wxID_ANY, "Keyboard Shortcuts", wxDefaultPosition,
@@ -1791,6 +1802,9 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			break;
 		case ID_CONFIGURE_INPUT:
 			ATShowInputSetupDialog(this);
+			break;
+		case ID_INPUT_ON_SCREEN_KEYBOARD:
+			ATShowOnScreenKeyboard(this);
 			break;
 
 		default:

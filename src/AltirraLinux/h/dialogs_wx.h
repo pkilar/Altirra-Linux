@@ -52,8 +52,21 @@ void ATShowTapeEditorDialog(wxWindow *parent);
 // Disk explorer dialog (modal).
 void ATShowDiskExplorerDialog(wxWindow *parent);
 
+// On-screen keyboard (non-modal, toggled).
+void ATShowOnScreenKeyboard(wxWindow *parent);
+void ATCloseOnScreenKeyboard();
+
+// Color/artifacting adjustment dialog (modal).
+void ATShowColorSettingsDialog(wxWindow *parent);
+
+// Advanced configuration editor (modal).
+void ATShowAdvancedConfigDialog(wxWindow *parent);
+
 // Close all non-modal windows before shutdown.
 void ATCloseAllNonModalWindows();
+
+// Setup wizard (returns true if completed, false if cancelled).
+bool ATShowSetupWizard(wxWindow *parent);
 
 // Video recording control (used by menu stop command).
 void ATStopVideoRecording();

@@ -9,6 +9,8 @@ include(${wxWidgets_USE_FILE})
 find_package(SDL3 REQUIRED)
 find_package(OpenGL REQUIRED)
 find_package(ZLIB REQUIRED)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ALSA REQUIRED alsa)
 
 # Collect all Altirra source files
 file(GLOB ALTIRRA_ALL_SOURCES
@@ -166,7 +168,6 @@ set(ALTIRRA_EXCLUDE_PATTERNS
 
 	# Files that depend heavily on Windows UI/shell APIs
 	"about.cpp"
-	"browser.cpp"
 	"directorywatcher.cpp"
 	"updatecheck.cpp"
 	"updatefeed.cpp"
@@ -386,6 +387,10 @@ set(WX_SOURCES
 	source/dialog_audio_monitor.cpp
 	source/dialog_tape_editor.cpp
 	source/dialog_disk_explorer.cpp
+	source/dialog_setup_wizard.cpp
+	source/dialog_osk.cpp
+	source/dialog_colors.cpp
+	source/dialog_advanced_config.cpp
 	source/statusbar_wx.cpp
 	source/debugger_wx.cpp
 )
@@ -396,6 +401,8 @@ set(LINUX_SOURCES
 	source/console_wx.cpp
 	source/stubs_linux.cpp
 	source/modemtcp_linux.cpp
+	source/midimate_linux.cpp
+	source/pipeserial_linux.cpp
 	source/uikeyboard_linux.cpp
 	source/worker_linux.cpp
 	source/joystick_sdl3.cpp
@@ -431,6 +438,9 @@ target_include_directories(altirra BEFORE
 
 		# Foundation headers
 		${CMAKE_SOURCE_DIR}/src/h
+
+		# ALSA headers (for MIDI output)
+		${ALSA_INCLUDE_DIRS}
 )
 
 # Link all libraries
@@ -466,6 +476,8 @@ target_link_libraries(altirra
 		pthread
 		dl
 		m
+		util
+		${ALSA_LIBRARIES}
 )
 
 # Optional FFmpeg support for H.264 recording

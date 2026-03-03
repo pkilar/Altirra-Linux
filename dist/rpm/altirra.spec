@@ -17,11 +17,13 @@ BuildRequires:  mesa-libGL-devel
 BuildRequires:  zlib-devel
 BuildRequires:  libxslt
 BuildRequires:  wxGTK3-devel >= 3.2
+BuildRequires:  alsa-lib-devel
 
 Requires:       SDL3
 Requires:       mesa-libGL
 Requires:       zlib
 Requires:       wxGTK3 >= 3.2
+Requires:       alsa-lib
 
 Recommends:     ffmpeg-free
 

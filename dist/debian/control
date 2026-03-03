@@ -13,7 +13,8 @@ Build-Depends: debhelper-compat (= 13),
                libgl-dev,
                zlib1g-dev,
                xsltproc,
-               libwxgtk3.2-dev
+               libwxgtk3.2-dev,
+               libasound2-dev
 Standards-Version: 4.6.2
 Homepage: https://www.virtualdub.org/altirra.html
 Vcs-Browser: https://github.com/pkilar/Altirra-Linux
