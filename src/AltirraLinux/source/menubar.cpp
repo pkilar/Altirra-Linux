@@ -92,6 +92,9 @@ void ATImGuiShowToast(const char *message);
 // Settings save (defined in main_wx.cpp)
 void ATLinuxSaveSettings();
 
+// Display resize (defined in stubs_linux.cpp)
+void ATUIResizeDisplay();
+
 // Audio recording state
 static vdautoptr<ATAudioWriter> s_pAudioWriter;
 static vdautoptr<IATSAPWriter> s_pSapWriter;
@@ -405,117 +408,21 @@ static_assert(std::size(kSpecialCarts) <= (ID_SPECIAL_CART_LAST - ID_SPECIAL_CAR
 wxMenuBar *ATMainFrame::CreateMenuBar() {
 	wxMenuBar *menuBar = new wxMenuBar;
 
-	// ===== System menu =====
-	wxMenu *systemMenu = new wxMenu;
-
-	wxMenu *hwMenu = new wxMenu;
-	hwMenu->AppendRadioItem(ID_HW_800, "Atari &800");
-	hwMenu->AppendRadioItem(ID_HW_800XL, "Atari 800&XL");
-	hwMenu->AppendRadioItem(ID_HW_1200XL, "Atari &1200XL");
-	hwMenu->AppendRadioItem(ID_HW_130XE, "Atari 130X&E");
-	hwMenu->AppendRadioItem(ID_HW_XEGS, "Atari XE&GS");
-	hwMenu->AppendRadioItem(ID_HW_5200, "Atari &5200");
-	systemMenu->AppendSubMenu(hwMenu, "&Hardware Mode");
-
-	// Kernel submenu — built dynamically in OnMenuOpen, but static items here
-	mpKernelMenu = new wxMenu;
-	mpKernelMenu->AppendRadioItem(ID_KERNEL_AUTOSELECT, "[&Autoselect]");
-	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_OSB, "Internal &OS-B");
-	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_XL, "Internal &XL OS");
-	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_5200, "Internal &5200 OS");
-	// User firmware items added dynamically in OnMenuOpen
-	systemMenu->AppendSubMenu(mpKernelMenu, "&Kernel");
-
-	// Memory submenu
-	wxMenu *memMenu = new wxMenu;
-	for (size_t i = 0; i < std::size(kMemoryModes) && i <= (size_t)(ID_MEMORY_LAST - ID_MEMORY_FIRST); ++i)
-		memMenu->AppendRadioItem(ID_MEMORY_FIRST + (int)i, kMemoryModes[i].label);
-	systemMenu->AppendSubMenu(memMenu, "&Memory");
-
-	wxMenu *vidStdMenu = new wxMenu;
-	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_NTSC, "&NTSC");
-	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_PAL, "&PAL");
-	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_SECAM, "&SECAM");
-	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_NTSC50, "NTSC-&50");
-	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_PAL60, "PAL-6&0");
-	systemMenu->AppendSubMenu(vidStdMenu, "&Video Standard");
-
-	systemMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_BASIC, "&BASIC");
-	systemMenu->AppendSeparator();
-
-	wxMenu *consoleMenu = new wxMenu;
-	consoleMenu->Append(ID_CONSOLE_START, "S&tart");
-	consoleMenu->Append(ID_CONSOLE_SELECT, "&Select");
-	consoleMenu->Append(ID_CONSOLE_OPTION, "&Option");
-	consoleMenu->AppendSeparator();
-	consoleMenu->Append(ID_CONSOLE_RELEASE_ALL, "&Release All");
-	systemMenu->AppendSubMenu(consoleMenu, "&Console Switches");
-
-	// Device Buttons submenu (dynamic — only shows if devices with buttons exist)
-	mpDeviceButtonsMenu = new wxMenu;
-	for (size_t i = 0; i < std::size(kDeviceButtons) && i <= (size_t)(ID_DEVBTN_LAST - ID_DEVBTN_FIRST); ++i)
-		mpDeviceButtonsMenu->Append(ID_DEVBTN_FIRST + (int)i, kDeviceButtons[i].name);
-	systemMenu->AppendSubMenu(mpDeviceButtonsMenu, "Device &Buttons");
-
-	// Power-On Delay submenu
-	wxMenu *powerOnMenu = new wxMenu;
-	powerOnMenu->AppendRadioItem(ID_POWERON_AUTO, "&Auto");
-	powerOnMenu->AppendRadioItem(ID_POWERON_NONE, "&None");
-	powerOnMenu->AppendRadioItem(ID_POWERON_1SEC, "&1 second");
-	powerOnMenu->AppendRadioItem(ID_POWERON_2SEC, "&2 seconds");
-	powerOnMenu->AppendRadioItem(ID_POWERON_3SEC, "&3 seconds");
-	systemMenu->AppendSubMenu(powerOnMenu, "Power-On &Delay");
-
-	systemMenu->AppendCheckItem(ID_SYSTEM_HOLD_KEYS_FOR_RESET, "&Hold Keys for Reset");
-	systemMenu->AppendCheckItem(ID_SYSTEM_AUTO_BOOT_TAPE, "Auto-Boot &Tape (Hold Start)");
-
-	systemMenu->AppendSeparator();
-	systemMenu->Append(ID_SYSTEM_WARM_RESET, "&Warm Reset\tF5");
-	systemMenu->Append(ID_SYSTEM_COLD_RESET, "&Cold Reset\tShift+F5");
-	systemMenu->AppendSeparator();
-	systemMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_REWIND, "Enable &Rewind");
-	systemMenu->Append(ID_SYSTEM_REWIND, "Re&wind");
-	systemMenu->AppendSeparator();
-
-	wxMenu *configMenu = new wxMenu;
-	configMenu->Append(ID_CONFIGURE_SYSTEM, "&System Settings...");
-	configMenu->Append(ID_CONFIGURE_CPU, "&CPU && Memory...");
-	configMenu->Append(ID_CONFIGURE_BOOT, "&Boot && Acceleration...");
-	configMenu->Append(ID_CONFIGURE_KEYBOARD, "&Keyboard...");
-	configMenu->Append(ID_CONFIGURE_AUDIO, "&Audio...");
-	configMenu->Append(ID_CONFIGURE_VIDEO, "&Video...");
-	configMenu->AppendSeparator();
-	configMenu->Append(ID_CONFIGURE_INPUT, "&Input Setup...");
-	configMenu->Append(ID_INPUT_ON_SCREEN_KEYBOARD, "On-Screen &Keyboard...");
-	systemMenu->AppendSubMenu(configMenu, "&Configure");
-
-	systemMenu->Append(ID_SYSTEM_CYCLE_QUICK_MAPS, "Cycle Quick &Maps\tShift+F1");
-	systemMenu->AppendSeparator();
-	systemMenu->Append(ID_SYSTEM_SAVE_SETTINGS, "&Save Settings\tCtrl+S");
-	systemMenu->AppendSeparator();
-	systemMenu->Append(ID_SYSTEM_QUIT, "&Quit\tCtrl+Q");
-	menuBar->Append(systemMenu, "&System");
-
-	// ===== Profiles menu =====
-	mpProfilesMenu = new wxMenu;
-	// Items added dynamically in OnMenuOpen
-	menuBar->Append(mpProfilesMenu, "P&rofiles");
-
-	// ===== File menu =====
+	// ================================================================
+	// File menu (matches Windows: Boot first, MRU, Disk, Cassette,
+	// State, Cartridge, Save Firmware, Exit)
+	// ================================================================
 	wxMenu *fileMenu = new wxMenu;
-	fileMenu->Append(ID_FILE_OPEN_IMAGE, "&Open Image...\tCtrl+O");
 	fileMenu->Append(ID_FILE_BOOT_IMAGE, "&Boot Image...\tCtrl+Shift+O");
-	fileMenu->AppendSeparator();
-	fileMenu->Append(ID_FILE_QUICK_SAVE_STATE, "Quick &Save State\tF7");
-	fileMenu->Append(ID_FILE_QUICK_LOAD_STATE, "Quick &Load State\tF8");
-	fileMenu->AppendSeparator();
-	fileMenu->Append(ID_FILE_SAVE_STATE, "Save State &As...");
-	fileMenu->Append(ID_FILE_LOAD_STATE, "&Load State...");
-	fileMenu->AppendSeparator();
 
-	// Per-drive disk submenus (D1-D15, built dynamically in OnMenuOpen)
+	mpMRUMenu = new wxMenu;
+	fileMenu->AppendSubMenu(mpMRUMenu, "&Recently Booted");
+
+	fileMenu->AppendSeparator();
+	fileMenu->Append(ID_FILE_OPEN_IMAGE, "&Open Image...\tCtrl+O");
+
+	// Per-drive disk submenus (D1-D15, labels updated in OnMenuOpen)
 	mpDiskDrivesMenu = new wxMenu;
-	// Static items at bottom (dynamic per-drive items added in OnMenuOpen)
 	for (int i = 0; i < 15; ++i) {
 		wxMenu *dm = new wxMenu;
 		int base = ID_DISK_DRIVE_FIRST + i * kDiskActionCount;
@@ -537,69 +444,127 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	mpDiskDrivesMenu->AppendSeparator();
 	mpDiskDrivesMenu->Append(ID_DISK_SAVE_ALL_MODIFIED, "&Save All Modified");
 	mpDiskDrivesMenu->Append(ID_DISK_UNMOUNT_ALL, "Unmount &All");
-	fileMenu->AppendSubMenu(mpDiskDrivesMenu, "&Disk Drives");
+	fileMenu->AppendSubMenu(mpDiskDrivesMenu, "Dis&k Drives");
 
-	fileMenu->Append(ID_CART_ATTACH, "Attach &Cartridge...");
-	fileMenu->Append(ID_CART_DETACH, "De&tach Cartridge");
+	// Attach/Detach Disk submenus (simplified 8-drive, matching Windows)
+	wxMenu *attachDiskMenu = new wxMenu;
+	attachDiskMenu->Append(ID_DISK_ROTATE_NEXT, "Rotate Down");
+	attachDiskMenu->Append(ID_DISK_ROTATE_PREV, "Rotate Up");
+	attachDiskMenu->AppendSeparator();
+	for (int i = 0; i < 8; ++i)
+		attachDiskMenu->Append(ID_DISK_ATTACH_1 + i, wxString::Format("Drive %d", i + 1));
+	fileMenu->AppendSubMenu(attachDiskMenu, "Attach Disk");
 
+	wxMenu *detachDiskMenu = new wxMenu;
+	detachDiskMenu->Append(ID_DISK_UNMOUNT_ALL, "All");
+	detachDiskMenu->AppendSeparator();
+	for (int i = 0; i < 8; ++i)
+		detachDiskMenu->Append(ID_DISK_DETACH_1 + i, wxString::Format("Drive %d", i + 1));
+	fileMenu->AppendSubMenu(detachDiskMenu, "Detach Disk");
+
+	fileMenu->AppendSeparator();
+
+	// Cassette submenu (expanded, matching Windows)
+	wxMenu *cassetteMenu = new wxMenu;
+	cassetteMenu->Append(ID_TOOLS_CASSETTE_CONTROL, "Tape Control...");
+	cassetteMenu->Append(ID_TOOLS_TAPE_EDITOR, "Tape Editor...");
+	cassetteMenu->AppendSeparator();
+	cassetteMenu->Append(ID_CASSETTE_NEW_TAPE, "New Tape");
+	cassetteMenu->Append(ID_CASSETTE_LOAD, "&Load...");
+	cassetteMenu->Append(ID_CASSETTE_UNLOAD, "&Unload");
+	cassetteMenu->Append(ID_CASSETTE_SAVE_TAPE, "Save...");
+	cassetteMenu->Append(ID_CASSETTE_EXPORT_AUDIO, "Export Audio Tape...");
+	fileMenu->AppendSubMenu(cassetteMenu, "Cassette");
+
+	fileMenu->AppendSeparator();
+	fileMenu->Append(ID_FILE_LOAD_STATE, "Load State...");
+	fileMenu->Append(ID_FILE_SAVE_STATE, "Save State...");
+	fileMenu->Append(ID_FILE_QUICK_LOAD_STATE, "Quick Load State");
+	fileMenu->Append(ID_FILE_QUICK_SAVE_STATE, "Quick Save State\tF7");
+	fileMenu->AppendSeparator();
+
+	// Cartridge section (matching Windows order)
 	wxMenu *specialCartMenu = new wxMenu;
 	for (size_t i = 0; i < std::size(kSpecialCarts); ++i)
 		specialCartMenu->Append(ID_SPECIAL_CART_FIRST + (int)i, kSpecialCarts[i].name);
 	fileMenu->AppendSubMenu(specialCartMenu, "Attach &Special Cartridge");
 
-	fileMenu->Append(ID_CART_SAVE, "Sa&ve Cartridge...");
+	wxMenu *secondaryCartMenu = new wxMenu;
+	secondaryCartMenu->Append(ID_CART_ATTACH_SECONDARY, "&Attach...");
+	secondaryCartMenu->Append(ID_CART_DETACH_SECONDARY, "Detach");
+	fileMenu->AppendSubMenu(secondaryCartMenu, "Secondary Cartridge");
+
+	fileMenu->Append(ID_CART_ATTACH, "&Attach Cartridge...");
+	fileMenu->Append(ID_CART_DETACH, "&Detach Cartridge");
 
 	wxMenu *saveFwMenu = new wxMenu;
-	saveFwMenu->Append(ID_SAVE_FW_IDE_MAIN, "IDE Main Firmware...");
-	saveFwMenu->Append(ID_SAVE_FW_IDE_SDX, "IDE SDX Firmware...");
-	saveFwMenu->Append(ID_SAVE_FW_U1MB, "Ultimate1MB Firmware...");
-	saveFwMenu->Append(ID_SAVE_FW_RAPIDUS, "Rapidus Flash...");
-	fileMenu->AppendSubMenu(saveFwMenu, "Save &Firmware");
+	saveFwMenu->Append(ID_CART_SAVE, "&Save Cartridge...");
+	saveFwMenu->Append(ID_SAVE_FW_IDE_MAIN, "Save KMK/JZ IDE Main Flash...");
+	saveFwMenu->Append(ID_SAVE_FW_IDE_SDX, "Save KMK/JZ IDE SDX Flash...");
+	saveFwMenu->Append(ID_SAVE_FW_U1MB, "Save Ultimate1MB Flash...");
+	saveFwMenu->Append(ID_SAVE_FW_RAPIDUS, "Save Rapidus Flash...");
+	fileMenu->AppendSubMenu(saveFwMenu, "Save Firmware");
 
 	fileMenu->AppendSeparator();
-	fileMenu->Append(ID_CART_ATTACH_SECONDARY, "Attach Secon&dary Cartridge...");
-	fileMenu->Append(ID_CART_DETACH_SECONDARY, "Detach S&econdary Cartridge");
-	fileMenu->AppendSeparator();
-	fileMenu->Append(ID_CASSETTE_LOAD, "Load C&assette...");
-	fileMenu->Append(ID_CASSETTE_UNLOAD, "Unload Casse&tte");
-	fileMenu->AppendSeparator();
-	fileMenu->Append(ID_FILE_SAVE_SCREENSHOT, "Save &Screenshot...\tF9");
-	fileMenu->Append(ID_FILE_SAVE_SCREENSHOT_TRUE_ASPECT, "Save Screenshot (&True Aspect)...");
-
-	// Recent Files submenu (populated dynamically in OnMenuUpdateUI)
-	fileMenu->AppendSeparator();
-	mpMRUMenu = new wxMenu;
-	fileMenu->AppendSubMenu(mpMRUMenu, "&Recent Files");
-
+	fileMenu->Append(ID_SYSTEM_QUIT, "E&xit\tCtrl+Q");
 	menuBar->Append(fileMenu, "&File");
 
-	// ===== Edit menu =====
-	wxMenu *editMenu = new wxMenu;
-	editMenu->Append(ID_EDIT_PASTE_TEXT, "Paste &Text\tCtrl+V");
-	editMenu->Append(ID_EDIT_COPY_FRAME, "Copy &Frame to Clipboard");
-	menuBar->Append(editMenu, "&Edit");
-
-	// ===== View menu =====
+	// ================================================================
+	// View menu (matches Windows: Fullscreen first, filters, overscan,
+	// copy/save frame, toggles)
+	// ================================================================
 	wxMenu *viewMenu = new wxMenu;
-	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FPS, "Show &FPS");
-	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_STATUSBAR, "Show &Status Bar");
+	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FULLSCREEN, "&Full Screen\tF11");
+	viewMenu->AppendSeparator();
 
+	// Filter Mode submenu (with Next Mode at top, matching Windows)
 	wxMenu *filterMenu = new wxMenu;
+	filterMenu->Append(ID_VIEW_NEXT_FILTER_MODE, "Next Mode");
+	filterMenu->AppendSeparator();
 	filterMenu->AppendRadioItem(ID_FILTER_POINT, "&Point");
 	filterMenu->AppendRadioItem(ID_FILTER_BILINEAR, "&Bilinear");
 	filterMenu->AppendRadioItem(ID_FILTER_SHARP_BILINEAR, "&Sharp Bilinear");
 	filterMenu->AppendRadioItem(ID_FILTER_BICUBIC, "Bi&cubic");
-	filterMenu->AppendRadioItem(ID_FILTER_DEFAULT, "&Default");
-	viewMenu->AppendSubMenu(filterMenu, "Display &Filter");
+	filterMenu->AppendRadioItem(ID_FILTER_DEFAULT, "Any &Suitable");
+	viewMenu->AppendSubMenu(filterMenu, "Fi&lter Mode");
 
+	// Video Frame (renamed from Stretch Mode, matching Windows)
 	wxMenu *stretchMenu = new wxMenu;
 	stretchMenu->AppendRadioItem(ID_STRETCH_FIT, "&Fit to Window");
 	stretchMenu->AppendRadioItem(ID_STRETCH_ASPECT, "Preserve &Aspect Ratio");
 	stretchMenu->AppendRadioItem(ID_STRETCH_ASPECT_INT, "Preserve Aspect Ratio (&Integer)");
 	stretchMenu->AppendRadioItem(ID_STRETCH_SQUARE, "&Square Pixels");
 	stretchMenu->AppendRadioItem(ID_STRETCH_SQUARE_INT, "Square Pixels (I&nteger)");
-	viewMenu->AppendSubMenu(stretchMenu, "&Stretch Mode");
+	viewMenu->AppendSubMenu(stretchMenu, "Video Fra&me");
 
+	// Overscan Mode submenu (with Vertical Override nested inside, matching Windows)
+	wxMenu *overscanMenu = new wxMenu;
+	overscanMenu->AppendRadioItem(ID_OVERSCAN_OS_SCREEN, "&OS Screen Only (160cc)");
+	overscanMenu->AppendRadioItem(ID_OVERSCAN_NORMAL, "&Normal (168cc)");
+	overscanMenu->AppendRadioItem(ID_OVERSCAN_WIDESCREEN, "&Widescreen (176cc)");
+	overscanMenu->AppendRadioItem(ID_OVERSCAN_EXTENDED, "&Extended (192cc)");
+	overscanMenu->AppendRadioItem(ID_OVERSCAN_FULL, "&Full (With Blanking) (228cc)");
+	overscanMenu->AppendSeparator();
+
+	wxMenu *vertMenu = new wxMenu;
+	vertMenu->AppendRadioItem(ID_VERT_DEFAULT, "&Off");
+	vertMenu->AppendRadioItem(ID_VERT_OS_SCREEN, "&OS Screen Only");
+	vertMenu->AppendRadioItem(ID_VERT_NORMAL, "&Normal");
+	vertMenu->AppendRadioItem(ID_VERT_EXTENDED, "&Extended");
+	vertMenu->AppendRadioItem(ID_VERT_FULL, "&Full (With Blanking)");
+	overscanMenu->AppendSubMenu(vertMenu, "&Vertical Override");
+	overscanMenu->AppendCheckItem(ID_VIEW_PAL_EXTENDED, "&Extended PAL Height");
+	overscanMenu->AppendCheckItem(ID_VIEW_INDICATOR_MARGIN, "&Indicator Margin");
+
+	viewMenu->AppendSubMenu(overscanMenu, "&Overscan Mode");
+
+	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_VSYNC, "&Vertical Sync");
+	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FPS, "Show FPS");
+	viewMenu->Append(ID_VIEW_COLOR_SETTINGS, "Adjust Colors...");
+	viewMenu->Append(ID_VIEW_VIDEO_SETTINGS, "Adjust Screen Effects...");
+	viewMenu->AppendSeparator();
+
+	// Linux-specific view items
 	wxMenu *winSizeMenu = new wxMenu;
 	winSizeMenu->Append(ID_WINSIZE_1X, "&1x");
 	winSizeMenu->Append(ID_WINSIZE_2X, "&2x");
@@ -613,22 +578,6 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	enhTextMenu->AppendRadioItem(ID_ENHTEXT_SOFTWARE, "&Software (CIO)");
 	viewMenu->AppendSubMenu(enhTextMenu, "&Enhanced Text");
 
-	wxMenu *overscanMenu = new wxMenu;
-	overscanMenu->AppendRadioItem(ID_OVERSCAN_NORMAL, "&Normal (168cc)");
-	overscanMenu->AppendRadioItem(ID_OVERSCAN_EXTENDED, "&Extended (192cc)");
-	overscanMenu->AppendRadioItem(ID_OVERSCAN_FULL, "&Full (228cc)");
-	overscanMenu->AppendRadioItem(ID_OVERSCAN_OS_SCREEN, "&OS Screen (160cc)");
-	overscanMenu->AppendRadioItem(ID_OVERSCAN_WIDESCREEN, "&Widescreen (176cc)");
-	viewMenu->AppendSubMenu(overscanMenu, "O&verscan Mode");
-
-	wxMenu *vertMenu = new wxMenu;
-	vertMenu->AppendRadioItem(ID_VERT_DEFAULT, "&Default");
-	vertMenu->AppendRadioItem(ID_VERT_OS_SCREEN, "&OS Screen (192)");
-	vertMenu->AppendRadioItem(ID_VERT_NORMAL, "&Normal (224)");
-	vertMenu->AppendRadioItem(ID_VERT_EXTENDED, "&Extended (240)");
-	vertMenu->AppendRadioItem(ID_VERT_FULL, "&Full");
-	viewMenu->AppendSubMenu(vertMenu, "Vertical O&verride");
-
 	wxMenu *artifactMenu = new wxMenu;
 	artifactMenu->AppendRadioItem(ID_ARTIFACT_NONE, "&None");
 	artifactMenu->AppendRadioItem(ID_ARTIFACT_NTSC, "N&TSC");
@@ -640,23 +589,125 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	viewMenu->AppendSubMenu(artifactMenu, "Ar&tifacting");
 
 	viewMenu->AppendSeparator();
-	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_VSYNC, "&Vertical Sync");
+
+	// Copy/Save frame (moved from Edit, matching Windows View menu)
+	viewMenu->Append(ID_EDIT_COPY_FRAME, "Copy Frame to Clipboard");
+	viewMenu->Append(ID_FILE_SAVE_SCREENSHOT, "Save Frame...\tF9");
+	viewMenu->Append(ID_FILE_SAVE_SCREENSHOT_TRUE_ASPECT, "Save Frame (True Aspect)...");
+
+	wxMenu *textSelMenu = new wxMenu;
+	textSelMenu->Append(ID_EDIT_PASTE_TEXT, "Paste Text\tCtrl+V");
+	viewMenu->AppendSubMenu(textSelMenu, "&Text Selection");
+
+	viewMenu->AppendSeparator();
+
+	// View toggles (matching Windows bottom section)
 	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FRAME_BLENDING, "Frame &Blending");
 	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_CONFINE_MOUSE, "&Confine Mouse in Fullscreen");
 	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_AUTO_HIDE_CURSOR, "Auto-&Hide Cursor");
-	viewMenu->AppendSeparator();
+	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_STATUSBAR, "Show &Status Bar");
 	viewMenu->Append(ID_VIEW_TOGGLE_AUDIO_MONITOR, "Audio &Monitor...");
 	viewMenu->Append(ID_VIEW_TOGGLE_AUDIO_SCOPE, "Audio Sc&ope...");
-	viewMenu->Append(ID_VIEW_VIDEO_SETTINGS, "&Video Settings...");
-	viewMenu->Append(ID_VIEW_COLOR_SETTINGS, "&Color Settings...");
-	viewMenu->AppendSeparator();
-	viewMenu->AppendCheckItem(ID_VIEW_TOGGLE_FULLSCREEN, "F&ullscreen\tF11");
 	menuBar->Append(viewMenu, "&View");
 
-	// ===== Speed menu =====
+	// ================================================================
+	// System menu (matches Windows: Profiles submenu, Configure,
+	// Reset, Pause, Warp, Rewind, Console Switches, HW/Kernel/Mem)
+	// ================================================================
+	wxMenu *systemMenu = new wxMenu;
+
+	// Profiles as submenu (moved from top-level, matching Windows)
+	mpProfilesMenu = new wxMenu;
+	mpProfilesMenu->Append(ID_TOOLS_PROFILE_MANAGER, "&Edit Profiles...");
+	mpProfilesMenu->AppendSeparator();
+	// Dynamic profile items added in OnMenuOpen
+	systemMenu->AppendSubMenu(mpProfilesMenu, "&Profiles");
+
+	systemMenu->Append(ID_CONFIGURE_SYSTEM, "Configure System...");
+	systemMenu->AppendSeparator();
+
+	systemMenu->Append(ID_SYSTEM_WARM_RESET, "Warm Reset\tF5");
+	systemMenu->Append(ID_SYSTEM_COLD_RESET, "Cold Reset\tShift+F5");
+	systemMenu->Append(ID_SYSTEM_COLD_RESET_COMPUTER_ONLY, "Cold Reset (Computer Only)");
+	systemMenu->AppendCheckItem(ID_SPEED_TOGGLE_PAUSE, "Pause\tPause");
+	systemMenu->AppendSeparator();
+
+	systemMenu->AppendCheckItem(ID_SPEED_TOGGLE_TURBO, "&Warp Speed");
+	systemMenu->AppendCheckItem(ID_SPEED_PAUSE_INACTIVE, "Pause When Inactive");
+
+	wxMenu *rewindMenu = new wxMenu;
+	rewindMenu->Append(ID_SYSTEM_REWIND, "Quick Rewind");
+	rewindMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_REWIND, "Enable Rewind");
+	systemMenu->AppendSubMenu(rewindMenu, "Rewind");
+
+	systemMenu->AppendSeparator();
+
+	// Power-On Delay submenu
+	wxMenu *powerOnMenu = new wxMenu;
+	powerOnMenu->AppendRadioItem(ID_POWERON_AUTO, "&Auto");
+	powerOnMenu->AppendRadioItem(ID_POWERON_NONE, "&None");
+	powerOnMenu->AppendRadioItem(ID_POWERON_1SEC, "&1 Second");
+	powerOnMenu->AppendRadioItem(ID_POWERON_2SEC, "&2 Seconds");
+	powerOnMenu->AppendRadioItem(ID_POWERON_3SEC, "&3 Seconds");
+	systemMenu->AppendSubMenu(powerOnMenu, "Power-On Delay");
+
+	systemMenu->AppendCheckItem(ID_SYSTEM_HOLD_KEYS_FOR_RESET, "Hold Keys For Reset");
+	systemMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_BASIC, "Internal BASIC (Boot Without Option Key)");
+	systemMenu->AppendCheckItem(ID_SYSTEM_AUTO_BOOT_TAPE, "Auto-Boot Tape (Hold Start)");
+	systemMenu->AppendSeparator();
+
+	// Console Switches — expanded to match Windows (system toggles + device buttons)
+	mpConsoleSwitchesMenu = new wxMenu;
+	mpConsoleSwitchesMenu->Append(ID_CONSOLE_START, "S&tart");
+	mpConsoleSwitchesMenu->Append(ID_CONSOLE_SELECT, "&Select");
+	mpConsoleSwitchesMenu->Append(ID_CONSOLE_OPTION, "&Option");
+	mpConsoleSwitchesMenu->Append(ID_CONSOLE_RELEASE_ALL, "&Release All");
+	mpConsoleSwitchesMenu->AppendSeparator();
+	mpConsoleSwitchesMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_KEYBOARD_PRESENT, "Keyboard Present (XEGS)");
+	mpConsoleSwitchesMenu->AppendCheckItem(ID_SYSTEM_TOGGLE_FORCED_SELF_TEST, "Force Self-Test");
+	mpConsoleSwitchesMenu->Append(ID_SYSTEM_CART_ACTIVATE_MENU_BUTTON, "Activate Cart Menu Button");
+	mpConsoleSwitchesMenu->AppendCheckItem(ID_SYSTEM_CART_TOGGLE_SWITCH, "Enable Cart Switch");
+	mpConsoleSwitchesMenu->AppendSeparator();
+	for (size_t i = 0; i < std::size(kDeviceButtons) && i <= (size_t)(ID_DEVBTN_LAST - ID_DEVBTN_FIRST); ++i)
+		mpConsoleSwitchesMenu->Append(ID_DEVBTN_FIRST + (int)i, kDeviceButtons[i].name);
+	systemMenu->AppendSubMenu(mpConsoleSwitchesMenu, "Console Switches");
+
+	systemMenu->AppendSeparator();
+
+	// Hardware configuration submenus (Linux convenience)
+	wxMenu *hwMenu = new wxMenu;
+	hwMenu->AppendRadioItem(ID_HW_800, "Atari &800");
+	hwMenu->AppendRadioItem(ID_HW_800XL, "Atari 800&XL");
+	hwMenu->AppendRadioItem(ID_HW_1200XL, "Atari &1200XL");
+	hwMenu->AppendRadioItem(ID_HW_130XE, "Atari 130X&E");
+	hwMenu->AppendRadioItem(ID_HW_XEGS, "Atari XE&GS");
+	hwMenu->AppendRadioItem(ID_HW_5200, "Atari &5200");
+	systemMenu->AppendSubMenu(hwMenu, "&Hardware Mode");
+
+	mpKernelMenu = new wxMenu;
+	mpKernelMenu->AppendRadioItem(ID_KERNEL_AUTOSELECT, "[&Autoselect]");
+	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_OSB, "Internal &OS-B");
+	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_XL, "Internal &XL OS");
+	mpKernelMenu->AppendRadioItem(ID_KERNEL_INTERNAL_5200, "Internal &5200 OS");
+	systemMenu->AppendSubMenu(mpKernelMenu, "&Kernel");
+
+	wxMenu *memMenu = new wxMenu;
+	for (size_t i = 0; i < std::size(kMemoryModes) && i <= (size_t)(ID_MEMORY_LAST - ID_MEMORY_FIRST); ++i)
+		memMenu->AppendRadioItem(ID_MEMORY_FIRST + (int)i, kMemoryModes[i].label);
+	systemMenu->AppendSubMenu(memMenu, "&Memory");
+
+	wxMenu *vidStdMenu = new wxMenu;
+	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_NTSC, "&NTSC");
+	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_PAL, "&PAL");
+	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_SECAM, "&SECAM");
+	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_NTSC50, "NTSC-&50");
+	vidStdMenu->AppendRadioItem(ID_VIDEOSTD_PAL60, "PAL-6&0");
+	systemMenu->AppendSubMenu(vidStdMenu, "&Video Standard");
+
+	systemMenu->AppendSeparator();
+
+	// Speed submenu (remaining speed items)
 	wxMenu *speedMenu = new wxMenu;
-	speedMenu->Append(ID_SPEED_TOGGLE_PAUSE, "&Pause / Resume\tPause");
-	speedMenu->AppendCheckItem(ID_SPEED_TOGGLE_TURBO, "&Turbo");
 	speedMenu->AppendCheckItem(ID_SPEED_TOGGLE_SLOW, "&Slow Motion");
 	speedMenu->AppendSeparator();
 	speedMenu->AppendRadioItem(ID_SPEED_50, "&50%");
@@ -666,71 +717,119 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 	speedMenu->Append(ID_SPEED_CUSTOM_FIRST, "&Custom Speed...");
 	speedMenu->AppendSeparator();
 	speedMenu->AppendCheckItem(ID_SPEED_TOGGLE_MUTE, "&Mute Audio\tF4");
-	speedMenu->AppendCheckItem(ID_SPEED_PAUSE_INACTIVE, "Pause When &Inactive");
-	menuBar->Append(speedMenu, "S&peed");
+	systemMenu->AppendSubMenu(speedMenu, "Speed");
 
-	// ===== Debug menu =====
+	systemMenu->AppendSeparator();
+
+	// Configure submenu
+	wxMenu *configMenu = new wxMenu;
+	configMenu->Append(ID_CONFIGURE_CPU, "&CPU && Memory...");
+	configMenu->Append(ID_CONFIGURE_BOOT, "&Boot && Acceleration...");
+	configMenu->Append(ID_CONFIGURE_KEYBOARD, "&Keyboard...");
+	configMenu->Append(ID_CONFIGURE_AUDIO, "&Audio...");
+	configMenu->Append(ID_CONFIGURE_VIDEO, "&Video...");
+	systemMenu->AppendSubMenu(configMenu, "Configure");
+
+	systemMenu->Append(ID_SYSTEM_CYCLE_QUICK_MAPS, "Cycle Quick Maps\tShift+F1");
+	systemMenu->Append(ID_SYSTEM_SAVE_SETTINGS, "Save Settings\tCtrl+S");
+	menuBar->Append(systemMenu, "S&ystem");
+
+	// ================================================================
+	// Input menu (NEW — matches Windows)
+	// ================================================================
+	wxMenu *inputMenu = new wxMenu;
+	inputMenu->Append(ID_CONFIGURE_INPUT, "Input Setup...");
+	inputMenu->Append(ID_SYSTEM_CYCLE_QUICK_MAPS, "Cycle Quick Maps");
+	inputMenu->AppendSeparator();
+	inputMenu->Append(ID_INPUT_ON_SCREEN_KEYBOARD, "On-Screen Keyboard...");
+	inputMenu->AppendSeparator();
+	inputMenu->AppendCheckItem(ID_INPUT_CAPTURE_MOUSE, "Capture Mouse");
+	inputMenu->AppendCheckItem(ID_INPUT_AUTO_CAPTURE_MOUSE, "Auto-Capture Mouse");
+	menuBar->Append(inputMenu, "&Input");
+
+	// ================================================================
+	// Cheat menu (NEW — matches Windows)
+	// ================================================================
+	wxMenu *cheatMenu = new wxMenu;
+	cheatMenu->Append(ID_TOOLS_CHEAT_ENGINE, "Cheater...");
+	cheatMenu->AppendSeparator();
+	cheatMenu->AppendCheckItem(ID_CHEAT_DISABLE_PM_COLLISIONS, "Disable P/M &Collisions");
+	cheatMenu->AppendCheckItem(ID_CHEAT_DISABLE_PF_COLLISIONS, "Disable &Playfield Collisions");
+	menuBar->Append(cheatMenu, "C&heat");
+
+	// ================================================================
+	// Debug menu (expanded, matches Windows: Enable Debugger first,
+	// Options submenu, Run/Break + Break, Step, Symbols)
+	// ================================================================
 	wxMenu *debugMenu = new wxMenu;
-	debugMenu->Append(ID_DEBUG_RUN_STOP, "&Run / Break\tF8");
+	debugMenu->AppendCheckItem(ID_DEBUG_TOGGLE_DEBUGGER, "Enable Debugger");
 	debugMenu->AppendSeparator();
-	debugMenu->Append(ID_DEBUG_STEP_INTO, "Step &Into\tF11");
-	debugMenu->Append(ID_DEBUG_STEP_OVER, "Step &Over\tF10");
-	debugMenu->Append(ID_DEBUG_STEP_OUT, "Step Ou&t\tShift+F11");
-	debugMenu->AppendSeparator();
-	debugMenu->AppendCheckItem(ID_DEBUG_TOGGLE_DEBUGGER, "Enable &Debugger");
-	debugMenu->AppendCheckItem(ID_DEBUG_TOGGLE_BREAK_AT_EXE, "&Break at EXE Run Address");
-	debugMenu->AppendCheckItem(ID_DEBUG_TOGGLE_AUTO_RELOAD_ROMS, "&Auto-Reload ROMs");
-	debugMenu->AppendSeparator();
-	debugMenu->Append(ID_DEBUG_LOAD_SYMBOLS, "&Load Symbols...");
-	debugMenu->Append(ID_DEBUG_UNLOAD_ALL_SYMBOLS, "&Unload All Symbols");
-	debugMenu->AppendSeparator();
-	debugMenu->AppendCheckItem(ID_DEBUG_AUTO_LOAD_KERNEL_SYMBOLS, "Auto-Load &Kernel Symbols");
-	debugMenu->AppendCheckItem(ID_DEBUG_AUTO_LOAD_SYSTEM_SYMBOLS, "Auto-Load &System Symbols");
-	debugMenu->AppendCheckItem(ID_DEBUG_DEBUG_LINK, "Debug &Link");
-	menuBar->Append(debugMenu, "&Debug");
 
-	// ===== Tools menu =====
+	wxMenu *debugOptMenu = new wxMenu;
+	debugOptMenu->AppendCheckItem(ID_DEBUG_TOGGLE_AUTO_RELOAD_ROMS, "Auto-Reload ROMs on Cold Reset");
+	debugOptMenu->AppendCheckItem(ID_DEBUG_RANDOMIZE_MEMORY_EXE, "&Randomize Memory On EXE Load");
+	debugOptMenu->AppendCheckItem(ID_DEBUG_TOGGLE_BREAK_AT_EXE, "&Break at EXE Run Address");
+	debugMenu->AppendSubMenu(debugOptMenu, "Options");
+
+	debugMenu->AppendSeparator();
+	debugMenu->Append(ID_DEBUG_RUN_STOP, "Run/Break\tF8");
+	debugMenu->Append(ID_DEBUG_BREAK, "Break");
+	debugMenu->AppendSeparator();
+	debugMenu->Append(ID_DEBUG_STEP_INTO, "Step Into\tF11");
+	debugMenu->Append(ID_DEBUG_STEP_OVER, "Step Over\tF10");
+	debugMenu->Append(ID_DEBUG_STEP_OUT, "Step Out\tShift+F11");
+	debugMenu->AppendSeparator();
+	debugMenu->Append(ID_DEBUG_LOAD_SYMBOLS, "Load Symbols...");
+	debugMenu->Append(ID_DEBUG_UNLOAD_ALL_SYMBOLS, "Unload All Symbols");
+	debugMenu->AppendCheckItem(ID_DEBUG_AUTO_LOAD_KERNEL_SYMBOLS, "Auto-Load Kernel Symbols");
+	debugMenu->AppendCheckItem(ID_DEBUG_AUTO_LOAD_SYSTEM_SYMBOLS, "Auto-Load System Symbols");
+	debugMenu->AppendCheckItem(ID_DEBUG_DEBUG_LINK, "Debug Link");
+	menuBar->Append(debugMenu, "Debu&g");
+
+	// ================================================================
+	// Record menu (NEW — matches Windows, moved from Tools)
+	// ================================================================
+	wxMenu *recordMenu = new wxMenu;
+	recordMenu->Append(ID_TOOLS_RECORD_AUDIO_PCM, "Record &Raw Audio...");
+	recordMenu->Append(ID_TOOLS_RECORD_AUDIO_WAV, "Record &Audio...");
+	recordMenu->Append(ID_TOOLS_RECORD_VIDEO, "Record &Video...");
+	recordMenu->Append(ID_TOOLS_RECORD_SAP, "Record &SAP Type-R...");
+	recordMenu->Append(ID_TOOLS_RECORD_VGM, "Record V&GM...");
+	recordMenu->AppendSeparator();
+	recordMenu->Append(ID_TOOLS_STOP_RECORDING, "&Stop Recording");
+	recordMenu->Append(ID_TOOLS_VIDEO_PAUSE_RESUME, "&Pause/Resume Recording");
+	menuBar->Append(recordMenu, "&Record");
+
+	// ================================================================
+	// Tools menu (reduced — matches Windows, recording/cassette/cheat moved)
+	// ================================================================
 	wxMenu *toolsMenu = new wxMenu;
+	toolsMenu->Append(ID_TOOLS_DISK_EXPLORER, "&Disk Explorer...");
+	toolsMenu->Append(ID_TOOLS_CONVERT_SAP_TO_EXE, "Convert SAP to EXE...");
+	toolsMenu->Append(ID_TOOLS_EXPORT_ROM_SET, "Export ROM Set...");
+	toolsMenu->Append(ID_TOOLS_ANALYZE_TAPE_DECODING, "Analyze Tape Decoding...");
+	toolsMenu->AppendSeparator();
+	toolsMenu->Append(ID_HELP_KEYBOARD_SHORTCUTS, "&Keyboard Shortcuts...");
+	toolsMenu->Append(ID_TOOLS_COMPAT_BROWSER, "&Compatibility Database...");
+	toolsMenu->Append(ID_TOOLS_ADVANCED_CONFIG, "Advanced Configuration...");
+	toolsMenu->AppendSeparator();
 	toolsMenu->Append(ID_TOOLS_FIRMWARE_MANAGER, "&Firmware Manager...");
 	toolsMenu->Append(ID_TOOLS_DEVICE_MANAGER, "&Device Manager...");
 	toolsMenu->Append(ID_TOOLS_CARTRIDGE_BROWSER, "&Cartridge Browser...");
-	toolsMenu->Append(ID_TOOLS_CASSETTE_CONTROL, "C&assette Control...");
-	toolsMenu->Append(ID_TOOLS_TAPE_EDITOR, "&Tape Editor...");
-	toolsMenu->Append(ID_TOOLS_PROFILE_MANAGER, "&Profile Manager...");
-	toolsMenu->Append(ID_TOOLS_CHEAT_ENGINE, "Ch&eat Engine...");
-	toolsMenu->Append(ID_TOOLS_COMPAT_BROWSER, "Compati&bility Database...");
-	toolsMenu->Append(ID_TOOLS_AUDIO_MONITOR, "Audio &Monitor/Scope...");
-	toolsMenu->Append(ID_TOOLS_DISK_EXPLORER, "&Disk Explorer...");
 	toolsMenu->AppendSeparator();
-	toolsMenu->Append(ID_TOOLS_RECORD_VIDEO, "&Record Video...");
-	toolsMenu->Append(ID_TOOLS_RECORD_AUDIO_WAV, "Record &Audio (WAV)...");
-	toolsMenu->Append(ID_TOOLS_RECORD_AUDIO_PCM, "Record Raw Audio (&PCM)...");
-	toolsMenu->Append(ID_TOOLS_RECORD_SAP, "Record &SAP Type-R...");
-	toolsMenu->Append(ID_TOOLS_RECORD_VGM, "Record V&GM...");
-	toolsMenu->Append(ID_TOOLS_VIDEO_PAUSE_RESUME, "Pause Recording");
-	toolsMenu->Append(ID_TOOLS_STOP_RECORDING, "&Stop Recording");
-	toolsMenu->AppendSeparator();
-	toolsMenu->Append(ID_TOOLS_EXPORT_ROM_SET, "&Export ROM Set...");
-	toolsMenu->Append(ID_TOOLS_CONVERT_SAP_TO_EXE, "Convert &SAP to EXE...");
-	toolsMenu->Append(ID_TOOLS_ANALYZE_TAPE_DECODING, "Analyze &Tape Decoding...");
-	toolsMenu->AppendSeparator();
-	toolsMenu->Append(ID_TOOLS_ADVANCED_CONFIG, "&Advanced Configuration...");
-	toolsMenu->AppendSeparator();
-	toolsMenu->Append(ID_TOOLS_OPEN_CONFIG_DIR, "Open &Config Directory");
-	toolsMenu->Append(ID_TOOLS_OPEN_FIRMWARE_DIR, "Open F&irmware Directory");
+	toolsMenu->Append(ID_TOOLS_OPEN_CONFIG_DIR, "Open Config Directory");
+	toolsMenu->Append(ID_TOOLS_OPEN_FIRMWARE_DIR, "Open Firmware Directory");
 	menuBar->Append(toolsMenu, "&Tools");
 
-	// ===== Help menu =====
+	// ================================================================
+	// Help menu (matches Windows order)
+	// ================================================================
 	wxMenu *helpMenu = new wxMenu;
-	helpMenu->Append(ID_HELP_KEYBOARD_SHORTCUTS, "&Keyboard Shortcuts...");
-	helpMenu->AppendSeparator();
-	helpMenu->Append(ID_HELP_HOME_PAGE, "&Home Page...");
-	helpMenu->Append(ID_HELP_CHANGELOG, "Change &Log...");
-	helpMenu->AppendSeparator();
-	helpMenu->Append(ID_HELP_CHECK_FOR_UPDATES, "Check for &Updates...");
-	helpMenu->AppendSeparator();
 	helpMenu->Append(ID_HELP_ABOUT, "&About Altirra...");
-	menuBar->Append(helpMenu, "&Help");
+	helpMenu->Append(ID_HELP_CHANGELOG, "Change &Log...");
+	helpMenu->Append(ID_HELP_CHECK_FOR_UPDATES, "Check For Updates...");
+	helpMenu->Append(ID_HELP_HOME_PAGE, "Altirra Home...");
+	menuBar->Append(helpMenu, "Help");
 
 	return menuBar;
 }
@@ -752,6 +851,35 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 		case ID_SYSTEM_COLD_RESET:
 			g_sim.ColdReset();
 			ATImGuiShowToast("Cold reset");
+			break;
+
+		case ID_SYSTEM_COLD_RESET_COMPUTER_ONLY:
+			g_sim.ColdResetComputerOnly();
+			ATImGuiShowToast("Cold reset (computer only)");
+			break;
+
+		case ID_SYSTEM_TOGGLE_KEYBOARD_PRESENT:
+			g_sim.SetKeyboardPresent(!g_sim.IsKeyboardPresent());
+			break;
+
+		case ID_SYSTEM_TOGGLE_FORCED_SELF_TEST:
+			g_sim.SetForcedSelfTest(!g_sim.IsForcedSelfTest());
+			break;
+
+		case ID_SYSTEM_CART_ACTIVATE_MENU_BUTTON: {
+			ATDeviceManager *dm = g_sim.GetDeviceManager();
+			if (dm) {
+				auto devButtons = dm->GetInterfaces<IATDeviceButtons>(false, false, false);
+				for (IATDeviceButtons *p : devButtons) {
+					if (p->GetSupportedButtons() & (1U << (uint32)kATDeviceButton_CartridgeResetBank))
+						p->ActivateButton(kATDeviceButton_CartridgeResetBank, true);
+				}
+			}
+			break;
+		}
+
+		case ID_SYSTEM_CART_TOGGLE_SWITCH:
+			g_sim.SetCartridgeSwitch(!g_sim.GetCartridgeSwitch());
 			break;
 
 		case ID_SYSTEM_TOGGLE_BASIC:
@@ -1214,6 +1342,51 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			g_sim.GetCassette().Unload();
 			break;
 
+		case ID_CASSETTE_NEW_TAPE:
+			g_sim.GetCassette().LoadNew();
+			ATImGuiShowToast("New tape created");
+			break;
+
+		case ID_CASSETTE_SAVE_TAPE: {
+			ATCassetteEmulator& cas = g_sim.GetCassette();
+			if (!cas.IsLoaded()) break;
+			wxFileDialog dlg(this, "Save Cassette", "", "tape.cas",
+				"CAS files (*.cas)|*.cas|All files (*)|*",
+				wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+			if (dlg.ShowModal() == wxID_OK) {
+				VDStringW path = VDTextU8ToW(VDStringA(dlg.GetPath().utf8_str().data()));
+				try {
+					VDFileStream f(path.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kCreateAlways);
+					ATSaveCassetteImageCAS(f, cas.GetImage());
+					cas.SetImageClean();
+					ATImGuiShowToast("Tape saved");
+				} catch (const MyError& e) {
+					wxMessageBox(e.c_str(), "Save Error", wxOK | wxICON_ERROR, this);
+				}
+			}
+			break;
+		}
+
+		case ID_CASSETTE_EXPORT_AUDIO: {
+			ATCassetteEmulator& cas = g_sim.GetCassette();
+			if (!cas.IsLoaded()) break;
+			wxFileDialog dlg(this, "Export Audio Tape", "", "tape.wav",
+				"WAV files (*.wav)|*.wav|All files (*)|*",
+				wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+			if (dlg.ShowModal() == wxID_OK) {
+				VDStringW path = VDTextU8ToW(VDStringA(dlg.GetPath().utf8_str().data()));
+				try {
+					VDFileStream f(path.c_str(), nsVDFile::kWrite | nsVDFile::kDenyAll | nsVDFile::kCreateAlways);
+					ATSaveCassetteImageWAV(f, cas.GetImage());
+					cas.SetImageClean();
+					ATImGuiShowToast("Audio tape exported");
+				} catch (const MyError& e) {
+					wxMessageBox(e.c_str(), "Export Error", wxOK | wxICON_ERROR, this);
+				}
+			}
+			break;
+		}
+
 		// ---- View ----
 		case ID_VIEW_TOGGLE_FPS:
 			ATUISetShowFPS(!ATUIGetShowFPS());
@@ -1235,6 +1408,16 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 		case ID_FILTER_BICUBIC:        ATUISetDisplayFilterMode(kATDisplayFilterMode_Bicubic); break;
 		case ID_FILTER_DEFAULT:        ATUISetDisplayFilterMode(kATDisplayFilterMode_AnySuitable); break;
 
+		case ID_VIEW_NEXT_FILTER_MODE:
+			switch (ATUIGetDisplayFilterMode()) {
+				case kATDisplayFilterMode_Point:        ATUISetDisplayFilterMode(kATDisplayFilterMode_Bilinear); break;
+				case kATDisplayFilterMode_Bilinear:     ATUISetDisplayFilterMode(kATDisplayFilterMode_SharpBilinear); break;
+				case kATDisplayFilterMode_SharpBilinear:ATUISetDisplayFilterMode(kATDisplayFilterMode_Bicubic); break;
+				case kATDisplayFilterMode_Bicubic:      ATUISetDisplayFilterMode(kATDisplayFilterMode_AnySuitable); break;
+				case kATDisplayFilterMode_AnySuitable:   ATUISetDisplayFilterMode(kATDisplayFilterMode_Point); break;
+			}
+			break;
+
 		case ID_ENHTEXT_NONE:     ATUISetEnhancedTextMode(kATUIEnhancedTextMode_None); break;
 		case ID_ENHTEXT_HARDWARE: ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Hardware); break;
 		case ID_ENHTEXT_SOFTWARE: ATUISetEnhancedTextMode(kATUIEnhancedTextMode_Software); break;
@@ -1252,6 +1435,15 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 		case ID_VERT_NORMAL:    g_sim.GetGTIA().SetVerticalOverscanMode(ATGTIAEmulator::kVerticalOverscan_Normal); break;
 		case ID_VERT_EXTENDED:  g_sim.GetGTIA().SetVerticalOverscanMode(ATGTIAEmulator::kVerticalOverscan_Extended); break;
 		case ID_VERT_FULL:      g_sim.GetGTIA().SetVerticalOverscanMode(ATGTIAEmulator::kVerticalOverscan_Full); break;
+
+		case ID_VIEW_PAL_EXTENDED:
+			g_sim.GetGTIA().SetOverscanPALExtended(!g_sim.GetGTIA().IsOverscanPALExtended());
+			ATUIResizeDisplay();
+			break;
+
+		case ID_VIEW_INDICATOR_MARGIN:
+			ATUISetDisplayPadIndicators(!ATUIGetDisplayPadIndicators());
+			break;
 
 		// Artifacting mode
 		case ID_ARTIFACT_NONE:    g_sim.GetGTIA().SetArtifactingMode(ATArtifactMode::None); break;
@@ -1449,6 +1641,26 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 				dbg->SetDebugLinkEnabled(!dbg->GetDebugLinkEnabled());
 			break;
 		}
+
+		case ID_DEBUG_RANDOMIZE_MEMORY_EXE:
+			g_sim.SetRandomFillEXEEnabled(!g_sim.IsRandomFillEXEEnabled());
+			break;
+
+		case ID_DEBUG_BREAK: {
+			IATDebugger *dbg = ATGetDebugger();
+			if (dbg)
+				dbg->Break();
+			break;
+		}
+
+		// ---- Cheat ----
+		case ID_CHEAT_DISABLE_PM_COLLISIONS:
+			g_sim.GetGTIA().SetPMCollisionsEnabled(!g_sim.GetGTIA().ArePMCollisionsEnabled());
+			break;
+
+		case ID_CHEAT_DISABLE_PF_COLLISIONS:
+			g_sim.GetGTIA().SetPFCollisionsEnabled(!g_sim.GetGTIA().ArePFCollisionsEnabled());
+			break;
 
 		// ---- Tools ----
 		case ID_TOOLS_FIRMWARE_MANAGER:
@@ -1813,6 +2025,14 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			ATShowOnScreenKeyboard(this);
 			break;
 
+		case ID_INPUT_CAPTURE_MOUSE:
+			ATImGuiShowToast("Mouse capture not yet implemented");
+			break;
+
+		case ID_INPUT_AUTO_CAPTURE_MOUSE:
+			ATImGuiShowToast("Auto mouse capture not yet implemented");
+			break;
+
 		default:
 			// Memory mode range
 			if (id >= ID_MEMORY_FIRST && id <= ID_MEMORY_LAST) {
@@ -1887,6 +2107,31 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 						++visIdx;
 					}
 				}
+				break;
+			}
+
+			// Attach Disk 1-8 (simplified mount via file dialog)
+			if (id >= ID_DISK_ATTACH_1 && id <= ID_DISK_ATTACH_8) {
+				int drive = id - ID_DISK_ATTACH_1;
+				ATDiskInterface& di = g_sim.GetDiskInterface(drive);
+				wxFileDialog dlg(this, wxString::Format("Attach Disk to D%d", drive + 1), "", "",
+					"Disk images (*.atr;*.atx;*.xfd;*.dcm;*.pro)|*.atr;*.atx;*.xfd;*.dcm;*.pro|All files (*)|*",
+					wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+				if (dlg.ShowModal() == wxID_OK) {
+					VDStringW path = VDTextU8ToW(VDStringA(dlg.GetPath().utf8_str().data()));
+					try {
+						di.LoadDisk(path.c_str());
+					} catch (const MyError& e) {
+						wxMessageBox(e.c_str(), "Disk Mount Error", wxOK | wxICON_ERROR, this);
+					}
+				}
+				break;
+			}
+
+			// Detach Disk 1-8
+			if (id >= ID_DISK_DETACH_1 && id <= ID_DISK_DETACH_8) {
+				int drive = id - ID_DISK_DETACH_1;
+				g_sim.GetDiskInterface(drive).UnloadDisk();
 				break;
 			}
 
@@ -2439,6 +2684,9 @@ void ATMainFrame::OnMenuUpdateUI(wxUpdateUIEvent& event) {
 		case ID_VERT_EXTENDED:  event.Check(g_sim.GetGTIA().GetVerticalOverscanMode() == ATGTIAEmulator::kVerticalOverscan_Extended); break;
 		case ID_VERT_FULL:      event.Check(g_sim.GetGTIA().GetVerticalOverscanMode() == ATGTIAEmulator::kVerticalOverscan_Full); break;
 
+		case ID_VIEW_PAL_EXTENDED:    event.Check(g_sim.GetGTIA().IsOverscanPALExtended()); break;
+		case ID_VIEW_INDICATOR_MARGIN: event.Check(ATUIGetDisplayPadIndicators()); break;
+
 		// Artifacting mode radios
 		case ID_ARTIFACT_NONE:    event.Check(g_sim.GetGTIA().GetArtifactingMode() == ATArtifactMode::None); break;
 		case ID_ARTIFACT_NTSC:    event.Check(g_sim.GetGTIA().GetArtifactingMode() == ATArtifactMode::NTSC); break;
@@ -2463,6 +2711,9 @@ void ATMainFrame::OnMenuUpdateUI(wxUpdateUIEvent& event) {
 			break;
 
 		// Speed checkboxes
+		case ID_SPEED_TOGGLE_PAUSE:
+			event.Check(g_sim.IsPaused());
+			break;
 		case ID_SPEED_TOGGLE_TURBO:
 			event.Check(ATUIGetTurbo());
 			break;
@@ -2523,6 +2774,35 @@ void ATMainFrame::OnMenuUpdateUI(wxUpdateUIEvent& event) {
 			event.Check(dbg && dbg->GetDebugLinkEnabled());
 			break;
 		}
+
+		case ID_DEBUG_RANDOMIZE_MEMORY_EXE:
+			event.Check(g_sim.IsRandomFillEXEEnabled());
+			break;
+
+		// System extras
+		case ID_SYSTEM_TOGGLE_KEYBOARD_PRESENT:
+			event.Check(g_sim.IsKeyboardPresent());
+			break;
+		case ID_SYSTEM_TOGGLE_FORCED_SELF_TEST:
+			event.Check(g_sim.IsForcedSelfTest());
+			break;
+		case ID_SYSTEM_CART_TOGGLE_SWITCH:
+			event.Check(g_sim.GetCartridgeSwitch());
+			break;
+
+		// Cheat checkboxes (inverted: menu says "Disable" so check when NOT enabled)
+		case ID_CHEAT_DISABLE_PM_COLLISIONS:
+			event.Check(!g_sim.GetGTIA().ArePMCollisionsEnabled());
+			break;
+		case ID_CHEAT_DISABLE_PF_COLLISIONS:
+			event.Check(!g_sim.GetGTIA().ArePFCollisionsEnabled());
+			break;
+
+		// Cassette save/export enable
+		case ID_CASSETTE_SAVE_TAPE:
+		case ID_CASSETTE_EXPORT_AUDIO:
+			event.Enable(g_sim.GetCassette().IsLoaded());
+			break;
 
 		// Tools recording enable state
 		case ID_TOOLS_VIDEO_PAUSE_RESUME:
@@ -2680,9 +2960,9 @@ void ATMainFrame::OnMenuOpen(wxMenuEvent& event) {
 
 	// ---- Rebuild Profiles menu ----
 	if (mpProfilesMenu) {
-		// Remove all dynamic profile items
-		while (mpProfilesMenu->GetMenuItemCount() > 0)
-			mpProfilesMenu->Delete(mpProfilesMenu->FindItemByPosition(0));
+		// Keep first 2 items ("Edit Profiles..." + separator), remove dynamic items
+		while (mpProfilesMenu->GetMenuItemCount() > 2)
+			mpProfilesMenu->Delete(mpProfilesMenu->FindItemByPosition(mpProfilesMenu->GetMenuItemCount() - 1));
 
 		vdfastvector<uint32> profileIds;
 		ATSettingsProfileEnum(profileIds);
@@ -2693,8 +2973,8 @@ void ATMainFrame::OnMenuOpen(wxMenuEvent& event) {
 				if (visIdx >= (ID_PROFILE_LAST - ID_PROFILE_FIRST + 1))
 					break;
 				VDStringA name = VDTextWToU8(ATSettingsProfileGetName(pid));
-				wxMenuItem *item = mpProfilesMenu->InsertRadioItem(
-					visIdx, ID_PROFILE_FIRST + visIdx, wxString(name.c_str()));
+				wxMenuItem *item = mpProfilesMenu->AppendRadioItem(
+					ID_PROFILE_FIRST + visIdx, wxString(name.c_str()));
 				item->Check(pid == curProfile);
 				++visIdx;
 			}

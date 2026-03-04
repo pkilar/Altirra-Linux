@@ -81,7 +81,7 @@ private:
 	wxMenu *mpMRUMenu = nullptr;
 	wxMenu *mpKernelMenu = nullptr;
 	wxMenu *mpProfilesMenu = nullptr;
-	wxMenu *mpDeviceButtonsMenu = nullptr;
+	wxMenu *mpConsoleSwitchesMenu = nullptr;
 	wxMenu *mpDiskDrivesMenu = nullptr;
 	ATInputWx mInputWx;
 
