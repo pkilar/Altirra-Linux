@@ -66,6 +66,11 @@ class IATAudioOutput {
 public:
 	virtual ~IATAudioOutput() = default;
 
+	// Scope tap callback type. Receives post-mix post-filter samples at
+	// mixing rate (~64kHz). Independent of the recording audio tap.
+	// right is nullptr when mono mixing.
+	using ScopeTapFn = void (*)(void *ctx, const float *left, const float *right, uint32 count);
+
 	virtual void Init(ATScheduler& scheduler) = 0;
 
 	// Create the native audio device. This must be done before writing audio. This is a separate call
@@ -77,6 +82,7 @@ public:
 	virtual void SetApi(ATAudioApi api) = 0;
 
 	virtual void SetAudioTap(IATAudioTap *tap) = 0;
+	virtual void SetScopeTap(ScopeTapFn fn, void *ctx) = 0;
 
 	virtual ATUIAudioStatus GetAudioStatus() const = 0;
 

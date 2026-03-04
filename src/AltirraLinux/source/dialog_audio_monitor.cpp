@@ -20,8 +20,11 @@
 #include <cmath>
 #include <vector>
 
+#include <cstring>
+
 #include <vd2/system/vdtypes.h>
 #include <at/ataudio/pokey.h>
+#include <at/ataudio/audiooutput.h>
 
 #include "simulator.h"
 #include "audiomonitor.h"
@@ -30,6 +33,38 @@
 #include "dialogs_wx.h"
 
 extern ATSimulator g_sim;
+
+///////////////////////////////////////////////////////////////////////////
+// Scope mix tap — captures post-mix audio (POKEY + Covox + all sources)
+///////////////////////////////////////////////////////////////////////////
+
+static struct ScopeMixTapState {
+	std::vector<float> mLeft;
+	std::vector<float> mRight;
+	uint32 mMaxSamples = 0;
+	uint32 mNumSamples = 0;
+	bool mbStereo = false;
+
+	void Resize(uint32 n) {
+		mLeft.resize(n);
+		mRight.resize(n);
+		mMaxSamples = n;
+		mNumSamples = 0;
+	}
+} s_scopeMixTap;
+
+static void ScopeMixTapCallback(void *ctx, const float *left, const float *right, uint32 count) {
+	auto& tap = s_scopeMixTap;
+	if (tap.mNumSamples < tap.mMaxSamples) {
+		uint32 n = std::min(count, tap.mMaxSamples - tap.mNumSamples);
+		memcpy(tap.mLeft.data() + tap.mNumSamples, left, n * sizeof(float));
+		if (right) {
+			memcpy(tap.mRight.data() + tap.mNumSamples, right, n * sizeof(float));
+			tap.mbStereo = true;
+		}
+		tap.mNumSamples += n;
+	}
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // Waveform Panel — custom drawing for per-channel POKEY waveforms
@@ -183,7 +218,7 @@ private:
 	int mRateIndex = 3;
 	uint32 mSamplesRequested = 0;
 	uint32 mSampleScale = 1;
-	std::vector<float> mWaveforms[2];
+	std::vector<float> mWaveforms[2];   // Left (red), Right (green)
 
 	wxTimer mRefreshTimer;
 	enum { ID_REFRESH = 4100 };
@@ -215,8 +250,6 @@ void ATAudioScopePanel::ZoomOut() {
 }
 
 void ATAudioScopePanel::UpdateSampleCounts() {
-	ATImGuiIndicatorState& ind = ATImGuiGetIndicatorState();
-
 	float usPerDiv = kScopeUsPerDiv[mRateIndex];
 	float usPerView = usPerDiv * 10.0f;
 	float secsPerView = usPerView / 1000000.0f;
@@ -226,10 +259,7 @@ void ATAudioScopePanel::UpdateSampleCounts() {
 	uint32 n = (uint32)ceilf(samplesPerViewF);
 	mSamplesRequested = n;
 
-	for (int i = 0; i < 2; ++i) {
-		if (ind.mpAudioMonitors[i])
-			ind.mpAudioMonitors[i]->SetMixedSampleCount(n);
-	}
+	s_scopeMixTap.Resize(n);
 }
 
 void ATAudioScopePanel::OnTimer(wxTimerEvent&) {
@@ -245,18 +275,9 @@ void ATAudioScopePanel::OnPaint(wxPaintEvent&) {
 	dc.SetBackground(*wxBLACK_BRUSH);
 	dc.Clear();
 
-	ATImGuiIndicatorState& ind = ATImGuiGetIndicatorState();
-
-	// Check if any monitor is active
-	bool anyActive = false;
-	for (int i = 0; i < 2; ++i) {
-		if (ind.mpAudioMonitors[i])
-			anyActive = true;
-	}
-
-	if (!anyActive) {
+	if (s_scopeMixTap.mMaxSamples == 0) {
 		dc.SetTextForeground(*wxWHITE);
-		dc.DrawText("Audio scope not active. Enable via simulator.", 10, h / 2 - 8);
+		dc.DrawText("Audio scope not active.", 10, h / 2 - 8);
 		return;
 	}
 
@@ -264,31 +285,18 @@ void ATAudioScopePanel::OnPaint(wxPaintEvent&) {
 	wxPen gridPen(wxColour(128, 128, 128, 128), 1);
 	dc.SetPen(gridPen);
 
-	// 10 vertical divisions
 	for (int i = 1; i < 10; ++i) {
 		int x = w * i / 10;
 		dc.DrawLine(x, 0, x, h);
 	}
 
-	// Center horizontal line
 	int ymid = h / 2;
 	dc.DrawLine(0, ymid, w, ymid);
 
-	// Collect data
-	ATPokeyAudioLog *logs[2] = {};
-	bool logsReady = true;
-	for (int i = 0; i < 2; ++i) {
-		ATAudioMonitor *mon = ind.mpAudioMonitors[i];
-		if (!mon)
-			continue;
-		ATPokeyRegisterState *rstate;
-		mon->Update(&logs[i], &rstate);
-		if (logs[i]->mNumMixedSamples < logs[i]->mMaxMixedSamples)
-			logsReady = false;
-	}
+	// Downsample when buffer is full
+	bool tapReady = s_scopeMixTap.mNumSamples >= s_scopeMixTap.mMaxSamples;
 
-	// When all samples ready, downsample
-	if (logsReady) {
+	if (tapReady) {
 		sint32 n = (sint32)mSamplesRequested;
 		mSampleScale = 1;
 
@@ -297,19 +305,14 @@ void ATAudioScopePanel::OnPaint(wxPaintEvent&) {
 			n >>= 1;
 		}
 
-		for (int i = 0; i < 2; ++i) {
-			ATPokeyAudioLog *log = logs[i];
-			if (!log)
-				continue;
+		uint32 step = mSampleScale;
+		float scale = 1.0f / (float)step;
 
-			auto& wf = mWaveforms[i];
-			wf.resize(n);
-
-			const float *src = log->mpMixedSamples;
-			float *dst = wf.data();
-			uint32 step = mSampleScale;
-			float scale = 1.0f / (float)step;
-
+		// Left channel (always present)
+		mWaveforms[0].resize(n);
+		{
+			const float *src = s_scopeMixTap.mLeft.data();
+			float *dst = mWaveforms[0].data();
 			for (sint32 j = 0; j < n; ++j) {
 				float v = 0;
 				for (uint32 k = 0; k < step; ++k)
@@ -317,17 +320,38 @@ void ATAudioScopePanel::OnPaint(wxPaintEvent&) {
 				dst[j] = v * scale;
 				src += step;
 			}
-
-			log->mNumMixedSamples = 0;
 		}
+
+		// Right channel (only when stereo mixing is active)
+		if (s_scopeMixTap.mbStereo) {
+			mWaveforms[1].resize(n);
+			const float *src = s_scopeMixTap.mRight.data();
+			float *dst = mWaveforms[1].data();
+			for (sint32 j = 0; j < n; ++j) {
+				float v = 0;
+				for (uint32 k = 0; k < step; ++k)
+					v += src[k];
+				dst[j] = v * scale;
+				src += step;
+			}
+		} else {
+			mWaveforms[1].clear();
+		}
+
+		s_scopeMixTap.mNumSamples = 0;
+		s_scopeMixTap.mbStereo = false;
 	}
 
-	// Draw stored waveforms
+	// Draw waveforms: Red=Left, Green=Right
 	float usPerDiv = kScopeUsPerDiv[mRateIndex];
 	float usPerView = usPerDiv * 10.0f;
 	float secsPerView = usPerView / 1000000.0f;
 	float samplesPerSec = 63920.8f;
 	float samplesPerViewF = samplesPerSec * secsPerView;
+
+	float yscale = -(float)(h / 2);
+	float yoffset = (float)ymid;
+	float xscale = (float)w / samplesPerViewF * (float)mSampleScale;
 
 	for (int i = 0; i < 2; ++i) {
 		const auto& wf = mWaveforms[i];
@@ -337,10 +361,6 @@ void ATAudioScopePanel::OnPaint(wxPaintEvent&) {
 		size_t n = wf.size();
 		wxColour color = i ? wxColour(0, 180, 0) : wxColour(255, 0, 0);
 		dc.SetPen(wxPen(color, 1));
-
-		float yscale = -(float)(h / 2);
-		float yoffset = (float)ymid;
-		float xscale = (float)w / samplesPerViewF * (float)mSampleScale;
 
 		int prevX = (int)(0.5f * xscale);
 		int prevY = (int)(wf[0] * yscale + yoffset);
@@ -436,6 +456,9 @@ ATAudioScopeFrame::ATAudioScopeFrame(wxWindow *parent)
 	g_sim.SetAudioMonitorEnabled(true);
 	g_sim.SetAudioScopeEnabled(true);
 
+	// Install post-mix scope tap to capture Covox and other non-POKEY audio
+	g_sim.GetAudioOutput()->SetScopeTap(ScopeMixTapCallback, nullptr);
+
 	wxBoxSizer *mainSizer = new wxBoxSizer(wxVERTICAL);
 
 	mpScopePanel = new ATAudioScopePanel(this);
@@ -448,7 +471,7 @@ ATAudioScopeFrame::ATAudioScopeFrame(wxWindow *parent)
 	ctrlRow->Add(mpTimebaseLabel, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, 4);
 	ctrlRow->Add(new wxButton(this, ID_ZOOM_OUT, "+", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT), 0);
 	ctrlRow->AddStretchSpacer();
-	ctrlRow->Add(new wxStaticText(this, wxID_ANY, "Red=POKEY1  Green=POKEY2"), 0, wxALIGN_CENTER_VERTICAL);
+	ctrlRow->Add(new wxStaticText(this, wxID_ANY, "Red=Left  Green=Right"), 0, wxALIGN_CENTER_VERTICAL);
 	mainSizer->Add(ctrlRow, 0, wxEXPAND | wxALL, 4);
 
 	SetSizer(mainSizer);
@@ -475,6 +498,9 @@ void ATAudioScopeFrame::OnZoomOut(wxCommandEvent&) {
 }
 
 void ATAudioScopeFrame::OnClose(wxCloseEvent&) {
+	// Remove post-mix scope tap
+	g_sim.GetAudioOutput()->SetScopeTap(nullptr, nullptr);
+
 	// Only disable scope if the monitor window isn't also open
 	if (!spAudioMonitorFrame)
 		g_sim.SetAudioMonitorEnabled(false);
