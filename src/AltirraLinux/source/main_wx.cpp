@@ -296,6 +296,7 @@ struct ATLinuxOptions {
 	bool fullscreen = false;
 	bool showHelp = false;
 	bool showVersion = false;
+	bool verbose = false;
 	VDStringW configPath;
 	VDStringW romPath;
 
@@ -339,7 +340,7 @@ struct ATLinuxOptions {
 	vdvector<VDStringW> tapes;
 	vdvector<VDStringW> positionalFiles;
 	VDStringW tapePos;
-	int cartMapper = 0;         // 0=auto, -1=nocartchecksum, >0=mapper
+	int cartMapper = -1;        // -1=not specified, 0=auto, >0=mapper
 	VDStringW diskEmu;
 
 	// Display
@@ -481,7 +482,8 @@ static void PrintUsage(const char *progname) {
 		"Other:\n"
 		"  --cheats <path>          Load cheat file\n"
 		"  --nocheats               Disable cheat engine\n"
-		"  --skipsetup              Skip first-run setup wizard\n",
+		"  --skipsetup              Skip first-run setup wizard\n"
+		"  --verbose                Enable verbose wxWidgets debug messages\n",
 		progname
 	);
 }
@@ -513,6 +515,7 @@ enum {
 	OPT_AUTOPROFILE, OPT_NOAUTOPROFILE, OPT_BASELINE, OPT_LAUNCH,
 	OPT_TYPE, OPT_RAWKEYS, OPT_NORAWKEYS,
 	OPT_CHEATS, OPT_NOCHEATS, OPT_SKIPSETUP,
+	OPT_VERBOSE,
 };
 
 static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
@@ -623,6 +626,7 @@ static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
 		{"cheats",            required_argument, nullptr, OPT_CHEATS},
 		{"nocheats",          no_argument,       nullptr, OPT_NOCHEATS},
 		{"skipsetup",         no_argument,       nullptr, OPT_SKIPSETUP},
+		{"verbose",           no_argument,       nullptr, OPT_VERBOSE},
 
 		{nullptr, 0, nullptr, 0}
 	};
@@ -831,6 +835,7 @@ static ATLinuxOptions ParseArguments(int argc, char *argv[]) {
 			case OPT_CHEATS:    opts.cheatsPath = VDTextU8ToW(VDStringA(optarg)); break;
 			case OPT_NOCHEATS:  opts.noCheats = true; break;
 			case OPT_SKIPSETUP: opts.skipSetup = true; break;
+			case OPT_VERBOSE: opts.verbose = true; break;
 
 			default:
 				break;
@@ -1358,6 +1363,7 @@ static void ATProcessCommandLine(const ATLinuxOptions& opts) {
 class ATApp : public wxApp {
 public:
 	void OnInitCmdLine(wxCmdLineParser& parser) override;
+	bool OnCmdLineParsed(wxCmdLineParser& parser) override;
 	bool OnInit() override;
 	int OnExit() override;
 
@@ -1394,8 +1400,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	wxEntryStart(argc, argv);
-	wxTheApp->CallOnInit();
-	if (wxTheApp->OnInit()) {
+	if (wxTheApp->CallOnInit()) {
 		wxTheApp->OnRun();
 	}
 	wxTheApp->OnExit();
@@ -1404,9 +1409,14 @@ int main(int argc, char *argv[]) {
 }
 
 void ATApp::OnInitCmdLine(wxCmdLineParser& parser) {
-	// Suppress wxWidgets' built-in command-line parsing (--help, --verbose, etc.)
-	// so we can handle all arguments ourselves via getopt_long.
-	parser.SetDesc(nullptr);
+	// Give wxWidgets an empty command line so it doesn't reject our arguments.
+	// We handle all argument parsing ourselves via ParseArguments().
+	parser.SetCmdLine("");
+}
+
+bool ATApp::OnCmdLineParsed(wxCmdLineParser& WXUNUSED(parser)) {
+	// Skip wxWidgets' built-in processing — we parse arguments ourselves.
+	return true;
 }
 
 bool ATApp::OnInit() {
@@ -1415,6 +1425,10 @@ bool ATApp::OnInit() {
 
 	// Parse our own arguments (wxWidgets may consume some first)
 	ATLinuxOptions opts = ParseArguments(argc, argv);
+
+	// Suppress wxWidgets debug/info messages unless --verbose is set
+	if (!opts.verbose)
+		wxLog::SetLogLevel(wxLOG_Warning);
 
 	fprintf(stderr, "Altirra Linux (wxWidgets) - starting up\n");
 
@@ -1448,8 +1462,8 @@ bool ATApp::OnInit() {
 	if (!LoadSettingsAndROMs(opts))
 		return false;
 
-	// Process command-line switches (system config, media, devices, debug, etc.)
-	// This must happen after settings/ROMs are loaded but before the window is created.
+	// Check if command-line switches were specified (needed for setup wizard skip logic).
+	// Actual processing happens after window/display setup.
 	bool hasCommandLineSwitches = opts.videoStandard >= 0 || opts.hardwareMode >= 0
 		|| !opts.kernelMode.empty() || !opts.kernelRef.empty() || !opts.basicRef.empty()
 		|| opts.memoryMode >= 0 || opts.axlonMemSize >= 0 || opts.highBanks > -2
@@ -1466,9 +1480,6 @@ bool ATApp::OnInit() {
 		|| !opts.diskEmu.empty() || opts.rawKeys >= 0 || !opts.keysToType.empty()
 		|| opts.debug || opts.debugBrkRun >= 0 || !opts.debugCmds.empty()
 		|| opts.baseline || opts.autoProfile || opts.noAutoProfile || opts.launch;
-
-	if (hasCommandLineSwitches)
-		ATProcessCommandLine(opts);
 
 	// Create main window
 	m_frame = new ATMainFrame();
@@ -1487,6 +1498,12 @@ bool ATApp::OnInit() {
 	// Initialize debugger UI hooks
 	ATWxDebuggerInit();
 	fprintf(stderr, "wxWidgets UI initialized\n");
+
+	// Process command-line switches (system config, media, devices, debug, etc.)
+	// This must happen after settings/ROMs are loaded AND after window/display setup,
+	// so that DoLoad's ColdReset+Resume can properly boot with display connected.
+	if (hasCommandLineSwitches)
+		ATProcessCommandLine(opts);
 
 	// Apply fullscreen after window creation
 	if (opts.fullscreen)
