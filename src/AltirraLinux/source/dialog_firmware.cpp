@@ -63,6 +63,9 @@ public:
 private:
 	void PopulateFirmwareList();
 	void PopulateDefaultChoices();
+	void SortFirmwareEntries();
+	void RefreshListFromEntries();
+	void OnColumnClick(wxListEvent& event);
 	void OnScanDirs(wxCommandEvent& event);
 	void OnAddFile(wxCommandEvent& event);
 	void OnRemove(wxCommandEvent& event);
@@ -82,6 +85,8 @@ private:
 	};
 	vdvector<FirmwareEntry> mFirmwareEntries;
 	bool mDefaultsChanged = false;
+	int mSortColumn = 0;
+	bool mSortAscending = true;
 
 	// Store firmware IDs matching each default dropdown
 	struct DefaultChoiceData {
@@ -147,6 +152,7 @@ ATFirmwareManagerDialog::ATFirmwareManagerDialog(wxWindow *parent)
 	Bind(wxEVT_BUTTON, &ATFirmwareManagerDialog::OnCloseButton, this, wxID_CLOSE);
 	Bind(wxEVT_CHOICE, &ATFirmwareManagerDialog::OnDefaultChanged, this);
 	Bind(wxEVT_CLOSE_WINDOW, &ATFirmwareManagerDialog::OnWindowClose, this);
+	mpFirmwareList->Bind(wxEVT_LIST_COL_CLICK, &ATFirmwareManagerDialog::OnColumnClick, this);
 }
 
 ATFirmwareManagerDialog::~ATFirmwareManagerDialog() {
@@ -155,14 +161,12 @@ ATFirmwareManagerDialog::~ATFirmwareManagerDialog() {
 }
 
 void ATFirmwareManagerDialog::PopulateFirmwareList() {
-	mpFirmwareList->DeleteAllItems();
 	mFirmwareEntries.clear();
 
 	ATFirmwareManager *fwMgr = g_sim.GetFirmwareManager();
 	vdvector<ATFirmwareInfo> fwList;
 	fwMgr->GetFirmwareList(fwList);
 
-	int row = 0;
 	for (const auto& fw : fwList) {
 		if (!fw.mbVisible)
 			continue;
@@ -172,14 +176,55 @@ void ATFirmwareManagerDialog::PopulateFirmwareList() {
 		entry.name = VDTextWToU8(fw.mName);
 		entry.type = fw.mType;
 		entry.path = VDTextWToU8(fw.mPath);
-
-		long idx = mpFirmwareList->InsertItem(row, entry.name.c_str());
-		mpFirmwareList->SetItem(idx, 1, ATGetFirmwareTypeDisplayName(fw.mType));
-		mpFirmwareList->SetItem(idx, 2, entry.path.c_str());
-
 		mFirmwareEntries.push_back(std::move(entry));
+	}
+
+	SortFirmwareEntries();
+	RefreshListFromEntries();
+}
+
+void ATFirmwareManagerDialog::SortFirmwareEntries() {
+	const int col = mSortColumn;
+	const bool asc = mSortAscending;
+
+	std::sort(mFirmwareEntries.begin(), mFirmwareEntries.end(),
+		[col, asc](const FirmwareEntry& a, const FirmwareEntry& b) {
+			int cmp;
+			switch (col) {
+				default:
+				case 0: cmp = strcasecmp(a.name.c_str(), b.name.c_str()); break;
+				case 1: cmp = strcasecmp(
+					ATGetFirmwareTypeDisplayName(a.type),
+					ATGetFirmwareTypeDisplayName(b.type)); break;
+				case 2: cmp = strcasecmp(a.path.c_str(), b.path.c_str()); break;
+			}
+			return asc ? cmp < 0 : cmp > 0;
+		});
+}
+
+void ATFirmwareManagerDialog::RefreshListFromEntries() {
+	mpFirmwareList->DeleteAllItems();
+
+	int row = 0;
+	for (const auto& entry : mFirmwareEntries) {
+		long idx = mpFirmwareList->InsertItem(row, entry.name.c_str());
+		mpFirmwareList->SetItem(idx, 1, ATGetFirmwareTypeDisplayName(entry.type));
+		mpFirmwareList->SetItem(idx, 2, entry.path.c_str());
 		++row;
 	}
+}
+
+void ATFirmwareManagerDialog::OnColumnClick(wxListEvent& event) {
+	int col = event.GetColumn();
+	if (col == mSortColumn)
+		mSortAscending = !mSortAscending;
+	else {
+		mSortColumn = col;
+		mSortAscending = true;
+	}
+
+	SortFirmwareEntries();
+	RefreshListFromEntries();
 }
 
 void ATFirmwareManagerDialog::PopulateDefaultChoices() {
