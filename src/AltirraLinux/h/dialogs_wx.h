@@ -29,6 +29,7 @@ void ATShowVideoSettingsDialog(wxWindow *parent);
 
 // Show manager / tool dialogs (modal).
 void ATShowFirmwareManagerDialog(wxWindow *parent);
+void ATShowFirmwareManagerDialogModal(wxWindow *parent);
 void ATShowDeviceManagerDialog(wxWindow *parent);
 void ATShowCartridgeBrowserDialog(wxWindow *parent);
 void ATShowCassetteControlDialog(wxWindow *parent);
@@ -46,8 +47,9 @@ void ATShowInputSetupDialog(wxWindow *parent);
 void ATShowAudioMonitorWindow(wxWindow *parent);
 void ATShowAudioScopeWindow(wxWindow *parent);
 
-// Tape editor dialog (modal).
+// Tape editor window (non-modal, toggled).
 void ATShowTapeEditorDialog(wxWindow *parent);
+void ATCloseTapeEditorDialog();
 
 // Disk explorer dialog (modal).
 void ATShowDiskExplorerDialog(wxWindow *parent);

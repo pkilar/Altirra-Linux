@@ -435,7 +435,11 @@ void ATFirmwareManagerDialog::ApplyAndClose() {
 			g_sim.Resume();
 		}
 	}
-	Destroy();
+
+	if (IsModal())
+		EndModal(wxID_OK);
+	else
+		Destroy();
 }
 
 void ATShowFirmwareManagerDialog(wxWindow *parent) {
@@ -446,4 +450,9 @@ void ATShowFirmwareManagerDialog(wxWindow *parent) {
 
 	auto *dlg = new ATFirmwareManagerDialog(parent);
 	dlg->Show();
+}
+
+void ATShowFirmwareManagerDialogModal(wxWindow *parent) {
+	ATFirmwareManagerDialog dlg(parent);
+	dlg.ShowModal();
 }
