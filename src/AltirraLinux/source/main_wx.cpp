@@ -1533,6 +1533,7 @@ void ATCloseAllNonModalWindows() {
 	ATCloseAudioWindows();
 	ATCloseVideoSettingsWindow();
 	ATCloseOnScreenKeyboard();
+	ATCloseTapeEditorDialog();
 }
 
 int ATApp::OnExit() {
