@@ -22,6 +22,9 @@
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
+#include <thread>
+#include <atomic>
+#include <chrono>
 
 // Compiler barrier: prevents the compiler from reordering memory operations
 // across this point. On x86/x64 this is sufficient for the SPSC ring buffer
@@ -130,18 +133,51 @@ bool VDAudioOutputSDL3::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATE
 	mTotalRead = 0;
 	memset(mRingBuffer.data(), 0, ringSize);
 
-	// Open SDL3 audio device stream
+	// Open SDL3 audio device stream.
+	// SDL3's PipeWire backend can deadlock if the PipeWire daemon is in a
+	// bad state (e.g. after a driver upgrade without restarting the session).
+	// Run the blocking call on a helper thread with a timeout so the
+	// application can still start in silent mode instead of hanging forever.
 	SDL_AudioSpec spec;
 	spec.format = SDL_AUDIO_S16;
 	spec.channels = fmt->nChannels;
 	spec.freq = mMixingRate;
 
-	mpStream = SDL_OpenAudioDeviceStream(
-		SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-		&spec,
-		StreamCallback,
-		this
-	);
+	{
+		std::atomic<SDL_AudioStream *> result{nullptr};
+		std::atomic<bool> done{false};
+
+		std::thread opener([&]() {
+			result.store(SDL_OpenAudioDeviceStream(
+				SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+				&spec,
+				StreamCallback,
+				this
+			), std::memory_order_release);
+			done.store(true, std::memory_order_release);
+		});
+
+		static constexpr auto kAudioOpenTimeout = std::chrono::seconds(5);
+		auto deadline = std::chrono::steady_clock::now() + kAudioOpenTimeout;
+
+		while (!done.load(std::memory_order_acquire)) {
+			if (std::chrono::steady_clock::now() >= deadline) {
+				// The open call is stuck (likely a PipeWire deadlock).
+				// Detach the thread — it will eventually complete or be
+				// cleaned up at process exit. We cannot safely cancel it
+				// since SDL_OpenAudioDeviceStream is not cancellable.
+				opener.detach();
+				fprintf(stderr, "Warning: SDL3 audio device open timed out (PipeWire may need restart).\n"
+					"  Try: systemctl --user restart pipewire pipewire-pulse\n"
+					"  Continuing without audio.\n");
+				return false;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		}
+
+		opener.join();
+		mpStream = result.load(std::memory_order_acquire);
+	}
 
 	if (!mpStream)
 		return false;
