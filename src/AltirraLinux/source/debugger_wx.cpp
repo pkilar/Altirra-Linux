@@ -225,11 +225,11 @@ void ATWxRegistersPanel::UpdateFromState(const ATDebuggerSystemState& state) {
 	snprintf(buf, sizeof(buf), "%c%c-%c%c%c%c%c",
 		(r.mP & 0x80) ? 'N' : 'n',
 		(r.mP & 0x40) ? 'V' : 'v',
+		(r.mP & 0x10) ? 'B' : 'b',
 		(r.mP & 0x08) ? 'D' : 'd',
 		(r.mP & 0x04) ? 'I' : 'i',
 		(r.mP & 0x02) ? 'Z' : 'z',
-		(r.mP & 0x01) ? 'C' : 'c',
-		(r.mP & 0x10) ? 'B' : 'b');
+		(r.mP & 0x01) ? 'C' : 'c');
 	mpFlags->SetLabel(buf);
 
 	snprintf(buf, sizeof(buf), "%u", state.mCycle);

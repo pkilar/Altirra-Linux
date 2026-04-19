@@ -682,7 +682,7 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 		}
 
 		vdrefptr<IATDiskImage> diskView(new ATPartitionDiskView(*dev, partitions[0]));
-		ATShowDiskExplorerForImage(nullptr, diskView, devName, !dev->IsReadOnly());
+		ATShowDiskExplorerForImage(nullptr, diskView, devName, dev->IsReadOnly());
 	} catch (const std::exception& e) {
 		char msg[256];
 		snprintf(msg, sizeof(msg), "Disk explorer failed: %s", e.what());
