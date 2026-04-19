@@ -126,6 +126,7 @@ enum ATMenuId {
 	// Edit menu (1420-1439)
 	ID_EDIT_PASTE_TEXT = 1420,
 	ID_EDIT_COPY_FRAME,
+	ID_EDIT_COPY_FRAME_TRUE_ASPECT,
 
 	// Cassette (2010-2019) — moved from 1400 to avoid overlap with disk drive range
 	ID_CASSETTE_LOAD = 2010,

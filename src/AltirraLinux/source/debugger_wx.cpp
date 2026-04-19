@@ -29,10 +29,12 @@
 #include <wx/spinctrl.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
+#include <wx/textdlg.h>
 #include <wx/timer.h>
 #include <wx/toolbar.h>
 
 #include <vd2/system/filesys.h>
+#include <vd2/system/registry.h>
 #include <vd2/system/text.h>
 #include <vd2/system/time.h>
 #include <vd2/system/vdtypes.h>
@@ -54,6 +56,7 @@ struct ATCPUHistoryEntry;
 
 #include "simulator.h"
 #include "trace.h"
+#include "console.h"
 
 extern ATSimulator g_sim;
 
@@ -135,6 +138,27 @@ private:
 
 static std::mutex s_consoleMutex;
 static VDStringA s_consolePending;
+static wxString s_defaultPerspective;
+
+namespace {
+
+bool ATDebuggerStatesEqual(const ATDebuggerSystemState& a, const ATDebuggerSystemState& b) {
+	// Compare scalar fields directly; skip mExecState (union with padding)
+	// since mPC/mCycle/mbRunning already capture meaningful state changes.
+	return a.mPC == b.mPC
+		&& a.mInsnPC == b.mInsnPC
+		&& a.mPCBank == b.mPCBank
+		&& a.mExecMode == b.mExecMode
+		&& a.mPCModuleId == b.mPCModuleId
+		&& a.mPCFileId == b.mPCFileId
+		&& a.mPCLine == b.mPCLine
+		&& a.mFrameExtPC == b.mFrameExtPC
+		&& a.mbRunning == b.mbRunning
+		&& a.mCycle == b.mCycle
+		&& a.mpDebugTarget == b.mpDebugTarget;
+}
+
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // Forward declarations
@@ -156,17 +180,26 @@ public:
 private:
 	void OnEditRegister(wxCommandEvent& event);
 
-	wxStaticText *mpPC = nullptr;
-	wxStaticText *mpA = nullptr;
-	wxStaticText *mpX = nullptr;
-	wxStaticText *mpY = nullptr;
-	wxStaticText *mpS = nullptr;
-	wxStaticText *mpP = nullptr;
+	wxButton *mpPC = nullptr;
+	wxButton *mpA = nullptr;
+	wxButton *mpX = nullptr;
+	wxButton *mpY = nullptr;
+	wxButton *mpS = nullptr;
+	wxButton *mpP = nullptr;
 	wxStaticText *mpFlags = nullptr;
 	wxStaticText *mpCycle = nullptr;
 
 	ATCPUExecState mPrevState {};
 	bool mbPrevValid = false;
+
+	enum {
+		ID_EDIT_PC = 4000,
+		ID_EDIT_A,
+		ID_EDIT_X,
+		ID_EDIT_Y,
+		ID_EDIT_S,
+		ID_EDIT_P
+	};
 };
 
 ATWxRegistersPanel::ATWxRegistersPanel(wxWindow *parent)
@@ -177,23 +210,32 @@ ATWxRegistersPanel::ATWxRegistersPanel(wxWindow *parent)
 	wxFlexGridSizer *grid = new wxFlexGridSizer(2, 4, 4);
 	grid->AddGrowableCol(1);
 
-	auto AddReg = [&](const char *label, wxStaticText *&text) {
+	auto AddEditableReg = [&](const char *label, wxButton *&button, int id) {
+		grid->Add(new wxStaticText(this, wxID_ANY, label), 0, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
+		button = new wxButton(this, id, "----", wxDefaultPosition, wxDefaultSize, wxBU_EXACTFIT);
+		button->SetFont(mono);
+		grid->Add(button, 0, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
+	};
+
+	auto AddStaticReg = [&](const char *label, wxStaticText *&text) {
 		grid->Add(new wxStaticText(this, wxID_ANY, label), 0, wxALIGN_RIGHT | wxALIGN_CENTER_VERTICAL);
 		text = new wxStaticText(this, wxID_ANY, "----");
 		text->SetFont(mono);
 		grid->Add(text, 0, wxALIGN_LEFT | wxALIGN_CENTER_VERTICAL);
 	};
 
-	AddReg("PC:", mpPC);
-	AddReg("A:", mpA);
-	AddReg("X:", mpX);
-	AddReg("Y:", mpY);
-	AddReg("S:", mpS);
-	AddReg("P:", mpP);
-	AddReg("Flags:", mpFlags);
-	AddReg("Cycle:", mpCycle);
+	AddEditableReg("PC:", mpPC, ID_EDIT_PC);
+	AddEditableReg("A:", mpA, ID_EDIT_A);
+	AddEditableReg("X:", mpX, ID_EDIT_X);
+	AddEditableReg("Y:", mpY, ID_EDIT_Y);
+	AddEditableReg("S:", mpS, ID_EDIT_S);
+	AddEditableReg("P:", mpP, ID_EDIT_P);
+	AddStaticReg("Flags:", mpFlags);
+	AddStaticReg("Cycle:", mpCycle);
 
 	SetSizer(grid);
+
+	Bind(wxEVT_BUTTON, &ATWxRegistersPanel::OnEditRegister, this, ID_EDIT_PC, ID_EDIT_P);
 }
 
 void ATWxRegistersPanel::UpdateFromState(const ATDebuggerSystemState& state) {
@@ -239,7 +281,120 @@ void ATWxRegistersPanel::UpdateFromState(const ATDebuggerSystemState& state) {
 	mPrevState = state.mExecState;
 }
 
-void ATWxRegistersPanel::OnEditRegister(wxCommandEvent&) {
+void ATWxRegistersPanel::OnEditRegister(wxCommandEvent& event) {
+	if (!mbPrevValid)
+		return;
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	IATDebugTarget *target = dbg->GetTarget();
+	if (!target)
+		return;
+
+	// Register editing currently supports 8-bit 6502/65C02 only.
+	// The 65C816 has 16-bit A/X/Y/S (depending on M/X flags) and extra
+	// registers (DB, DP, K, PBR) that the dialog does not handle; the
+	// write-back would clobber the XH/YH/SH high bytes.
+	const ATDebugDisasmMode mode = target->GetDisasmMode();
+	if (mode != kATDebugDisasmMode_6502
+		&& mode != kATDebugDisasmMode_65C02)
+	{
+		wxMessageBox("Register editing is only supported for 6502/65C02 CPUs.",
+			"Debugger", wxOK | wxICON_INFORMATION, this);
+		return;
+	}
+
+	const int id = event.GetId();
+	const char *name = nullptr;
+	unsigned maxValue = 0xFF;
+	wxString currentValue;
+
+	switch (id) {
+		case ID_EDIT_PC:
+			name = "PC";
+			maxValue = 0xFFFF;
+			currentValue = mpPC->GetLabel();
+			break;
+		case ID_EDIT_A:
+			name = "A";
+			currentValue = mpA->GetLabel();
+			break;
+		case ID_EDIT_X:
+			name = "X";
+			currentValue = mpX->GetLabel();
+			break;
+		case ID_EDIT_Y:
+			name = "Y";
+			currentValue = mpY->GetLabel();
+			break;
+		case ID_EDIT_S:
+			name = "S";
+			currentValue = mpS->GetLabel();
+			break;
+		case ID_EDIT_P:
+			name = "P";
+			currentValue = mpP->GetLabel();
+			break;
+		default:
+			return;
+	}
+
+	wxTextEntryDialog dlg(this,
+		wxString::Format("Enter new %s value (hex):", name),
+		"Edit Register",
+		currentValue);
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+
+	unsigned long value = 0;
+	if (!dlg.GetValue().ToULong(&value, 16) || value > maxValue) {
+		wxMessageBox(
+			wxString::Format("Invalid %s value.", name),
+			"Debugger",
+			wxOK | wxICON_ERROR,
+			this);
+		return;
+	}
+
+	ATCPUExecState state;
+	target->GetExecState(state);
+
+	if (id == ID_EDIT_PC) {
+		if (!dbg->GetTargetIndex()) {
+			dbg->SetPC((uint16)value);
+		} else {
+			state.m6502.mPC = (uint16)value;
+			target->SetExecState(state);
+		}
+	} else {
+		switch (id) {
+			case ID_EDIT_A:
+				state.m6502.mA = (uint8)value;
+				break;
+			case ID_EDIT_X:
+				state.m6502.mX = (uint8)value;
+				state.m6502.mXH = 0;
+				break;
+			case ID_EDIT_Y:
+				state.m6502.mY = (uint8)value;
+				state.m6502.mYH = 0;
+				break;
+			case ID_EDIT_S:
+				state.m6502.mS = (uint8)value;
+				state.m6502.mSH = 0;
+				break;
+			case ID_EDIT_P:
+				state.m6502.mP = (uint8)value;
+				break;
+		}
+
+		target->SetExecState(state);
+	}
+
+	if (s_pClient)
+		dbg->RequestClientUpdate(s_pClient);
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -251,6 +406,7 @@ public:
 	ATWxDisassemblyPanel(wxWindow *parent);
 	void UpdateFromState(const ATDebuggerSystemState& state);
 	void NavigateTo(uint32 addr);
+	bool ToggleSelectedBreakpoint();
 
 private:
 	void OnGo(wxCommandEvent& event);
@@ -345,12 +501,16 @@ void ATWxDisassemblyPanel::OnGo(wxCommandEvent&) {
 				mBaseAddr = (uint16)sym;
 		}
 	}
+	mbFollowPC = false;
+	mpFollowPC->SetValue(false);
 	Repopulate();
 }
 
 void ATWxDisassemblyPanel::OnGoPC(wxCommandEvent&) {
 	IATDebugger *dbg = ATGetDebugger();
 	if (dbg) {
+		mbFollowPC = true;
+		mpFollowPC->SetValue(true);
 		mBaseAddr = dbg->GetPC();
 		char buf[8];
 		snprintf(buf, sizeof(buf), "%04X", mBaseAddr);
@@ -402,6 +562,32 @@ void ATWxDisassemblyPanel::Repopulate() {
 
 		addr = result.mNextPC;
 	}
+}
+
+bool ATWxDisassemblyPanel::ToggleSelectedBreakpoint() {
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg || mLines.empty())
+		return false;
+
+	long sel = mpList->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+	if (sel < 0)
+		sel = mpList->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_FOCUSED);
+
+	if (sel < 0) {
+		for (size_t i = 0; i < mLines.size(); ++i) {
+			if (mLines[i].addr == mCurrentPC) {
+				sel = (long)i;
+				break;
+			}
+		}
+	}
+
+	if (sel < 0 || sel >= (long)mLines.size())
+		return false;
+
+	dbg->ToggleBreakpoint(mLines[(size_t)sel].addr);
+	Repopulate();
+	return true;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1186,6 +1372,7 @@ public:
 	ATWxSourcePanel(wxWindow *parent);
 	void UpdateFromState(const ATDebuggerSystemState& state);
 	bool NavigateToAddress(uint32 addr);
+	bool HandlePaneCommand(ATUIPaneCommandId id);
 
 private:
 	void OnFileSelect(wxCommandEvent& event);
@@ -1438,6 +1625,85 @@ bool ATWxSourcePanel::NavigateToAddress(uint32 addr) {
 		mpList->EnsureVisible(targetLine);
 
 	return true;
+}
+
+bool ATWxSourcePanel::HandlePaneCommand(ATUIPaneCommandId id) {
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return false;
+
+	switch (id) {
+		case kATUIPaneCommandId_DebugToggleBreakpoint: {
+			long sel = mpList->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+			if (sel < 0)
+				sel = mpList->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_FOCUSED);
+			if (sel < 0)
+				sel = mPCLine;
+
+			if (sel < 0)
+				return false;
+
+			auto it = mLineToAddr.find((int)sel);
+			if (it == mLineToAddr.end())
+				return false;
+
+			dbg->ToggleBreakpoint(it->second);
+			Repopulate();
+			return true;
+		}
+
+		case kATUIPaneCommandId_DebugRun:
+			dbg->Run(kATDebugSrcMode_Source);
+			return true;
+
+		case kATUIPaneCommandId_DebugStepOver:
+		case kATUIPaneCommandId_DebugStepInto: {
+			IATDebuggerSymbolLookup *dsl = ATGetDebuggerSymbolLookup();
+			const uint32 pc = dbg->GetPC();
+			void (IATDebugger::*stepMethod)(ATDebugSrcMode, const ATDebuggerStepRange *, uint32)
+				= (id == kATUIPaneCommandId_DebugStepOver) ? &IATDebugger::StepOver : &IATDebugger::StepInto;
+
+			auto it = mAddrToLine.upper_bound(pc);
+			if (it != mAddrToLine.end() && it != mAddrToLine.begin()) {
+				auto itNext = it;
+				--it;
+
+				const uint32 addr1 = it->first;
+				const uint32 addr2 = itNext->first;
+
+				if (addr2 - addr1 < 100 && addr1 != addr2 && pc + 1 < addr2) {
+					const ATDebuggerStepRange range = { pc + 1, (addr2 - pc) - 1 };
+					(dbg->*stepMethod)(kATDebugSrcMode_Source, &range, 1);
+					return true;
+				}
+			}
+
+			if (dsl) {
+				uint32 moduleId = 0;
+				ATSourceLineInfo sli1 {};
+				ATSourceLineInfo sli2 {};
+
+				if (dsl->LookupLine(pc, false, moduleId, sli1)
+					&& dsl->LookupLine(pc, true, moduleId, sli2)
+					&& sli2.mOffset > pc + 1
+					&& sli2.mOffset - sli1.mOffset < 100)
+				{
+					const ATDebuggerStepRange range = { pc + 1, sli2.mOffset - (pc + 1) };
+					(dbg->*stepMethod)(kATDebugSrcMode_Source, &range, 1);
+					return true;
+				}
+			}
+
+			(dbg->*stepMethod)(kATDebugSrcMode_Source, nullptr, 0);
+			return true;
+		}
+
+		case kATUIPaneCommandId_DebugStepOut:
+			dbg->StepOut(kATDebugSrcMode_Source);
+			return true;
+	}
+
+	return false;
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -2338,6 +2604,19 @@ public:
 
 	void AppendConsoleText(const char *s);
 	bool NavigateSourceToAddress(uint32 addr);
+	bool CloseFocusedPane();
+	bool ToggleFloatFocusedPane();
+	bool CyclePaneFocus(bool forward);
+	bool ShowPane(const char *paneName, bool focus = true);
+	bool HidePane(const char *paneName);
+	bool IsPaneVisible(const char *paneName);
+	bool ActivatePaneById(uint32 paneId);
+	uint32 GetActivePaneId();
+	bool ClosePaneById(uint32 paneId);
+	bool SaveLayout(const char *name);
+	bool RestoreLayout(const char *name);
+	void LoadDefaultLayout();
+	bool HandleActivePaneCommand(ATUIPaneCommandId id);
 
 private:
 	void OnClose(wxCloseEvent& event);
@@ -2349,6 +2628,7 @@ private:
 	void OnViewPane(wxCommandEvent& event);
 
 	void UpdateAllPanes();
+	wxWindow *GetFocusedPaneWindow();
 
 	wxAuiManager mAuiMgr;
 	wxTimer mRefreshTimer;
@@ -2367,6 +2647,8 @@ private:
 	ATWxTracePanel *mpTrace = nullptr;
 	ATWxDebugDisplayPanel *mpDebugDisplay = nullptr;
 	ATWxProfilerPanel *mpProfiler = nullptr;
+	ATDebuggerSystemState mLastState {};
+	bool mbLastStateValid = false;
 
 	bool mbJustBroke = false;
 
@@ -2512,6 +2794,7 @@ ATWxDebuggerFrame::ATWxDebuggerFrame(wxWindow *parent)
 		.BestSize(600, 400).MinSize(400, 200));
 
 	mAuiMgr.Update();
+	s_defaultPerspective = mAuiMgr.SavePerspective();
 
 	// Bind events
 	Bind(wxEVT_CLOSE_WINDOW, &ATWxDebuggerFrame::OnClose, this);
@@ -2552,12 +2835,7 @@ void ATWxDebuggerFrame::AppendConsoleText(const char *s) {
 bool ATWxDebuggerFrame::NavigateSourceToAddress(uint32 addr) {
 	if (!mpSource) return false;
 
-	// Make the source pane visible
-	wxAuiPaneInfo& pane = mAuiMgr.GetPane(mpSource);
-	if (!pane.IsShown()) {
-		pane.Show();
-		mAuiMgr.Update();
-	}
+	ShowPane("source", false);
 
 	return mpSource->NavigateToAddress(addr);
 }
@@ -2588,8 +2866,12 @@ void ATWxDebuggerFrame::OnTimer(wxTimerEvent&) {
 	// Always update panes when stopped
 	if (s_pClient->IsStateValid()) {
 		ATDebuggerSystemState state = s_pClient->GetState();
-		if (!state.mbRunning || broke)
+		const bool stateChanged = !mbLastStateValid || !ATDebuggerStatesEqual(state, mLastState);
+		if (!state.mbRunning && (stateChanged || broke || bpChanged))
 			UpdateAllPanes();
+
+		mLastState = state;
+		mbLastStateValid = true;
 	}
 
 	// Update View menu check state
@@ -2661,24 +2943,32 @@ void ATWxDebuggerFrame::OnRunStop(wxCommandEvent&) {
 		dbg->Break();
 	else
 		dbg->Run(kATDebugSrcMode_Disasm);
+
+	mbLastStateValid = false;
 }
 
 void ATWxDebuggerFrame::OnStepInto(wxCommandEvent&) {
 	IATDebugger *dbg = ATGetDebugger();
 	if (dbg && !dbg->IsRunning())
 		dbg->StepInto(kATDebugSrcMode_Disasm);
+
+	mbLastStateValid = false;
 }
 
 void ATWxDebuggerFrame::OnStepOver(wxCommandEvent&) {
 	IATDebugger *dbg = ATGetDebugger();
 	if (dbg && !dbg->IsRunning())
 		dbg->StepOver(kATDebugSrcMode_Disasm);
+
+	mbLastStateValid = false;
 }
 
 void ATWxDebuggerFrame::OnStepOut(wxCommandEvent&) {
 	IATDebugger *dbg = ATGetDebugger();
 	if (dbg && !dbg->IsRunning())
 		dbg->StepOut(kATDebugSrcMode_Disasm);
+
+	mbLastStateValid = false;
 }
 
 void ATWxDebuggerFrame::OnViewPane(wxCommandEvent& event) {
@@ -2704,6 +2994,228 @@ void ATWxDebuggerFrame::OnViewPane(wxCommandEvent& event) {
 	wxAuiPaneInfo& pane = mAuiMgr.GetPane(paneName);
 	pane.Show(!pane.IsShown());
 	mAuiMgr.Update();
+}
+
+bool ATWxDebuggerFrame::ShowPane(const char *paneName, bool focus) {
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(paneName);
+	if (!pane.IsOk() || !pane.window)
+		return false;
+
+	if (!pane.IsShown()) {
+		pane.Show();
+		mAuiMgr.Update();
+	}
+
+	if (focus)
+		pane.window->SetFocus();
+
+	return true;
+}
+
+bool ATWxDebuggerFrame::HidePane(const char *paneName) {
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(paneName);
+	if (!pane.IsOk() || !pane.IsShown())
+		return false;
+
+	pane.Hide();
+	mAuiMgr.Update();
+	return true;
+}
+
+bool ATWxDebuggerFrame::IsPaneVisible(const char *paneName) {
+	const wxAuiPaneInfo& pane = mAuiMgr.GetPane(paneName);
+	return pane.IsOk() && pane.IsShown();
+}
+
+bool ATWxDebuggerFrame::ActivatePaneById(uint32 paneId) {
+	switch (paneId) {
+		case kATUIPaneId_Console:      return ShowPane("console");
+		case kATUIPaneId_Registers:    return ShowPane("registers");
+		case kATUIPaneId_CallStack:    return ShowPane("callstack");
+		case kATUIPaneId_Disassembly:  return ShowPane("disassembly");
+		case kATUIPaneId_History:      return ShowPane("history");
+		case kATUIPaneId_Memory:
+		case kATUIPaneId_MemoryN:      return ShowPane("memory");
+		case kATUIPaneId_PrinterOutput:return ShowPane("printer");
+		case kATUIPaneId_Profiler:     return ShowPane("profiler");
+		case kATUIPaneId_DebugDisplay: return ShowPane("debugdisplay");
+		case kATUIPaneId_Breakpoints:  return ShowPane("breakpoints");
+		default:
+			if (paneId >= kATUIPaneId_Source)
+				return ShowPane("source");
+			if (paneId >= kATUIPaneId_WatchN)
+				return ShowPane("watch");
+			return false;
+	}
+}
+
+uint32 ATWxDebuggerFrame::GetActivePaneId() {
+	wxWindow *window = GetFocusedPaneWindow();
+	if (!window)
+		return kATUIPaneId_None;
+
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(window);
+	if (!pane.IsOk())
+		return kATUIPaneId_None;
+
+	const wxString& name = pane.name;
+	if (name == "console")      return kATUIPaneId_Console;
+	if (name == "registers")    return kATUIPaneId_Registers;
+	if (name == "callstack")    return kATUIPaneId_CallStack;
+	if (name == "disassembly")  return kATUIPaneId_Disassembly;
+	if (name == "history")      return kATUIPaneId_History;
+	if (name == "memory")       return kATUIPaneId_Memory;
+	if (name == "printer")      return kATUIPaneId_PrinterOutput;
+	if (name == "profiler")     return kATUIPaneId_Profiler;
+	if (name == "debugdisplay") return kATUIPaneId_DebugDisplay;
+	if (name == "breakpoints")  return kATUIPaneId_Breakpoints;
+	if (name == "watch")        return kATUIPaneId_WatchN;
+	if (name == "source")       return kATUIPaneId_Source;
+
+	return kATUIPaneId_None;
+}
+
+wxWindow *ATWxDebuggerFrame::GetFocusedPaneWindow() {
+	wxWindow *focus = wxWindow::FindFocus();
+
+	while (focus) {
+		wxAuiPaneInfo& pane = mAuiMgr.GetPane(focus);
+		if (pane.IsOk() && pane.window)
+			return pane.window;
+
+		focus = focus->GetParent();
+	}
+
+	return nullptr;
+}
+
+bool ATWxDebuggerFrame::CloseFocusedPane() {
+	wxWindow *window = GetFocusedPaneWindow();
+	if (!window)
+		return false;
+
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(window);
+	if (!pane.IsOk() || !pane.IsShown())
+		return false;
+
+	pane.Hide();
+	mAuiMgr.Update();
+	return true;
+}
+
+bool ATWxDebuggerFrame::ToggleFloatFocusedPane() {
+	wxWindow *window = GetFocusedPaneWindow();
+	if (!window)
+		return false;
+
+	wxAuiPaneInfo& pane = mAuiMgr.GetPane(window);
+	if (!pane.IsOk())
+		return false;
+
+	if (pane.IsFloating())
+		pane.Dock();
+	else
+		pane.Float();
+
+	mAuiMgr.Update();
+	window->SetFocus();
+	return true;
+}
+
+bool ATWxDebuggerFrame::CyclePaneFocus(bool forward) {
+	wxAuiPaneInfoArray& panes = mAuiMgr.GetAllPanes();
+	std::vector<wxWindow *> visiblePanes;
+	visiblePanes.reserve(panes.size());
+
+	for (size_t i = 0; i < panes.size(); ++i) {
+		wxAuiPaneInfo& pane = panes.Item(i);
+		if (pane.IsShown() && pane.window && pane.window->CanAcceptFocus())
+			visiblePanes.push_back(pane.window);
+	}
+
+	if (visiblePanes.empty())
+		return false;
+
+	size_t index = 0;
+	if (wxWindow *current = GetFocusedPaneWindow()) {
+		auto it = std::find(visiblePanes.begin(), visiblePanes.end(), current);
+		if (it != visiblePanes.end()) {
+			index = (size_t)std::distance(visiblePanes.begin(), it);
+			index = forward
+				? (index + 1) % visiblePanes.size()
+				: (index + visiblePanes.size() - 1) % visiblePanes.size();
+		}
+	}
+
+	visiblePanes[index]->SetFocus();
+	return true;
+}
+
+bool ATWxDebuggerFrame::ClosePaneById(uint32 paneId) {
+	switch (paneId) {
+		case kATUIPaneId_Console:       return HidePane("console");
+		case kATUIPaneId_Registers:     return HidePane("registers");
+		case kATUIPaneId_CallStack:     return HidePane("callstack");
+		case kATUIPaneId_Disassembly:   return HidePane("disassembly");
+		case kATUIPaneId_History:       return HidePane("history");
+		case kATUIPaneId_Memory:
+		case kATUIPaneId_MemoryN:       return HidePane("memory");
+		case kATUIPaneId_PrinterOutput: return HidePane("printer");
+		case kATUIPaneId_Profiler:      return HidePane("profiler");
+		case kATUIPaneId_DebugDisplay:  return HidePane("debugdisplay");
+		case kATUIPaneId_Breakpoints:   return HidePane("breakpoints");
+		default:
+			if (paneId >= kATUIPaneId_Source)
+				return HidePane("source");
+			if (paneId >= kATUIPaneId_WatchN)
+				return HidePane("watch");
+			return false;
+	}
+}
+
+bool ATWxDebuggerFrame::SaveLayout(const char *name) {
+	const char *layoutName = (name && *name) ? name : "Debugger";
+	VDRegistryAppKey key("Pane layouts 2", true);
+	key.setString(layoutName, mAuiMgr.SavePerspective().utf8_str().data());
+	return true;
+}
+
+bool ATWxDebuggerFrame::RestoreLayout(const char *name) {
+	const char *layoutName = (name && *name) ? name : "Debugger";
+	VDRegistryAppKey key("Pane layouts 2", false);
+	VDStringA layout;
+
+	if (!key.getString(layoutName, layout) || layout.empty())
+		return false;
+
+	if (!mAuiMgr.LoadPerspective(wxString::FromUTF8(layout.c_str()), true))
+		return false;
+
+	mAuiMgr.Update();
+	return true;
+}
+
+void ATWxDebuggerFrame::LoadDefaultLayout() {
+	if (s_defaultPerspective.empty())
+		return;
+
+	mAuiMgr.LoadPerspective(s_defaultPerspective, true);
+	mAuiMgr.Update();
+}
+
+bool ATWxDebuggerFrame::HandleActivePaneCommand(ATUIPaneCommandId id) {
+	switch (GetActivePaneId()) {
+		case kATUIPaneId_Disassembly:
+			return mpDisassembly && id == kATUIPaneCommandId_DebugToggleBreakpoint
+				? mpDisassembly->ToggleSelectedBreakpoint()
+				: false;
+
+		case kATUIPaneId_Source:
+			return mpSource && mpSource->HandlePaneCommand(id);
+
+		default:
+			return false;
+	}
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -2743,10 +3255,81 @@ bool ATWxDebuggerNavigateSource(uint32 addr) {
 	return false;
 }
 
+bool ATWxDebuggerShowPane(const char *paneName, wxWindow *parent) {
+	if (!paneName || !*paneName)
+		return false;
+
+	if (!s_pDebugFrame)
+		ATWxDebuggerOpen(parent);
+
+	return s_pDebugFrame && s_pDebugFrame->ShowPane(paneName);
+}
+
+bool ATWxDebuggerHidePane(const char *paneName) {
+	return s_pDebugFrame && s_pDebugFrame->HidePane(paneName);
+}
+
+bool ATWxDebuggerIsPaneVisible(const char *paneName) {
+	return s_pDebugFrame && s_pDebugFrame->IsPaneVisible(paneName);
+}
+
+bool ATWxDebuggerActivatePane(uint32 paneId, wxWindow *parent) {
+	if (paneId == kATUIPaneId_None)
+		return false;
+
+	if (!s_pDebugFrame)
+		ATWxDebuggerOpen(parent);
+
+	return s_pDebugFrame && s_pDebugFrame->ActivatePaneById(paneId);
+}
+
+uint32 ATWxDebuggerGetActivePaneId() {
+	return s_pDebugFrame ? s_pDebugFrame->GetActivePaneId() : kATUIPaneId_None;
+}
+
+bool ATWxDebuggerClosePane(uint32 paneId) {
+	return s_pDebugFrame && s_pDebugFrame->ClosePaneById(paneId);
+}
+
+bool ATWxDebuggerSaveLayout(const char *name) {
+	return s_pDebugFrame && s_pDebugFrame->SaveLayout(name);
+}
+
+bool ATWxDebuggerRestoreLayout(const char *name, wxWindow *parent) {
+	if (!s_pDebugFrame)
+		ATWxDebuggerOpen(parent);
+
+	return s_pDebugFrame && s_pDebugFrame->RestoreLayout(name);
+}
+
+void ATWxDebuggerLoadDefaultLayout(wxWindow *parent) {
+	if (!s_pDebugFrame)
+		ATWxDebuggerOpen(parent);
+
+	if (s_pDebugFrame)
+		s_pDebugFrame->LoadDefaultLayout();
+}
+
+bool ATWxDebuggerHandleActivePaneCommand(uint32 commandId) {
+	return s_pDebugFrame && s_pDebugFrame->HandleActivePaneCommand((ATUIPaneCommandId)commandId);
+}
+
 bool ATWxDebuggerDidBreak() {
 	if (s_pClient)
 		return s_pClient->ConsumeBreak();
 	return false;
+}
+
+bool ATWxDebuggerCloseActivePane() {
+	return s_pDebugFrame && s_pDebugFrame->CloseFocusedPane();
+}
+
+bool ATWxDebuggerToggleFloatActivePane() {
+	return s_pDebugFrame && s_pDebugFrame->ToggleFloatFocusedPane();
+}
+
+bool ATWxDebuggerCyclePane(bool forward) {
+	return s_pDebugFrame && s_pDebugFrame->CyclePaneFocus(forward);
 }
 
 void ATWxDebuggerInit() {

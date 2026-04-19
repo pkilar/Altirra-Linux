@@ -79,6 +79,7 @@
 #include "uimenu.h"
 #include "uiclipboard.h"
 #include "uicommondialogs.h"
+#include "console.h"
 #include "uirender.h"
 #include "uiconfirm.h"
 #include "debugger.h"
@@ -100,7 +101,15 @@
 #include <wx/msgdlg.h>
 #include <wx/filedlg.h>
 #include <wx/dirdlg.h>
+#include <wx/clipbrd.h>
+#include <wx/listctrl.h>
+#include <wx/textctrl.h>
+#include <wx/textdlg.h>
+#include <wx/textentry.h>
 #include "dialogs_wx.h"
+#include "mainframe.h"
+#include "menu_ids.h"
+#include <debugger_wx.h>
 
 #include <vd2/Dita/services.h>
 #include <vd2/system/filesys.h>
@@ -607,6 +616,116 @@ bool ATUIClipGetText(VDStringW& s) {
 	SDL_free(text);
 	return true;
 }
+
+namespace {
+
+wxWindow *ATGetFocusedWindow() {
+	return wxWindow::FindFocus();
+}
+
+wxTextCtrl *ATGetFocusedTextCtrl() {
+	wxWindow *focus = ATGetFocusedWindow();
+	while (focus) {
+		if (auto *text = wxDynamicCast(focus, wxTextCtrl))
+			return text;
+		focus = focus->GetParent();
+	}
+	return nullptr;
+}
+
+wxListCtrl *ATGetFocusedListCtrl() {
+	wxWindow *focus = ATGetFocusedWindow();
+	while (focus) {
+		if (auto *list = wxDynamicCast(focus, wxListCtrl))
+			return list;
+		focus = focus->GetParent();
+	}
+	return nullptr;
+}
+
+bool ATSetClipboardText(const wxString& text) {
+	if (!wxTheClipboard || !wxTheClipboard->Open())
+		return false;
+
+	wxTheClipboard->SetData(new wxTextDataObject(text));
+	wxTheClipboard->Close();
+	return true;
+}
+
+wxString ATGetSelectedTextForCopy() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		wxString selected = text->GetStringSelection();
+		return selected;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		wxString out;
+		long item = -1;
+		bool firstRow = true;
+
+		while ((item = list->GetNextItem(item, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED)) != -1) {
+			if (!firstRow)
+				out += '\n';
+			firstRow = false;
+
+			int colCount = list->GetColumnCount();
+			for (int col = 0; col < colCount; ++col) {
+				if (col)
+					out += '\t';
+				out += list->GetItemText(item, col);
+			}
+		}
+
+		return out;
+	}
+
+	return wxString();
+}
+
+wxString ATEscapeText(const wxString& text) {
+	wxString out;
+	out.reserve(text.length() * 2);
+
+	for (wxUniChar ch : text) {
+		switch ((wchar_t)ch) {
+			case '\\': out += "\\\\"; break;
+			case '\n': out += "\\n"; break;
+			case '\r': out += "\\r"; break;
+			case '\t': out += "\\t"; break;
+			case '\"': out += "\\\""; break;
+			default: out += ch; break;
+		}
+	}
+
+	return out;
+}
+
+wxString ATTextToHex(const wxString& text) {
+	wxScopedCharBuffer utf8 = text.utf8_str();
+	const char *src = utf8.data();
+	if (!src)
+		return wxString();
+
+	wxString out;
+	for (size_t i = 0; src[i]; ++i) {
+		if (i)
+			out += ' ';
+		out += wxString::Format("%02X", (unsigned char)src[i]);
+	}
+	return out;
+}
+
+wxString ATTextToUnicodeEscapes(const wxString& text) {
+	wxString out;
+	for (wxUniChar ch : text) {
+		out += wxString::Format("\\u%04X", (unsigned int)(wchar_t)ch);
+	}
+	return out;
+}
+
+} // namespace
+
+void OnCommandVideoEnhancedTextFontDialog();
 
 void ATUIExecuteCommandStringAndShowErrors(const char *cmd, const ATUICommandOptions *opts) noexcept {
 	if (!cmd || !*cmd)
@@ -2374,7 +2493,7 @@ void ATUIShowDialogSpeedOptions(VDGUIHandle) {
 }
 
 void ATUIOpenAdjustScreenEffectsDialog(VDGUIHandle) {
-	// Not available on Linux
+	ATShowVideoSettingsDialog(ATGetMainFrame());
 }
 
 void ATUIShowDialogRewind(IATAutoSaveManager&) {
@@ -2382,19 +2501,49 @@ void ATUIShowDialogRewind(IATAutoSaveManager&) {
 }
 
 void ATUIShowDialogDebugFont(VDGUIHandle) {
-	// No-op on Linux
+	OnCommandVideoEnhancedTextFontDialog();
 }
 
 void ATUIShowDialogVerifier(VDGUIHandle, ATSimulator&) {
-	// No-op on Linux
+	ATShowCPUOptionsDialog(ATGetMainFrame());
 }
 
 void ATUIShowDialogNewBreakpoint() {
-	// No-op on Linux
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	ATWxDebuggerShowPane("breakpoints", ATGetMainFrame());
+
+	wxTextEntryDialog dlg(
+		ATGetMainFrame(),
+		"Enter breakpoint location (expression or hex address):",
+		"New Breakpoint",
+		wxString::Format("%04X", dbg->GetPC()));
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+
+	try {
+		const wxScopedCharBuffer expr = dlg.GetValue().utf8_str();
+		const uint32 address = dbg->EvaluateThrow(expr.data());
+
+		ATDebuggerBreakpointInfo bpInfo {};
+		bpInfo.mTargetIndex = dbg->GetTargetIndex();
+		bpInfo.mAddress = address;
+		bpInfo.mbBreakOnPC = true;
+		dbg->SetBreakpoint(-1, bpInfo);
+		ATWxDebuggerShowPane("breakpoints", ATGetMainFrame());
+	} catch(const MyError& e) {
+		wxMessageBox(
+			wxString::Format("Unable to create breakpoint: %s", e.c_str()),
+			"Debugger",
+			wxOK | wxICON_ERROR,
+			ATGetMainFrame());
+	}
 }
 
 void ATUIOpenTraceViewer(VDGUIHandle, ATTraceCollection *) {
-	// No-op on Linux
+	ATWxDebuggerShowPane("trace", ATGetMainFrame());
 }
 
 int ATUIShowDialogCartridgeMapper(VDGUIHandle, uint32, const void *) {
@@ -2684,7 +2833,7 @@ void ATUIExit(bool) {
 }
 
 // Mouse capture
-bool ATUIIsMouseCaptured() { return false; }
+bool ATUIIsMouseCaptured() { return ATLinuxIsMouseCaptured(); }
 
 // Window state
 bool ATUICanManipulateWindows() { return true; }
@@ -2933,9 +3082,15 @@ void OnCommandBootImage(ATUICommandContext&) {
 		DoBootWithConfirm(path.c_str(), nullptr, -1);
 }
 
-bool OnTestCommandQuickLoadState() { return false; }
-void OnCommandQuickLoadState() {}
-void OnCommandQuickSaveState() {}
+bool OnTestCommandQuickLoadState() { return true; }
+void OnCommandQuickLoadState() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_QUICK_LOAD_STATE);
+}
+void OnCommandQuickSaveState() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_QUICK_SAVE_STATE);
+}
 
 void OnCommandLoadState() {
 	VDStringW fn = VDGetLoadFileName('save', nullptr, L"Load save state",
@@ -2958,10 +3113,22 @@ void OnCommandSaveState() {
 	}
 }
 
-void OnCommandSaveFirmwareIDEMain() {}
-void OnCommandSaveFirmwareIDESDX() {}
-void OnCommandSaveFirmwareU1MB() {}
-void OnCommandSaveFirmwareRapidusFlash() {}
+void OnCommandSaveFirmwareIDEMain() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_IDE_MAIN);
+}
+void OnCommandSaveFirmwareIDESDX() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_IDE_SDX);
+}
+void OnCommandSaveFirmwareU1MB() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_U1MB);
+}
+void OnCommandSaveFirmwareRapidusFlash() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_RAPIDUS);
+}
 
 void OnCommandExit(ATUICommandContext& ctx) {
 	ATUIExit(ctx.mbQuiet);
@@ -3016,23 +3183,83 @@ void OnCommandViewAdjustWindowSize() {
 }
 
 void OnCommandViewResetWindowLayout() {
-	// No-op on Linux
+	ATLoadDefaultPaneLayout();
 }
 
-void OnCommandPane(uint32) {
-	// Pane activation is handled by wxAuiManager
+void OnCommandPane(uint32 paneId) {
+	if (paneId == kATUIPaneId_Display) {
+		if (ATMainFrame *frame = ATGetMainFrame())
+			frame->FocusDisplayCanvas();
+		return;
+	}
+
+	ATWxDebuggerActivatePane(paneId);
 }
 
-void OnCommandEditCopyFrame() {}
-void OnCommandEditCopyFrameTrueAspect() {}
-void OnCommandEditSaveFrame() {}
-void OnCommandEditSaveFrameTrueAspect() {}
-void OnCommandEditDeselect() {}
-void OnCommandEditSelectAll() {}
-void OnCommandEditCopyText() {}
-void OnCommandEditCopyEscapedText() {}
-void OnCommandEditCopyHex() {}
-void OnCommandEditCopyUnicode() {}
+void OnCommandEditCopyFrame() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_EDIT_COPY_FRAME);
+}
+void OnCommandEditCopyFrameTrueAspect() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_EDIT_COPY_FRAME_TRUE_ASPECT);
+}
+void OnCommandEditSaveFrame() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_SAVE_SCREENSHOT);
+}
+void OnCommandEditSaveFrameTrueAspect() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_SAVE_SCREENSHOT_TRUE_ASPECT);
+}
+void OnCommandEditDeselect() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		const long pos = text->GetInsertionPoint();
+		text->SetSelection(pos, pos);
+		return;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		for (long item = 0; item < list->GetItemCount(); ++item)
+			list->SetItemState(item, 0, wxLIST_STATE_SELECTED);
+	}
+}
+
+void OnCommandEditSelectAll() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		text->SelectAll();
+		return;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		for (long item = 0; item < list->GetItemCount(); ++item)
+			list->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+	}
+}
+
+void OnCommandEditCopyText() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(text);
+}
+
+void OnCommandEditCopyEscapedText() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATEscapeText(text));
+}
+
+void OnCommandEditCopyHex() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATTextToHex(text));
+}
+
+void OnCommandEditCopyUnicode() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATTextToUnicodeEscapes(text));
+}
 
 void OnCommandEditPasteText() {
 	// Text paste requires complex character-to-scancode conversion.
@@ -3190,7 +3417,9 @@ void OnCommandDiskRotate(int delta) {
 }
 
 // Input commands from main.cpp
-void OnCommandInputCaptureMouse() {}
+void OnCommandInputCaptureMouse() {
+	ATLinuxToggleMouseCapture();
+}
 void OnCommandInputToggleAutoCaptureMouse() {
 	ATUISetMouseAutoCapture(!ATUIGetMouseAutoCapture());
 }
@@ -3227,15 +3456,42 @@ void OnCommandInputCycleQuickMaps() {
 }
 
 // Recording commands — simplified stubs
-void OnCommandRecordStop() {}
-void OnCommandRecordRawAudio() {}
-void OnCommandRecordAudio() {}
-void OnCommandRecordVideo() {}
-void OnCommandRecordPause() {}
-void OnCommandRecordResume() {}
-void OnCommandRecordPauseResume() {}
-void OnCommandRecordSapTypeR() {}
-void OnCommandRecordVgm() {}
+void OnCommandRecordStop() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_STOP_RECORDING);
+}
+void OnCommandRecordRawAudio() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_AUDIO_PCM);
+}
+void OnCommandRecordAudio() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_AUDIO_WAV);
+}
+void OnCommandRecordVideo() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_VIDEO);
+}
+void OnCommandRecordPause() {
+	if (ATIsVideoRecording() && !ATIsVideoRecordingPaused())
+		ATPauseVideoRecording();
+}
+void OnCommandRecordResume() {
+	if (ATIsVideoRecording() && ATIsVideoRecordingPaused())
+		ATResumeVideoRecording();
+}
+void OnCommandRecordPauseResume() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_VIDEO_PAUSE_RESUME);
+}
+void OnCommandRecordSapTypeR() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_SAP);
+}
+void OnCommandRecordVgm() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_VGM);
+}
 
 // Cheat commands
 void OnCommandCheatTogglePMCollisions() {
@@ -3303,10 +3559,18 @@ void OnCommandHelpCheckForUpdates() {
 }
 
 // Window commands (no-ops, cmdwindow.cpp is excluded)
-void OnCommandWindowClose() {}
-void OnCommandWindowUndock() {}
-void OnCommandWindowPrevPane() {}
-void OnCommandWindowNextPane() {}
+void OnCommandWindowClose() {
+	ATWxDebuggerCloseActivePane();
+}
+void OnCommandWindowUndock() {
+	ATWxDebuggerToggleFloatActivePane();
+}
+void OnCommandWindowPrevPane() {
+	ATWxDebuggerCyclePane(false);
+}
+void OnCommandWindowNextPane() {
+	ATWxDebuggerCyclePane(true);
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // 23. cmddebug.cpp dependencies
@@ -3342,6 +3606,18 @@ void ATUISwitchKernel(uint64 id) {
 }
 
 // Additional toggles used by cmd*.cpp
-void OnCommandSystemProgramLoadModeDefault() {}
-void OnCommandToggleAutoReset() {}
-void OnCommandToggleBootUnload() {}
+void OnCommandSystemProgramLoadModeDefault() {
+	extern ATSimulator g_sim;
+	g_sim.SetHLEProgramLoadMode(kATHLEProgramLoadMode_Default);
+}
+
+void OnCommandToggleAutoReset() {
+	uint32 flags = kATUIResetFlag_CartridgeChange | kATUIResetFlag_BasicChange | kATUIResetFlag_VideoStandardChange;
+	ATUIModifyResetFlag(flags, (s_uiResetFlags & flags) != flags);
+}
+
+void OnCommandToggleBootUnload() {
+	uint32 mask = ATUIGetBootUnloadStorageMask();
+	uint32 all = kATStorageTypeMask_Cartridge | kATStorageTypeMask_Disk | kATStorageTypeMask_Tape;
+	ATUISetBootUnloadStorageMask(mask ^ all);
+}

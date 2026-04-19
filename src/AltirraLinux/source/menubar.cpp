@@ -120,6 +120,9 @@ static void ATStopAudioRecording() {
 	}
 }
 
+// NTSC pixel aspect ratio correction factor (~7:5 PAR)
+static constexpr double kNTSCAspectRatioScale = 1.2;
+
 ///////////////////////////////////////////////////////////////////////////
 // Device button definitions
 ///////////////////////////////////////////////////////////////////////////
@@ -592,6 +595,7 @@ wxMenuBar *ATMainFrame::CreateMenuBar() {
 
 	// Copy/Save frame (moved from Edit, matching Windows View menu)
 	viewMenu->Append(ID_EDIT_COPY_FRAME, "Copy Frame to Clipboard");
+	viewMenu->Append(ID_EDIT_COPY_FRAME_TRUE_ASPECT, "Copy Frame (True Aspect) to Clipboard");
 	viewMenu->Append(ID_FILE_SAVE_SCREENSHOT, "Save Frame...\tF9");
 	viewMenu->Append(ID_FILE_SAVE_SCREENSHOT_TRUE_ASPECT, "Save Frame (True Aspect)...");
 
@@ -1156,7 +1160,7 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 					int srcW = px.w;
 					int srcH = px.h;
 					int dstW = srcW;
-					int dstH = (int)(srcH * 1.2 + 0.5);
+					int dstH = (int)(srcH * kNTSCAspectRatioScale + 0.5);
 					VDPixmapBuffer dstBuf(dstW, dstH, nsVDPixmap::kPixFormat_XRGB8888);
 					VDPixmap dst = dstBuf;
 					VDPixmapStretchBltBilinear(dst, px);
@@ -1180,6 +1184,21 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
 				ATCopyFrameToClipboard(px);
 				ATImGuiShowToast("Frame copied");
+			}
+			break;
+		}
+
+		case ID_EDIT_COPY_FRAME_TRUE_ASPECT: {
+			VDPixmapBuffer pxbuf;
+			VDPixmap px;
+			if (g_sim.GetGTIA().GetLastFrameBuffer(pxbuf, px)) {
+				int dstW = px.w;
+				int dstH = (int)(px.h * kNTSCAspectRatioScale + 0.5);
+				VDPixmapBuffer dstBuf(dstW, dstH, nsVDPixmap::kPixFormat_XRGB8888);
+				VDPixmap dst = dstBuf;
+				VDPixmapStretchBltBilinear(dst, px);
+				ATCopyFrameToClipboard(dst);
+				ATImGuiShowToast("True aspect frame copied");
 			}
 			break;
 		}
@@ -2026,11 +2045,17 @@ void ATMainFrame::OnMenuCommand(wxCommandEvent& event) {
 			break;
 
 		case ID_INPUT_CAPTURE_MOUSE:
-			ATImGuiShowToast("Mouse capture not yet implemented");
+			ToggleMouseCapture();
+			ATImGuiShowToast(IsMouseCaptured()
+				? "Mouse captured - press Ctrl+Alt+M to release"
+				: "Mouse released");
 			break;
 
 		case ID_INPUT_AUTO_CAPTURE_MOUSE:
-			ATImGuiShowToast("Auto mouse capture not yet implemented");
+			ATUISetMouseAutoCapture(!ATUIGetMouseAutoCapture());
+			ATImGuiShowToast(ATUIGetMouseAutoCapture()
+				? "Auto mouse capture enabled"
+				: "Auto mouse capture disabled");
 			break;
 
 		default:

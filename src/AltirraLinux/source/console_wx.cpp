@@ -10,6 +10,7 @@
 #include <stdafx.h>
 #include "console.h"
 #include "debugger.h"
+#include "mainframe.h"
 #include <debugger_wx.h>
 
 #include <vd2/system/file.h>
@@ -23,6 +24,19 @@
 #include <cstdio>
 #include <cstdarg>
 #include <vector>
+
+namespace {
+
+class ATWxActiveDebuggerPane final : public IATUIDebuggerPane {
+public:
+	bool OnPaneCommand(ATUIPaneCommandId id) override {
+		return ATWxDebuggerHandleActivePaneCommand((uint32)id);
+	}
+};
+
+ATWxActiveDebuggerPane g_activeDebuggerPane;
+
+}
 
 // Log file support
 static VDFileStream *g_pLogFile = nullptr;
@@ -99,9 +113,7 @@ bool ATConsoleCheckBreak() {
 }
 
 void ATShowConsole() {
-	// Open the debugger window (which contains the console pane)
-	// ATWxDebuggerOpen requires a parent, but we don't have one here.
-	// The console is already visible in the debugger if it's open.
+	ATWxDebuggerShowPane("console");
 }
 
 void ATOpenConsole() {
@@ -109,10 +121,11 @@ void ATOpenConsole() {
 }
 
 void ATCloseConsole() {
+	ATWxDebuggerHidePane("console");
 }
 
 bool ATIsDebugConsoleActive() {
-	return ATWxDebuggerIsOpen();
+	return ATWxDebuggerIsPaneVisible("console");
 }
 
 // Source window implementation — bridges IATSourceWindow
@@ -346,6 +359,8 @@ ATUIPane *ATGetUIPaneByFrame(ATFrameWindow *frame) {
 }
 
 void ATCloseUIPane(uint32 id) {
+	if (id != kATUIPaneId_Display)
+		ATWxDebuggerClosePane(id);
 }
 
 ATUIPane *ATUIGetActivePane() {
@@ -353,11 +368,24 @@ ATUIPane *ATUIGetActivePane() {
 }
 
 void *ATUIGetActivePaneAs(uint32 iid) {
+	if (iid == IATUIDebuggerPane::kTypeID && ATUIGetActivePaneId() != kATUIPaneId_None)
+		return &g_activeDebuggerPane;
+
 	return nullptr;
 }
 
 uint32 ATUIGetActivePaneId() {
-	return 0;
+	uint32 paneId = ATWxDebuggerGetActivePaneId();
+	if (paneId != kATUIPaneId_None)
+		return paneId;
+
+	if (ATMainFrame *frame = ATGetMainFrame()) {
+		wxWindow *focus = wxWindow::FindFocus();
+		if (focus && frame->IsDescendant(focus))
+			return kATUIPaneId_Display;
+	}
+
+	return kATUIPaneId_None;
 }
 
 // Win32-specific font handles — return null handles
@@ -392,11 +420,13 @@ void ATConsolePingBeamPosition(uint32 frame, uint32 vpos, uint32 hpos) {
 
 // Pane layout — stub
 bool ATRestorePaneLayout(const char *name) {
-	return false;
+	return ATWxDebuggerRestoreLayout(name);
 }
 
 void ATSavePaneLayout(const char *name) {
+	ATWxDebuggerSaveLayout(name);
 }
 
 void ATLoadDefaultPaneLayout() {
+	ATWxDebuggerLoadDefaultLayout();
 }

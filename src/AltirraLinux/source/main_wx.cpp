@@ -122,9 +122,23 @@ SDL_Window *ATGetLinuxWindow() { return nullptr; }
 // ImGui manager pointer — console_linux.cpp references this as extern
 ATImGuiManager *g_pImGui = nullptr;
 
-// Toast notification stub — will be replaced with wxWidgets implementation
+// Route toast notifications into the wx frontend when the main frame exists.
 void ATImGuiShowToast(const char *message) {
-	fprintf(stderr, "[Toast] %s\n", message);
+	if (!message || !*message)
+		return;
+
+	if (!wxTheApp) {
+		fprintf(stderr, "[Toast] %s\n", message);
+		return;
+	}
+
+	const wxString msg = wxString::FromUTF8(message);
+	wxTheApp->CallAfter([msg]() {
+		if (ATMainFrame *frame = ATGetMainFrame())
+			frame->ShowToastMessage(msg);
+		else
+			fprintf(stderr, "[Toast] %s\n", msg.utf8_str().data());
+	});
 }
 
 // Joystick manager factory (defined in joystick_sdl3.cpp)

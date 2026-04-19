@@ -26,6 +26,8 @@
 class ATDisplayCanvas;
 class ATDisplayWx;
 class ATStatusBar;
+class wxPopupTransientWindow;
+class wxStaticText;
 
 class ATMainFrame : public wxFrame {
 public:
@@ -33,6 +35,7 @@ public:
 	~ATMainFrame();
 
 	ATDisplayWx *GetDisplay() const { return mpDisplay; }
+	bool IsMouseCaptured() const { return mMouseCaptured; }
 
 	// Start the emulation idle loop
 	void StartEmulation();
@@ -42,6 +45,13 @@ public:
 
 	// Initialize input system (called after input manager is ready)
 	void InitInput();
+
+	// UI helpers used by the Linux frontend glue.
+	void ShowToastMessage(const wxString& message);
+	void SetMouseCaptured(bool captured);
+	void ToggleMouseCapture();
+	void ExecuteMenuCommand(int id);
+	void FocusDisplayCanvas();
 
 private:
 	void OnClose(wxCloseEvent& event);
@@ -74,6 +84,9 @@ private:
 
 	void UpdateWindowTitle();
 	void RenderAndPresent();
+	void UpdateToastPopupPosition();
+	void DismissToast();
+	void OnToastTimer(wxTimerEvent& event);
 
 	ATDisplayCanvas *mpCanvas = nullptr;
 	ATDisplayWx *mpDisplay = nullptr;
@@ -98,6 +111,8 @@ private:
 	// Mouse tracking for relative motion
 	int mLastMouseX = -1;
 	int mLastMouseY = -1;
+	bool mIgnoreNextWarpMouse = false;
+	bool mMouseCaptured = false;
 
 	// Frame pacing state
 	sint64 mFrameError = 0;
@@ -106,5 +121,14 @@ private:
 	bool mEmulationRunning = false;
 	bool mPausedByFocusLoss = false;
 
+	wxPopupTransientWindow *mpToastPopup = nullptr;
+	wxStaticText *mpToastLabel = nullptr;
+	wxTimer mToastTimer;
+
 	wxDECLARE_EVENT_TABLE();
 };
+
+ATMainFrame *ATGetMainFrame();
+void ATLinuxToggleMouseCapture();
+void ATLinuxSetMouseCaptured(bool captured);
+bool ATLinuxIsMouseCaptured();

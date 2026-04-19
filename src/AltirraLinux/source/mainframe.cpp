@@ -22,8 +22,11 @@
 #include <statusbar_wx.h>
 
 #include <wx/dnd.h>
+#include <wx/popupwin.h>
 #include <wx/sizer.h>
 #include <wx/msgdlg.h>
+#include <wx/panel.h>
+#include <wx/stattext.h>
 #include <time.h>
 
 #include <vd2/system/filesys.h>
@@ -74,6 +77,31 @@ void ATImGuiShowToast(const char *message);
 // MRU list (defined in menubar.cpp)
 void MRUAdd(const wchar_t *path);
 
+namespace {
+
+ATMainFrame *g_pMainFrame = nullptr;
+constexpr int kToastTimerId = wxID_HIGHEST + 100;
+
+}
+
+ATMainFrame *ATGetMainFrame() {
+	return g_pMainFrame;
+}
+
+void ATLinuxToggleMouseCapture() {
+	if (g_pMainFrame)
+		g_pMainFrame->ToggleMouseCapture();
+}
+
+void ATLinuxSetMouseCaptured(bool captured) {
+	if (g_pMainFrame)
+		g_pMainFrame->SetMouseCaptured(captured);
+}
+
+bool ATLinuxIsMouseCaptured() {
+	return g_pMainFrame && g_pMainFrame->IsMouseCaptured();
+}
+
 ///////////////////////////////////////////////////////////////////////////
 // Drag-and-drop file loading
 ///////////////////////////////////////////////////////////////////////////
@@ -120,7 +148,10 @@ wxEND_EVENT_TABLE()
 ATMainFrame::ATMainFrame()
 	: wxFrame(nullptr, wxID_ANY, "Altirra (Linux)")
 	, mGamepadTimer(this, ID_GAMEPAD_TIMER_ID)
+	, mToastTimer(this, kToastTimerId)
 {
+	g_pMainFrame = this;
+
 	// Restore saved window geometry, or use defaults (2x NTSC resolution)
 	int winW = 912;
 	int winH = 524;
@@ -193,9 +224,29 @@ ATMainFrame::ATMainFrame()
 
 	// Give the canvas initial keyboard focus
 	mpCanvas->SetFocus();
+
+	Bind(wxEVT_TIMER, &ATMainFrame::OnToastTimer, this, kToastTimerId);
+	Bind(wxEVT_MOVE, [this](wxMoveEvent& event) {
+		UpdateToastPopupPosition();
+		event.Skip();
+	});
+	Bind(wxEVT_SIZE, [this](wxSizeEvent& event) {
+		UpdateToastPopupPosition();
+		event.Skip();
+	});
 }
 
 ATMainFrame::~ATMainFrame() {
+	if (g_pMainFrame == this)
+		g_pMainFrame = nullptr;
+
+	mToastTimer.Stop();
+	if (mpToastPopup) {
+		mpToastPopup->Destroy();
+		mpToastPopup = nullptr;
+		mpToastLabel = nullptr;
+	}
+
 	mEmulationRunning = false;
 	mGamepadTimer.Stop();
 	mInputWx.Shutdown();
@@ -233,6 +284,8 @@ void ATMainFrame::StopEmulation() {
 }
 
 void ATMainFrame::OnClose(wxCloseEvent& event) {
+	SetMouseCaptured(false);
+
 	// Check for dirty disks before closing
 	if (event.CanVeto()) {
 		bool hasDirty = false;
@@ -301,6 +354,11 @@ void ATMainFrame::OnClose(wxCloseEvent& event) {
 void ATMainFrame::OnActivate(wxActivateEvent& event) {
 	event.Skip();
 
+	if (!event.GetActive() && mMouseCaptured) {
+		SetMouseCaptured(false);
+		ShowToastMessage("Mouse released");
+	}
+
 	if (!ATUIGetPauseWhenInactive())
 		return;
 
@@ -326,6 +384,12 @@ void ATMainFrame::OnActivate(wxActivateEvent& event) {
 
 void ATMainFrame::OnKeyDown(wxKeyEvent& event) {
 	int keyCode = event.GetKeyCode();
+
+	if (mMouseCaptured && event.ControlDown() && event.AltDown() && (keyCode == 'M' || keyCode == 'm')) {
+		SetMouseCaptured(false);
+		ShowToastMessage("Mouse released");
+		return;
+	}
 
 	// Send to input mapping system (for joystick/paddle emulation via keyboard)
 	mInputWx.OnKeyDown(keyCode);
@@ -439,6 +503,34 @@ void ATMainFrame::ProcessAtariKeyUp(int wxKeyCode) {
 ///////////////////////////////////////////////////////////////////////////
 
 void ATMainFrame::OnMouseMotion(wxMouseEvent& event) {
+	if (mMouseCaptured && mpCanvas) {
+		const wxSize sz = mpCanvas->GetClientSize();
+		const int cx = sz.GetWidth() / 2;
+		const int cy = sz.GetHeight() / 2;
+
+		if (mIgnoreNextWarpMouse) {
+			mIgnoreNextWarpMouse = false;
+			mLastMouseX = cx;
+			mLastMouseY = cy;
+			return;
+		}
+
+		const int x = event.GetX();
+		const int y = event.GetY();
+		const int dx = x - cx;
+		const int dy = y - cy;
+
+		if (dx != 0 || dy != 0) {
+			mInputWx.OnMouseMove(dx, dy);
+			mIgnoreNextWarpMouse = true;
+			mpCanvas->WarpPointer(cx, cy);
+		}
+
+		mLastMouseX = cx;
+		mLastMouseY = cy;
+		return;
+	}
+
 	int x = event.GetX();
 	int y = event.GetY();
 
@@ -457,6 +549,11 @@ void ATMainFrame::OnMouseButton(wxMouseEvent& event) {
 	// Ensure canvas has focus when clicked
 	if (event.ButtonDown())
 		mpCanvas->SetFocus();
+
+	if (event.ButtonDown() && !mMouseCaptured && ATUIGetMouseAutoCapture()) {
+		SetMouseCaptured(true);
+		ShowToastMessage("Mouse captured - press Ctrl+Alt+M to release");
+	}
 
 	int button = 0;
 	if (event.GetButton() == wxMOUSE_BTN_LEFT)
@@ -732,4 +829,101 @@ void ATMainFrame::RenderAndPresent() {
 	// Tick status bar frame counter and hold counters
 	if (mpStatusBar)
 		mpStatusBar->TickFrame();
+}
+
+void ATMainFrame::ShowToastMessage(const wxString& message) {
+	if (message.empty())
+		return;
+
+	if (!mpToastPopup) {
+		mpToastPopup = new wxPopupTransientWindow(this, wxBORDER_SIMPLE);
+
+		auto *panel = new wxPanel(mpToastPopup);
+		panel->SetBackgroundColour(wxColour(32, 32, 32));
+
+		mpToastLabel = new wxStaticText(panel, wxID_ANY, "");
+		mpToastLabel->SetForegroundColour(wxColour(245, 245, 245));
+		mpToastLabel->SetFont(wxFontInfo(10).Family(wxFONTFAMILY_SWISS));
+
+		auto *sizer = new wxBoxSizer(wxVERTICAL);
+		sizer->Add(mpToastLabel, 0, wxALL, 10);
+		panel->SetSizerAndFit(sizer);
+
+		auto *outer = new wxBoxSizer(wxVERTICAL);
+		outer->Add(panel, 1, wxEXPAND);
+		mpToastPopup->SetSizerAndFit(outer);
+	}
+
+	mpToastLabel->SetLabel(message);
+	mpToastLabel->Wrap(360);
+	mpToastPopup->Fit();
+	UpdateToastPopupPosition();
+	mpToastPopup->Show();
+	mToastTimer.StartOnce(2500);
+}
+
+void ATMainFrame::SetMouseCaptured(bool captured) {
+	if (!mpCanvas || captured == mMouseCaptured)
+		return;
+
+	mMouseCaptured = captured;
+	mLastMouseX = -1;
+	mLastMouseY = -1;
+	mIgnoreNextWarpMouse = false;
+
+	if (captured) {
+		if (!mpCanvas->HasCapture())
+			mpCanvas->CaptureMouse();
+
+		mpCanvas->SetCursor(wxCursor(wxCURSOR_BLANK));
+		mpCanvas->SetFocus();
+
+		const wxSize sz = mpCanvas->GetClientSize();
+		if (sz.GetWidth() > 0 && sz.GetHeight() > 0) {
+			mIgnoreNextWarpMouse = true;
+			mpCanvas->WarpPointer(sz.GetWidth() / 2, sz.GetHeight() / 2);
+		}
+	} else {
+		if (mpCanvas->HasCapture())
+			mpCanvas->ReleaseMouse();
+
+		mpCanvas->SetCursor(wxNullCursor);
+	}
+}
+
+void ATMainFrame::ToggleMouseCapture() {
+	SetMouseCaptured(!mMouseCaptured);
+}
+
+void ATMainFrame::ExecuteMenuCommand(int id) {
+	wxCommandEvent event(wxEVT_MENU, id);
+	OnMenuCommand(event);
+}
+
+void ATMainFrame::FocusDisplayCanvas() {
+	if (mpCanvas)
+		mpCanvas->SetFocus();
+}
+
+void ATMainFrame::UpdateToastPopupPosition() {
+	if (!mpToastPopup || !mpToastPopup->IsShown())
+		return;
+
+	const wxSize popupSize = mpToastPopup->GetBestSize();
+	const wxSize clientSize = GetClientSize();
+	const wxPoint clientPos(
+		std::max(12, clientSize.GetWidth() - popupSize.GetWidth() - 20),
+		12);
+
+	mpToastPopup->Move(ClientToScreen(clientPos));
+}
+
+void ATMainFrame::DismissToast() {
+	mToastTimer.Stop();
+	if (mpToastPopup)
+		mpToastPopup->Show(false);
+}
+
+void ATMainFrame::OnToastTimer(wxTimerEvent&) {
+	DismissToast();
 }

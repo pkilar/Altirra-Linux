@@ -30,6 +30,21 @@ bool ATWxDebuggerDidBreak();
 
 // Navigate the debugger source panel to show the source for a given address.
 bool ATWxDebuggerNavigateSource(uint32 addr);
+bool ATWxDebuggerShowPane(const char *paneName, wxWindow *parent = nullptr);
+bool ATWxDebuggerHidePane(const char *paneName);
+bool ATWxDebuggerIsPaneVisible(const char *paneName);
+bool ATWxDebuggerActivatePane(uint32 paneId, wxWindow *parent = nullptr);
+uint32 ATWxDebuggerGetActivePaneId();
+bool ATWxDebuggerClosePane(uint32 paneId);
+bool ATWxDebuggerSaveLayout(const char *name = nullptr);
+bool ATWxDebuggerRestoreLayout(const char *name = nullptr, wxWindow *parent = nullptr);
+void ATWxDebuggerLoadDefaultLayout(wxWindow *parent = nullptr);
+bool ATWxDebuggerHandleActivePaneCommand(uint32 commandId);
+
+// Window/pane management helpers used by Linux command shims.
+bool ATWxDebuggerCloseActivePane();
+bool ATWxDebuggerToggleFloatActivePane();
+bool ATWxDebuggerCyclePane(bool forward);
 
 // Initialize/shutdown debugger hooks (called from wxApp OnInit/OnExit).
 void ATWxDebuggerInit();
