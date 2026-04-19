@@ -1,14 +1,14 @@
 # Altirra Linux Port
 
 Linux port of [Altirra](http://www.virtualdub.org/altirra.html), Avery Lee's
-cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. This port uses SDL3 for
-display, audio, and input, OpenGL 2.1 for rendering, and Dear ImGui for the
-configuration and debugger overlay.
+cycle-accurate Atari 8-bit (800/XL/XE/5200) emulator. The current Linux
+frontend uses wxWidgets for windows, menus, dialogs, and the debugger UI, with
+OpenGL 2.1 for rendering and SDL3 for audio/gamepad integration.
 
-> **Status**: ~99.9% feature-complete. Core emulation, UI, debugger, recording,
-> disk explorer, profiles, compatibility database, and all configuration dialogs
-> are fully functional. All 8 device config types and 72 device tag mappings
-> implemented.
+> **Status**: feature-complete for core emulation and broad frontend coverage.
+> The Linux port includes the main emulator UI, debugger, recording, disk
+> explorer, profiles, compatibility database, and configuration dialogs, but it
+> still differs from Windows in some UI behavior and polish.
 
 ## Prerequisites
 
@@ -256,7 +256,8 @@ Two real-time audio analysis windows are available under **View**:
 ## Known limitations
 
 - No DragonCart Ethernet emulation (modem TCP works via POSIX sockets)
-- No physical disk access (intentionally disabled for security)
+- Physical disk access uses Linux block devices directly (`/dev/sd*`, `/dev/nvme*`, etc.)
+  and requires appropriate privileges; treat it as an advanced feature
 
 ## Running the test suite
 

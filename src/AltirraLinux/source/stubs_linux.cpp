@@ -79,6 +79,7 @@
 #include "uimenu.h"
 #include "uiclipboard.h"
 #include "uicommondialogs.h"
+#include "console.h"
 #include "uirender.h"
 #include "uiconfirm.h"
 #include "debugger.h"
@@ -95,6 +96,103 @@
 #include <at/atcore/cio.h>
 #include <at/atcore/constants.h>
 #include "uienhancedtext.h"
+#include <at/atnativeui/genericdialog.h>
+
+#include <wx/msgdlg.h>
+#include <wx/filedlg.h>
+#include <wx/dirdlg.h>
+#include <wx/clipbrd.h>
+#include <wx/listctrl.h>
+#include <wx/textctrl.h>
+#include <wx/textdlg.h>
+#include <wx/textentry.h>
+#include "dialogs_wx.h"
+#include "mainframe.h"
+#include "menu_ids.h"
+#include <debugger_wx.h>
+
+#include <vd2/Dita/services.h>
+#include <vd2/system/filesys.h>
+#include "uifilefilters.h"
+#include "cartridge.h"
+#include "inputmanager.h"
+#include "inputmap.h"
+#include "disk.h"
+#include "diskinterface.h"
+#include "cassette.h"
+#include "autosavemanager.h"
+#include <at/atio/cartridgeimage.h>
+#include <at/atio/image.h>
+
+///////////////////////////////////////////////////////////////////////////
+// 0. Generic dialog + main window (needed by browser.cpp and others)
+///////////////////////////////////////////////////////////////////////////
+
+VDGUIHandle ATUIGetMainWindow() {
+	return nullptr;
+}
+
+static VDStringW s_defaultGenericDialogCaption(L"Altirra");
+
+void ATUISetDefaultGenericDialogCaption(const wchar_t *s) {
+	s_defaultGenericDialogCaption = s ? s : L"Altirra";
+}
+
+void ATUIGenericDialogUndoAllIgnores() {
+}
+
+ATUIGenericResult ATUIShowGenericDialog(const ATUIGenericDialogOptions& opts) {
+	VDStringA msg = VDTextWToU8(VDStringW(opts.mpMessage ? opts.mpMessage : L""));
+	VDStringA title = VDTextWToU8(VDStringW(opts.mpTitle ? opts.mpTitle : s_defaultGenericDialogCaption.c_str()));
+
+	long style = 0;
+
+	if (opts.mResultMask & kATUIGenericResultMask_AllowDeny)
+		style = wxYES_NO;
+	else if (opts.mResultMask & (kATUIGenericResultMask_Yes | kATUIGenericResultMask_No))
+		style = wxYES_NO;
+	else if (opts.mResultMask & kATUIGenericResultMask_OKCancel)
+		style = wxOK | wxCANCEL;
+	else
+		style = wxOK;
+
+	switch (opts.mIconType) {
+		case kATUIGenericIconType_Info:    style |= wxICON_INFORMATION; break;
+		case kATUIGenericIconType_Warning: style |= wxICON_WARNING; break;
+		case kATUIGenericIconType_Error:   style |= wxICON_ERROR; break;
+		default: break;
+	}
+
+	int result = wxMessageBox(
+		wxString::FromUTF8(msg.c_str()),
+		wxString::FromUTF8(title.c_str()),
+		style);
+
+	if (opts.mResultMask & kATUIGenericResultMask_AllowDeny)
+		return (result == wxYES) ? kATUIGenericResult_Allow : kATUIGenericResult_Deny;
+	else if (opts.mResultMask & (kATUIGenericResultMask_Yes | kATUIGenericResultMask_No))
+		return (result == wxYES) ? kATUIGenericResult_Yes : kATUIGenericResult_No;
+	else if (opts.mResultMask & kATUIGenericResultMask_OKCancel)
+		return (result == wxOK) ? kATUIGenericResult_OK : kATUIGenericResult_Cancel;
+	else
+		return kATUIGenericResult_OK;
+}
+
+ATUIGenericResult ATUIShowGenericDialogAutoCenter(const ATUIGenericDialogOptions& opts) {
+	return ATUIShowGenericDialog(opts);
+}
+
+bool ATUIConfirm(VDGUIHandle, const char *, const wchar_t *message, const wchar_t *title) {
+	VDStringA msg = VDTextWToU8(VDStringW(message ? message : L""));
+	VDStringA cap = VDTextWToU8(VDStringW(title ? title : L"Altirra"));
+
+	int result = wxMessageBox(
+		wxString::FromUTF8(msg.c_str()),
+		wxString::FromUTF8(cap.c_str()),
+		wxYES_NO | wxICON_QUESTION);
+
+	return result == wxYES;
+}
 
 ///////////////////////////////////////////////////////////////////////////
 // 1. Global variable definitions
@@ -113,21 +211,20 @@ ATUIManager& g_ATUIManager = reinterpret_cast<ATUIManager&>(g_ATUIManager_storag
 extern ATUIKeyboardOptions g_kbdOpts;
 
 // Device definitions for Windows-only devices
-extern const ATDeviceDefinition g_ATDeviceDefBrowser = {
-	"browser", nullptr, L"Browser (B:)", nullptr, 0
-};
+// NOTE: g_ATDeviceDefBrowser is defined in browser.cpp (now compiled on Linux)
+
+void ATCreateDeviceIDEPhysDisk(const ATPropertySet& pset, IATDevice **dev) {
+	vdrefptr<ATIDEPhysicalDisk> p(new ATIDEPhysicalDisk);
+	*dev = p;
+	(*dev)->AddRef();
+}
 
 extern const ATDeviceDefinition g_ATDeviceDefIDEPhysDisk = {
-	"hdphysdisk", "harddisk", L"Hard disk image (physical disk)", nullptr, 0
+	"hdphysdisk", "harddisk", L"Hard disk image (physical disk)", ATCreateDeviceIDEPhysDisk, 0
 };
 
-extern const ATDeviceDefinition g_ATDeviceDefMidiMate = {
-	"midimate", nullptr, L"MidiMate", nullptr, 0
-};
-
-extern const ATDeviceDefinition g_ATDeviceDefPipeSerial = {
-	"pipeserial", "pipeserial", L"Named pipe serial port", nullptr, 0
-};
+// NOTE: g_ATDeviceDefMidiMate is defined in midimate_linux.cpp (ALSA implementation)
+// NOTE: g_ATDeviceDefPipeSerial is defined in pipeserial_linux.cpp (PTY implementation)
 
 ///////////////////////////////////////////////////////////////////////////
 // 2. ATUIManager methods (Windows display layer)
@@ -142,40 +239,7 @@ const wchar_t *ATUIManager::GetCustomEffectPath() const {
 void ATUIManager::SetCustomEffectPath(const wchar_t *, bool) {
 }
 
-///////////////////////////////////////////////////////////////////////////
-// 3. ATUIQueue (UI step queue)
-///////////////////////////////////////////////////////////////////////////
-
-static ATUIQueue s_stubQueue;
-
-void ATUIQueue::PushStep(const vdfunction<void()>& step) {
-	mSteps.push_back(step);
-}
-
-bool ATUIQueue::Run() {
-	if (mSteps.empty())
-		return false;
-
-	ATUIStep step(std::move(mSteps.back()));
-	mSteps.pop_back();
-
-	try {
-		step();
-	} catch (const MyError& e) {
-		ATUIShowError(e);
-	} catch (...) {
-	}
-
-	return true;
-}
-
-ATUIQueue& ATUIGetQueue() {
-	return s_stubQueue;
-}
-
-void ATUIPushStep(const ATUIStep& step) {
-	s_stubQueue.PushStep(step);
-}
+// ATUIQueue — now provided by uiqueue.cpp (un-excluded from build)
 
 // Forward declaration (defined in section 8)
 void ATUIUpdateSpeedTiming();
@@ -285,25 +349,20 @@ void ATUISetConstrainMouseFullScreen(bool v) {
 void ATUISetCurrentAltOutputName(const char *) {}
 void ATUISetDisplayFilterMode(ATDisplayFilterMode m) {
 	s_displayFilterMode = m;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
-	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-	if (disp) {
-		IVDVideoDisplay::FilterMode fm =
-			(m == kATDisplayFilterMode_Point)
-				? IVDVideoDisplay::kFilterPoint
-				: IVDVideoDisplay::kFilterBilinear;
-		disp->SetFilterMode(fm);
-	}
+	extern void ATLinuxSetDisplayFilterMode(IVDVideoDisplay::FilterMode);
+	IVDVideoDisplay::FilterMode fm =
+		(m == kATDisplayFilterMode_Point)
+			? IVDVideoDisplay::kFilterPoint
+			: IVDVideoDisplay::kFilterBilinear;
+	ATLinuxSetDisplayFilterMode(fm);
 }
 void ATUISetDisplayIndicators(bool v) { s_displayIndicators = v; }
 void ATUISetDisplayPadIndicators(bool v) { s_displayPadIndicators = v; }
 void ATUISetDisplayPanOffset(const vdfloat2& v) { s_displayPanOffset = v; }
 void ATUISetDisplayStretchMode(ATDisplayStretchMode m) {
 	s_displayStretchMode = m;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
-	ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-	if (disp)
-		disp->SetStretchMode(m);
+	extern void ATLinuxSetDisplayStretchMode(ATDisplayStretchMode);
+	ATLinuxSetDisplayStretchMode(m);
 }
 void ATUISetDisplayZoom(float v) { s_displayZoom = v; }
 void ATUISetDrawPadBoundsEnabled(bool v) { s_drawPadBounds = v; }
@@ -328,7 +387,7 @@ static ATLinuxEnhancedTextOutput g_enhancedTextOutput;
 
 void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 	extern ATSimulator g_sim;
-	extern ATDisplaySDL3 *ATGetLinuxDisplay();
+	extern void ATLinuxGetDisplayWindowSize(int&, int&);
 
 	ATUIEnhancedTextMode oldMode = s_enhancedTextMode;
 	s_enhancedTextMode = v;
@@ -371,13 +430,10 @@ void ATUISetEnhancedTextMode(ATUIEnhancedTextMode v) {
 			g_pEnhancedTextEngine->Init(&g_enhancedTextOutput, &g_sim);
 
 			// Initialize with current window size
-			ATDisplaySDL3 *disp = ATGetLinuxDisplay();
-			if (disp) {
-				int w = 0, h = 0;
-				disp->GetWindowSize(w, h);
-				if (w > 0 && h > 0)
-					g_pEnhancedTextEngine->OnSize(w, h);
-			}
+			int w = 0, h = 0;
+			ATLinuxGetDisplayWindowSize(w, h);
+			if (w > 0 && h > 0)
+				g_pEnhancedTextEngine->OnSize(w, h);
 		}
 	}
 }
@@ -561,6 +617,116 @@ bool ATUIClipGetText(VDStringW& s) {
 	return true;
 }
 
+namespace {
+
+wxWindow *ATGetFocusedWindow() {
+	return wxWindow::FindFocus();
+}
+
+wxTextCtrl *ATGetFocusedTextCtrl() {
+	wxWindow *focus = ATGetFocusedWindow();
+	while (focus) {
+		if (auto *text = wxDynamicCast(focus, wxTextCtrl))
+			return text;
+		focus = focus->GetParent();
+	}
+	return nullptr;
+}
+
+wxListCtrl *ATGetFocusedListCtrl() {
+	wxWindow *focus = ATGetFocusedWindow();
+	while (focus) {
+		if (auto *list = wxDynamicCast(focus, wxListCtrl))
+			return list;
+		focus = focus->GetParent();
+	}
+	return nullptr;
+}
+
+bool ATSetClipboardText(const wxString& text) {
+	if (!wxTheClipboard || !wxTheClipboard->Open())
+		return false;
+
+	wxTheClipboard->SetData(new wxTextDataObject(text));
+	wxTheClipboard->Close();
+	return true;
+}
+
+wxString ATGetSelectedTextForCopy() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		wxString selected = text->GetStringSelection();
+		return selected;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		wxString out;
+		long item = -1;
+		bool firstRow = true;
+
+		while ((item = list->GetNextItem(item, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED)) != -1) {
+			if (!firstRow)
+				out += '\n';
+			firstRow = false;
+
+			int colCount = list->GetColumnCount();
+			for (int col = 0; col < colCount; ++col) {
+				if (col)
+					out += '\t';
+				out += list->GetItemText(item, col);
+			}
+		}
+
+		return out;
+	}
+
+	return wxString();
+}
+
+wxString ATEscapeText(const wxString& text) {
+	wxString out;
+	out.reserve(text.length() * 2);
+
+	for (wxUniChar ch : text) {
+		switch ((wchar_t)ch) {
+			case '\\': out += "\\\\"; break;
+			case '\n': out += "\\n"; break;
+			case '\r': out += "\\r"; break;
+			case '\t': out += "\\t"; break;
+			case '\"': out += "\\\""; break;
+			default: out += ch; break;
+		}
+	}
+
+	return out;
+}
+
+wxString ATTextToHex(const wxString& text) {
+	wxScopedCharBuffer utf8 = text.utf8_str();
+	const char *src = utf8.data();
+	if (!src)
+		return wxString();
+
+	wxString out;
+	for (size_t i = 0; src[i]; ++i) {
+		if (i)
+			out += ' ';
+		out += wxString::Format("%02X", (unsigned char)src[i]);
+	}
+	return out;
+}
+
+wxString ATTextToUnicodeEscapes(const wxString& text) {
+	wxString out;
+	for (wxUniChar ch : text) {
+		out += wxString::Format("\\u%04X", (unsigned int)(wchar_t)ch);
+	}
+	return out;
+}
+
+} // namespace
+
+void OnCommandVideoEnhancedTextFontDialog();
+
 void ATUIExecuteCommandStringAndShowErrors(const char *cmd, const ATUICommandOptions *opts) noexcept {
 	if (!cmd || !*cmd)
 		return;
@@ -635,7 +801,7 @@ void ATUIShowDialogDiskExplorer(VDGUIHandle, IATBlockDevice *dev, const wchar_t 
 		}
 
 		vdrefptr<IATDiskImage> diskView(new ATPartitionDiskView(*dev, partitions[0]));
-		ATImGuiOpenDiskExplorer(diskView, devName, dev->IsReadOnly());
+		ATShowDiskExplorerForImage(nullptr, diskView, devName, dev->IsReadOnly());
 	} catch (const std::exception& e) {
 		char msg[256];
 		snprintf(msg, sizeof(msg), "Disk explorer failed: %s", e.what());
@@ -1503,23 +1669,49 @@ void ATDirectoryWatcher::NotifyAllChanged() {
 }
 
 ///////////////////////////////////////////////////////////////////////////
-// 14. ATIDEPhysicalDisk (Windows physical disk I/O)
-//     This class inherits from IATBlockDevice and ATDevice, so we must
-//     provide all pure virtual method implementations for vtable.
+// 14. ATIDEPhysicalDisk (Linux physical disk I/O via /dev/sdX)
+//     Uses open() + pread()/pwrite() with O_DIRECT for raw disk access.
+//     Requires root or membership in the 'disk' group.
 ///////////////////////////////////////////////////////////////////////////
 
-bool ATIDEIsPhysicalDiskPath(const wchar_t *) {
-	return false;
+#include <sys/ioctl.h>
+#include <linux/fs.h>
+
+bool ATIDEIsPhysicalDiskPath(const wchar_t *path) {
+	if (!path)
+		return false;
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+	// Linux block device paths: /dev/sd*, /dev/hd*, /dev/nvme*, /dev/loop*
+	return strncmp(u8.c_str(), "/dev/sd", 7) == 0
+		|| strncmp(u8.c_str(), "/dev/hd", 7) == 0
+		|| strncmp(u8.c_str(), "/dev/nvme", 9) == 0
+		|| strncmp(u8.c_str(), "/dev/loop", 9) == 0;
+}
+
+sint64 ATIDEGetPhysicalDiskSize(const wchar_t *path) {
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+	int fd = ::open(u8.c_str(), O_RDONLY);
+	if (fd < 0)
+		return -1;
+
+	uint64_t size = 0;
+	if (ioctl(fd, BLKGETSIZE64, &size) < 0) {
+		::close(fd);
+		return -1;
+	}
+	::close(fd);
+	return (sint64)size;
 }
 
 ATIDEPhysicalDisk::ATIDEPhysicalDisk()
-	: mhDisk(nullptr)
+	: mhDisk(reinterpret_cast<void *>(static_cast<intptr_t>(-1)))
 	, mpBuffer(nullptr)
 	, mSectorCount(0)
 {
 }
 
 ATIDEPhysicalDisk::~ATIDEPhysicalDisk() {
+	Shutdown();
 }
 
 int ATIDEPhysicalDisk::AddRef() {
@@ -1531,6 +1723,8 @@ int ATIDEPhysicalDisk::Release() {
 }
 
 void *ATIDEPhysicalDisk::AsInterface(uint32 iid) {
+	if (iid == IATBlockDevice::kTypeID)
+		return static_cast<IATBlockDevice *>(this);
 	return ATDevice::AsInterface(iid);
 }
 
@@ -1538,14 +1732,29 @@ void ATIDEPhysicalDisk::GetDeviceInfo(ATDeviceInfo& info) {
 	info.mpDef = &g_ATDeviceDefIDEPhysDisk;
 }
 
-void ATIDEPhysicalDisk::GetSettings(ATPropertySet&) {
+void ATIDEPhysicalDisk::GetSettings(ATPropertySet& settings) {
+	if (!mPath.empty())
+		settings.SetString("path", mPath.c_str());
 }
 
-bool ATIDEPhysicalDisk::SetSettings(const ATPropertySet&) {
-	return false;
+bool ATIDEPhysicalDisk::SetSettings(const ATPropertySet& settings) {
+	const wchar_t *path = settings.GetString("path");
+	if (path)
+		mPath = path;
+	return true;
 }
 
 void ATIDEPhysicalDisk::Shutdown() {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd >= 0) {
+		::close(fd);
+		mhDisk = reinterpret_cast<void *>(static_cast<intptr_t>(-1));
+	}
+	if (mpBuffer) {
+		free(mpBuffer);
+		mpBuffer = nullptr;
+	}
+	mSectorCount = 0;
 }
 
 ATBlockDeviceGeometry ATIDEPhysicalDisk::GetGeometry() const {
@@ -1553,20 +1762,74 @@ ATBlockDeviceGeometry ATIDEPhysicalDisk::GetGeometry() const {
 }
 
 uint32 ATIDEPhysicalDisk::GetSerialNumber() const {
-	return 0;
+	if (mPath.empty())
+		return 0;
+	// Simple hash of path string for device identification
+	uint32 hash = 2166136261u;
+	for (auto ch : mPath) {
+		hash ^= (uint32)ch;
+		hash *= 16777619u;
+	}
+	return hash;
 }
 
-void ATIDEPhysicalDisk::Init(const wchar_t *) {
-	// Physical disk access not supported on Linux yet
+void ATIDEPhysicalDisk::Init(const wchar_t *path) {
+	Shutdown();
+
+	if (!path || !*path)
+		return;
+
+	mPath = path;
+	VDStringA u8 = VDTextWToU8(VDStringW(path));
+
+	int fd = ::open(u8.c_str(), O_RDONLY);
+	if (fd < 0)
+		return;
+
+	// Get disk size via ioctl
+	uint64_t diskSize = 0;
+	if (ioctl(fd, BLKGETSIZE64, &diskSize) < 0) {
+		::close(fd);
+		return;
+	}
+
+	mSectorCount = (uint32)(diskSize / 512);
+	mhDisk = reinterpret_cast<void *>(static_cast<intptr_t>(fd));
+
+	// Allocate a 16KB read buffer (32 sectors)
+	mpBuffer = malloc(512 * 32);
 }
 
 void ATIDEPhysicalDisk::Flush() {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd >= 0)
+		fsync(fd);
 }
 
-void ATIDEPhysicalDisk::ReadSectors(void *, uint32, uint32) {
+void ATIDEPhysicalDisk::ReadSectors(void *data, uint32 lba, uint32 n) {
+	int fd = static_cast<int>(reinterpret_cast<intptr_t>(mhDisk));
+	if (fd < 0 || !mpBuffer || !data)
+		return;
+
+	uint8 *dst = (uint8 *)data;
+	uint32 remaining = n;
+
+	while (remaining > 0) {
+		uint32 chunk = remaining > 32 ? 32 : remaining;
+		uint64_t offset = (uint64_t)lba * 512;
+		ssize_t bytesRead = ::pread(fd, mpBuffer, chunk * 512, (off_t)offset);
+		if (bytesRead <= 0)
+			break;
+		memcpy(dst, mpBuffer, (size_t)bytesRead);
+		uint32 sectorsRead = (uint32)bytesRead / 512;
+		dst += sectorsRead * 512;
+		lba += sectorsRead;
+		remaining -= sectorsRead;
+	}
 }
 
-void ATIDEPhysicalDisk::WriteSectors(const void *, uint32, uint32) {
+void ATIDEPhysicalDisk::WriteSectors(const void *data, uint32 lba, uint32 n) {
+	// Read-only device — writes not supported
 }
 
 ///////////////////////////////////////////////////////////////////////////
@@ -1964,4 +2227,1397 @@ void VDUIGetAcceleratorString(const VDUIAccelerator& accel, VDStringW& s) {
 			}
 		}
 	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 16. VDGetLoadFileName / VDGetSaveFileName — Dita file dialog stubs
+//     Parse null-separated Win32 filter strings into wxFileDialog format.
+///////////////////////////////////////////////////////////////////////////
+
+static std::map<long, VDStringW> s_lastLoadSavePaths;
+static std::map<long, VDStringW> s_lastLoadSaveFileNames;
+
+// Parse null-separated filter string into wxWidgets pipe-separated format.
+// Input:  L"Description\0*.ext\0Description2\0*.ext2\0\0"
+// Output: "Description|*.ext|Description2|*.ext2"
+static wxString ParseWin32FilterString(const wchar_t *filters) {
+	if (!filters)
+		return wxString();
+
+	wxString result;
+	const wchar_t *p = filters;
+
+	while (*p) {
+		// Description
+		const wchar_t *desc = p;
+		while (*p) ++p;
+
+		if (!*desc) break;
+
+		++p; // skip null
+		if (!*p) break;
+
+		// Pattern
+		const wchar_t *pattern = p;
+		while (*p) ++p;
+		++p; // skip null
+
+		if (!result.empty())
+			result += '|';
+
+		VDStringA descU8 = VDTextWToU8(VDStringW(desc));
+		VDStringA patU8 = VDTextWToU8(VDStringW(pattern));
+		result += wxString::FromUTF8(descU8.c_str());
+		result += '|';
+		result += wxString::FromUTF8(patU8.c_str());
+	}
+
+	return result;
+}
+
+const VDStringW VDGetLoadFileName(long nKey, VDGUIHandle, const wchar_t *pszTitle, const wchar_t *pszFilters, const wchar_t *pszExt, const VDFileDialogOption *, int *) {
+	wxString title = pszTitle ? wxString::FromUTF8(VDTextWToU8(VDStringW(pszTitle)).c_str()) : wxString("Open");
+	wxString filters = ParseWin32FilterString(pszFilters);
+	if (filters.empty())
+		filters = "All files (*.*)|*.*";
+
+	wxString defaultDir;
+	auto it = s_lastLoadSavePaths.find(nKey);
+	if (it != s_lastLoadSavePaths.end())
+		defaultDir = wxString::FromUTF8(VDTextWToU8(it->second).c_str());
+
+	wxFileDialog dlg(nullptr, title, defaultDir, wxEmptyString, filters, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+	if (dlg.ShowModal() != wxID_OK)
+		return VDStringW();
+
+	VDStringW path = VDTextU8ToW(VDStringSpanA(dlg.GetPath().utf8_str().data()));
+	s_lastLoadSavePaths[nKey] = VDFileSplitPathLeft(path);
+	return path;
+}
+
+const VDStringW VDGetSaveFileName(long nKey, VDGUIHandle, const wchar_t *pszTitle, const wchar_t *pszFilters, const wchar_t *pszExt, const VDFileDialogOption *, int *) {
+	wxString title = pszTitle ? wxString::FromUTF8(VDTextWToU8(VDStringW(pszTitle)).c_str()) : wxString("Save");
+	wxString filters = ParseWin32FilterString(pszFilters);
+	if (filters.empty())
+		filters = "All files (*.*)|*.*";
+
+	wxString defaultDir;
+	auto it = s_lastLoadSavePaths.find(nKey);
+	if (it != s_lastLoadSavePaths.end())
+		defaultDir = wxString::FromUTF8(VDTextWToU8(it->second).c_str());
+
+	wxFileDialog dlg(nullptr, title, defaultDir, wxEmptyString, filters, wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
+	if (dlg.ShowModal() != wxID_OK)
+		return VDStringW();
+
+	VDStringW path = VDTextU8ToW(VDStringSpanA(dlg.GetPath().utf8_str().data()));
+	s_lastLoadSavePaths[nKey] = VDFileSplitPathLeft(path);
+	return path;
+}
+
+void VDSetLastLoadSavePath(long nKey, const wchar_t *path) {
+	if (path)
+		s_lastLoadSavePaths[nKey] = path;
+}
+
+const VDStringW VDGetLastLoadSavePath(long nKey) {
+	auto it = s_lastLoadSavePaths.find(nKey);
+	return it != s_lastLoadSavePaths.end() ? it->second : VDStringW();
+}
+
+void VDSetLastLoadSaveFileName(long nKey, const wchar_t *fileName) {
+	if (fileName)
+		s_lastLoadSaveFileNames[nKey] = fileName;
+}
+
+const VDStringW VDGetDirectory(long nKey, VDGUIHandle, const wchar_t *pszTitle) {
+	wxString title = pszTitle ? wxString::FromUTF8(VDTextWToU8(VDStringW(pszTitle)).c_str()) : wxString("Select Directory");
+
+	wxString defaultDir;
+	auto it = s_lastLoadSavePaths.find(nKey);
+	if (it != s_lastLoadSavePaths.end())
+		defaultDir = wxString::FromUTF8(VDTextWToU8(it->second).c_str());
+
+	wxDirDialog dlg(nullptr, title, defaultDir, wxDD_DEFAULT_STYLE | wxDD_DIR_MUST_EXIST);
+	if (dlg.ShowModal() != wxID_OK)
+		return VDStringW();
+
+	VDStringW path = VDTextU8ToW(VDStringSpanA(dlg.GetPath().utf8_str().data()));
+	s_lastLoadSavePaths[nKey] = path;
+	return path;
+}
+
+void VDLoadFilespecSystemData() {}
+void VDSaveFilespecSystemData() {}
+void VDClearFilespecSystemData() {}
+void VDInitFilespecSystem() {}
+
+sint32 VDUIShowColorPicker(VDGUIHandle, uint32, vdspan<const uint32>, const char *) {
+	return -1;
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 17. uiconfirm.cpp stubs — confirmation dialogs
+///////////////////////////////////////////////////////////////////////////
+
+static uint32 s_uiResetFlags = kATUIResetFlag_Default;
+
+bool ATUIIsResetNeeded(uint32 flag) {
+	return (s_uiResetFlags & flag) != 0;
+}
+
+void ATUIModifyResetFlag(uint32 flag, bool newState) {
+	if (newState)
+		s_uiResetFlags |= flag;
+	else
+		s_uiResetFlags &= ~flag;
+}
+
+bool ATUIConfirmDiscardMemory(VDGUIHandle h, const wchar_t *title) {
+	return ATUIConfirm(h, "DiscardMemory", L"Memory contents will be lost. Continue?", title);
+}
+
+bool ATUIConfirmReset(VDGUIHandle h, const char *key, const wchar_t *message, const wchar_t *title) {
+	return ATUIConfirm(h, key, message, title);
+}
+
+void ATUIConfirmResetComplete() {
+	extern ATSimulator g_sim;
+	g_sim.ColdReset();
+}
+
+bool ATUIConfirmBasicChangeReset() {
+	return true;
+}
+
+void ATUIConfirmBasicChangeResetComplete() {
+	extern ATSimulator g_sim;
+	g_sim.ColdReset();
+}
+
+bool ATUIConfirmVideoStandardChangeReset() {
+	return true;
+}
+
+void ATUIConfirmVideoStandardChangeResetComplete() {
+	extern ATSimulator g_sim;
+	g_sim.ColdReset();
+}
+
+bool ATUIConfirmCartridgeChangeReset() {
+	return true;
+}
+
+void ATUIConfirmCartridgeChangeResetComplete() {
+	extern ATSimulator g_sim;
+	g_sim.ColdReset();
+}
+
+bool ATUIConfirmSystemChangeReset() {
+	return true;
+}
+
+void ATUIConfirmSystemChangeResetComplete() {
+	extern ATSimulator g_sim;
+	g_sim.ColdReset();
+}
+
+bool ATUIConfirmAddFullDrive() {
+	return true;
+}
+
+// Extended confirmations used by main.cpp command handlers
+bool ATUIConfirmPartiallyAccurateSnapshot() {
+	return true;
+}
+
+bool ATUIConfirmDiscardAllStorage(VDGUIHandle h, const wchar_t *prompt, bool, uint32) {
+	return ATUIConfirm(h, "DiscardAll", prompt ? prompt : L"OK to discard?", L"Confirm");
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 18. Dialog redirect stubs — bridge ATUIShow*Dialog(VDGUIHandle) to
+//     ATShow*Dialog(wxWindow*) for the wxWidgets implementations.
+///////////////////////////////////////////////////////////////////////////
+
+void ATUIShowAudioOptionsDialog(VDGUIHandle) {
+	ATShowAudioOptionsDialog(nullptr);
+}
+
+void ATUIShowCPUOptionsDialog(VDGUIHandle) {
+	ATShowCPUOptionsDialog(nullptr);
+}
+
+void ATUIShowDialogConfigureSystem(VDGUIHandle) {
+	ATShowSystemConfigDialog(nullptr);
+}
+
+void ATUIShowDialogDevices(VDGUIHandle) {
+	ATShowDeviceManagerDialog(nullptr);
+}
+
+void ATUIShowDialogFirmware(VDGUIHandle, ATFirmwareManager&, bool *) {
+	ATShowFirmwareManagerDialog(nullptr);
+}
+
+void ATUIShowDialogProfiles(VDGUIHandle) {
+	ATShowProfileManagerDialog(nullptr);
+}
+
+void ATUIOpenAdjustColorsDialog(VDGUIHandle) {
+	ATShowColorSettingsDialog(nullptr);
+}
+
+void ATUIShowDialogAdvancedConfigurationModeless(VDGUIHandle) {
+	ATShowAdvancedConfigDialog(nullptr);
+}
+
+void ATUIShowDialogCompatDB(VDGUIHandle) {
+	ATShowCompatBrowserDialog(nullptr);
+}
+
+void ATUIShowTapeControlDialog(VDGUIHandle, ATCassetteEmulator&) {
+	ATShowCassetteControlDialog(nullptr);
+}
+
+void ATUIShowDialogTapeEditor() {
+	ATShowTapeEditorDialog(nullptr);
+}
+
+void ATUIShowDialogKeyboardCustomize(VDGUIHandle) {
+	ATShowKeyboardSettingsDialog(nullptr);
+}
+
+void ATUIShowDialogSpeedOptions(VDGUIHandle) {
+	// No separate speed dialog on Linux; speed is set via menu
+}
+
+void ATUIOpenAdjustScreenEffectsDialog(VDGUIHandle) {
+	ATShowVideoSettingsDialog(ATGetMainFrame());
+}
+
+void ATUIShowDialogRewind(IATAutoSaveManager&) {
+	// No-op — rewind is handled directly
+}
+
+void ATUIShowDialogDebugFont(VDGUIHandle) {
+	OnCommandVideoEnhancedTextFontDialog();
+}
+
+void ATUIShowDialogVerifier(VDGUIHandle, ATSimulator&) {
+	ATShowCPUOptionsDialog(ATGetMainFrame());
+}
+
+void ATUIShowDialogNewBreakpoint() {
+	IATDebugger *dbg = ATGetDebugger();
+	if (!dbg)
+		return;
+
+	ATWxDebuggerShowPane("breakpoints", ATGetMainFrame());
+
+	wxTextEntryDialog dlg(
+		ATGetMainFrame(),
+		"Enter breakpoint location (expression or hex address):",
+		"New Breakpoint",
+		wxString::Format("%04X", dbg->GetPC()));
+	if (dlg.ShowModal() != wxID_OK)
+		return;
+
+	try {
+		const wxScopedCharBuffer expr = dlg.GetValue().utf8_str();
+		const uint32 address = dbg->EvaluateThrow(expr.data());
+
+		ATDebuggerBreakpointInfo bpInfo {};
+		bpInfo.mTargetIndex = dbg->GetTargetIndex();
+		bpInfo.mAddress = address;
+		bpInfo.mbBreakOnPC = true;
+		dbg->SetBreakpoint(-1, bpInfo);
+		ATWxDebuggerShowPane("breakpoints", ATGetMainFrame());
+	} catch(const MyError& e) {
+		wxMessageBox(
+			wxString::Format("Unable to create breakpoint: %s", e.c_str()),
+			"Debugger",
+			wxOK | wxICON_ERROR,
+			ATGetMainFrame());
+	}
+}
+
+void ATUIOpenTraceViewer(VDGUIHandle, ATTraceCollection *) {
+	ATWxDebuggerShowPane("trace", ATGetMainFrame());
+}
+
+int ATUIShowDialogCartridgeMapper(VDGUIHandle, uint32, const void *) {
+	return -1;  // auto-detect
+}
+
+void ATUIShowDialogSetFileAssociations(VDGUIHandle, bool, bool) {
+	// Windows-only
+}
+
+void ATUIShowDialogRemoveFileAssociations(VDGUIHandle, bool, bool) {
+	// Windows-only
+}
+
+bool ATUIShowWarningConfirm(VDGUIHandle, const wchar_t *text, const wchar_t *title) {
+	VDStringA msg = VDTextWToU8(VDStringW(text ? text : L""));
+	VDStringA cap = VDTextWToU8(VDStringW(title ? title : L"Warning"));
+
+	int result = wxMessageBox(
+		wxString::FromUTF8(msg.c_str()),
+		wxString::FromUTF8(cap.c_str()),
+		wxYES_NO | wxICON_WARNING);
+
+	return result == wxYES;
+}
+
+void ATUIShowInfo(VDGUIHandle, const wchar_t *text) {
+	if (text) {
+		VDStringA msg = VDTextWToU8(VDStringW(text));
+		wxMessageBox(wxString::FromUTF8(msg.c_str()), "Info", wxOK | wxICON_INFORMATION);
+	}
+}
+
+bool ATUIGetNativeDialogMode() { return true; }
+void ATUISetNativeDialogMode(bool) {}
+
+vdrefptr<ATUIFutureWithResult<bool>> ATUIShowAlertWarningConfirm(const wchar_t *text, const wchar_t *title) {
+	bool result = ATUIShowWarningConfirm(nullptr, text, title);
+	return vdrefptr<ATUIFutureWithResult<bool>>(new ATUIFutureWithResult<bool>(result));
+}
+
+vdrefptr<ATUIFutureWithResult<bool>> ATUIShowAlertError(const wchar_t *text, const wchar_t *title) {
+	if (text) {
+		VDStringA msg = VDTextWToU8(VDStringW(text));
+		VDStringA cap = VDTextWToU8(VDStringW(title ? title : L"Error"));
+		wxMessageBox(wxString::FromUTF8(msg.c_str()), wxString::FromUTF8(cap.c_str()), wxOK | wxICON_ERROR);
+	}
+	return vdrefptr<ATUIFutureWithResult<bool>>(new ATUIFutureWithResult<bool>(true));
+}
+
+vdrefptr<ATUIFileDialogResult> ATUIShowOpenFileDialog(uint32 id, const wchar_t *title, const wchar_t *filters) {
+	// Async file dialog API — not used on Linux (cmd*.cpp uses VDGetLoadFileName instead)
+	return {};
+}
+
+vdrefptr<ATUIFileDialogResult> ATUIShowSaveFileDialog(uint32 id, const wchar_t *title, const wchar_t *filters) {
+	// Async file dialog API — not used on Linux (cmd*.cpp uses VDGetSaveFileName instead)
+	return {};
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 19. Additional dialogs referenced by cmd*.cpp / main.cpp forward decls
+///////////////////////////////////////////////////////////////////////////
+
+// Disk drive dialog (uses device manager dialog on Linux)
+void ATUIShowDiskDriveDialog(VDGUIHandle) {
+	ATShowDeviceManagerDialog(nullptr);
+}
+
+void ATUIShowDialogCheater(VDGUIHandle, void *) {
+	ATShowCheaterDialog(nullptr);
+}
+
+void ATUIShowDialogAbout(VDGUIHandle) {
+	// The wx About dialog is shown from the menu bar directly;
+	// this stub exists for command handler compatibility.
+	wxMessageBox(
+		"Altirra - Atari 800/800XL/5200 Emulator\n"
+		"Copyright (C) 2008-2024 Avery Lee\n"
+		"Linux port contributions\n\n"
+		"Licensed under GNU GPL v2+",
+		"About Altirra", wxOK | wxICON_INFORMATION);
+}
+
+void ATUIShowDialogKeyboardOptions(VDGUIHandle) {
+	ATShowKeyboardSettingsDialog(nullptr);
+}
+
+void ATUIShowDialogInputMappings(void *, ATInputManager&, IATJoystickManager *) {
+	ATShowInputSetupDialog(nullptr);
+}
+
+void ATUIShowDialogInputSetup(void *, ATInputManager&, IATJoystickManager *) {
+	ATShowInputSetupDialog(nullptr);
+}
+
+void ATUIShowDialogLightPen(VDGUIHandle, void *) {
+	// No light pen dialog on Linux
+}
+
+void ATShowChangeLog(VDGUIHandle) {
+	// Open URL in browser
+	system("xdg-open 'https://github.com/joelsgp/altirra-linux/releases' &");
+}
+
+void ATUIShowDialogCmdLineHelp(VDGUIHandle) {
+	wxMessageBox(
+		"Usage: altirra [options] [image-file]\n\n"
+		"Options:\n"
+		"  /ntsc, /pal         Set video standard\n"
+		"  /800, /xl, /5200    Set hardware mode\n"
+		"  /debug              Enable debugger\n"
+		"  /run                Auto-run after load\n",
+		"Command Line Help", wxOK | wxICON_INFORMATION);
+}
+
+void ATUIShowDialogCheckForUpdates(VDGUIHandle) {
+	ATCheckForUpdates(nullptr);
+}
+
+void ATShowHelp(void *, const char *) {
+	system("xdg-open 'https://www.virtualdub.org/docs/altirra/' &");
+}
+
+void ATUIShowDialogSetupWizard(VDGUIHandle) {
+	ATShowSetupWizard(nullptr);
+}
+
+// ATUIShowSourceListDialog is defined in console_wx.cpp
+
+void ATUIShowDialogEditAccelerators(const char *) {
+	// Shows keyboard shortcuts — redirect to our keyboard settings
+	ATShowKeyboardSettingsDialog(nullptr);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 20. Accessor stubs missing from cmd*.cpp requirements
+///////////////////////////////////////////////////////////////////////////
+
+// Global variables referenced by cmds.cpp
+bool g_xepViewEnabled = false;
+bool g_xepViewAutoswitchingEnabled = false;
+bool g_showFps = false;
+
+bool ATUIIsXEPViewEnabled() { return g_xepViewEnabled; }
+void ATUISetXEPViewEnabled(bool v) { g_xepViewEnabled = v; }
+
+bool ATUIIsAltOutputAvailable() { return false; }
+void ATUISelectPrevAltOutput() {}
+void ATUISelectNextAltOutput() {}
+void ATUIToggleAltOutput(const char *) {}
+
+sint32 ATUIGetCurrentAltViewIndex() { return -1; }
+void ATUISetAltViewByIndex(sint32) {}
+
+// Turbo pulse
+static bool s_turboPulse = false;
+bool ATUIGetTurboPulse() { return s_turboPulse; }
+void ATUISetTurboPulse(bool v) {
+	s_turboPulse = v;
+	if (v)
+		ATUISetTurbo(true);
+	else
+		ATUISetTurbo(false);
+}
+
+// Drive sounds
+bool ATUIGetDriveSoundsEnabled() {
+	extern ATSimulator g_sim;
+	const ATDiskInterface& diskIf = g_sim.GetDiskInterface(0);
+	return diskIf.AreDriveSoundsEnabled();
+}
+
+void ATUISetDriveSoundsEnabled(bool enabled) {
+	extern ATSimulator g_sim;
+	for (int i = 0; i < 15; ++i) {
+		ATDiskInterface& diskIf = g_sim.GetDiskInterface(i);
+		diskIf.SetDriveSoundsEnabled(enabled);
+	}
+}
+
+// Recording status
+ATUIRecordingStatus ATUIGetRecordingStatus() {
+	return kATUIRecordingStatus_None;
+}
+
+// Device buttons
+static uint32 s_deviceButtonMask = 0;
+static uint32 s_deviceButtonChangeCounter = 0;
+
+bool ATUIGetDeviceButtonSupported(uint32 idx) {
+	extern ATSimulator g_sim;
+	ATDeviceManager& dm = *g_sim.GetDeviceManager();
+	const uint32 cc = dm.GetChangeCounter();
+
+	if (s_deviceButtonChangeCounter != cc) {
+		s_deviceButtonChangeCounter = cc;
+		s_deviceButtonMask = 0;
+
+		for (IATDeviceButtons *p : dm.GetInterfaces<IATDeviceButtons>(false, false, false))
+			s_deviceButtonMask |= p->GetSupportedButtons();
+	}
+
+	return (s_deviceButtonMask & (1u << idx)) != 0;
+}
+
+bool ATUIGetDeviceButtonDepressed(uint32 idx) {
+	if (!(s_deviceButtonMask & (1u << idx)))
+		return false;
+
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false)) {
+		if (p->IsButtonDepressed((ATDeviceButton)idx))
+			return true;
+	}
+	return false;
+}
+
+void ATUIActivateDeviceButton(uint32 idx, bool state) {
+	if (!(s_deviceButtonMask & (1u << idx)))
+		return;
+
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton((ATDeviceButton)idx, state);
+}
+
+// Overscan mode
+void ATUISetOverscanMode(ATGTIAEmulator::OverscanMode mode) {
+	extern ATSimulator g_sim;
+	g_sim.GetGTIA().SetOverscanMode(mode);
+	ATUIResizeDisplay();
+}
+
+// Video standard
+void ATSetVideoStandard(ATVideoStandard mode) {
+	extern ATSimulator g_sim;
+	if (g_sim.GetHardwareMode() == kATHardwareMode_5200)
+		return;
+	g_sim.SetVideoStandard(mode);
+	ATUIUpdateSpeedTiming();
+}
+
+// BASIC switch
+void ATUISwitchBasic(uint64 basicId) {
+	extern ATSimulator g_sim;
+	if (g_sim.GetBasicId() == basicId)
+		return;
+	g_sim.SetBasic(basicId);
+	if (ATUIConfirmBasicChangeReset())
+		ATUIConfirmBasicChangeResetComplete();
+}
+
+// Menu rebuild — no-op, wxWidgets menus rebuild directly
+void ATUIRebuildDynamicMenu(int) {}
+
+// Pan/zoom and light pen — no-op on Linux
+void ATUIRecalibrateLightPen() {}
+void ATUIActivatePanZoomTool() {}
+
+// On-screen keyboard
+void ATUIOpenOnScreenKeyboard() {
+	ATShowOnScreenKeyboard(nullptr);
+}
+
+// Hold keys toggle
+static bool g_holdKeysActive = false;
+
+void ATUIToggleHoldKeys() {
+	extern ATSimulator g_sim;
+	g_holdKeysActive = !g_holdKeysActive;
+
+	if (!g_holdKeysActive) {
+		g_sim.ClearPendingHeldKey();
+		g_sim.SetPendingHeldSwitches(0);
+	}
+
+	auto *pUIR = g_sim.GetUIRenderer();
+	if (pUIR)
+		pUIR->SetPendingHoldMode(g_holdKeysActive);
+}
+
+// Exit
+void ATUIExit(bool) {
+	// Exit is handled by the wx event loop
+	wxExit();
+}
+
+// Mouse capture
+bool ATUIIsMouseCaptured() { return ATLinuxIsMouseCaptured(); }
+
+// Window state
+bool ATUICanManipulateWindows() { return true; }
+bool ATUIIsModalActive() { return false; }
+
+// Display fullscreen (same as ATUIGetFullscreen)
+bool ATUIGetDisplayFullscreen() { return ATUIGetFullscreen(); }
+
+// Dispatcher
+static IATAsyncDispatcher *s_pDispatcher = nullptr;
+IATAsyncDispatcher *ATUIGetDispatcher() { return s_pDispatcher; }
+void ATUISetDispatcher(IATAsyncDispatcher *p) { s_pDispatcher = p; }
+
+// ATUIManager accessor
+ATUIManager& ATUIGetManager() { return g_ATUIManager; }
+
+// Boot image
+void ATUIBootImage(const wchar_t *path) {
+	extern ATSimulator g_sim;
+	if (!path)
+		return;
+
+	try {
+		g_sim.UnloadAll();
+		g_sim.Load(path, kATMediaWriteMode_RO, nullptr);
+		g_sim.ColdReset();
+		g_sim.Resume();
+	} catch (const MyError& e) {
+		ATUIShowError(e);
+	}
+}
+
+// Export debug help
+void ATUIExportDebugHelp() {
+	// No-op on Linux
+}
+
+// ATLaunchURL
+void ATLaunchURL(const char *url) {
+	if (url) {
+		char cmd[1024];
+		snprintf(cmd, sizeof(cmd), "xdg-open '%s' &", url);
+		system(cmd);
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 21. DoLoad / DoBootWithConfirm — main.cpp load functions
+///////////////////////////////////////////////////////////////////////////
+
+void DoLoad(VDGUIHandle, const wchar_t *path, const ATMediaWriteMode *writeMode, int cartmapper, ATImageType loadType, bool *suppressColdReset, int loadIndex, bool) {
+	extern ATSimulator g_sim;
+
+	if (!path || !*path)
+		return;
+
+	try {
+		ATMediaWriteMode wm = writeMode ? *writeMode : kATMediaWriteMode_RO;
+
+		if (loadType == kATImageType_Cartridge || cartmapper >= 0) {
+			ATCartLoadContext ctx;
+			ctx.mCartMapper = cartmapper;
+			g_sim.LoadCartridge(0, path, &ctx);
+		} else {
+			ATImageLoadContext ctx;
+			ctx.mLoadType = loadType;
+			ctx.mLoadIndex = loadIndex;
+			g_sim.Load(path, wm, &ctx);
+		}
+
+		if (suppressColdReset && *suppressColdReset)
+			return;
+
+		g_sim.ColdReset();
+		g_sim.Resume();
+	} catch (const MyError& e) {
+		ATUIShowError(e);
+	}
+}
+
+void DoBootWithConfirm(const wchar_t *path, const ATMediaWriteMode *writeMode, int cartmapper) {
+	extern ATSimulator g_sim;
+
+	if (!ATUIConfirmDiscardAllStorage(nullptr, L"OK to discard?", false, 0))
+		return;
+
+	g_sim.UnloadAll();
+	DoLoad(nullptr, path, writeMode, cartmapper, kATImageType_None, nullptr, -1, false);
+}
+
+// Unload storage for boot (simplified)
+void ATUIUnloadStorageForBoot() {
+	extern ATSimulator g_sim;
+	g_sim.UnloadAll();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Paste() — keyboard text injection (ported from Windows main.cpp)
+///////////////////////////////////////////////////////////////////////////
+
+#include <at/ataudio/pokey.h>
+#include "uikeyboard.h"
+
+void Paste(const wchar_t *s, size_t len, bool useCooldown) {
+	extern ATSimulator g_sim;
+	vdfastvector<wchar_t> pasteChars;
+
+	while (len--) {
+		wchar_t c = *s++;
+
+		if (!c)
+			continue;
+
+		int repeat = 1;
+
+		switch (c) {
+			case L'\u200B':	// zero width space
+			case L'\u200C':	// zero width non-joiner
+			case L'\u200D':	// zero width joiner
+			case L'\u200E':	// left to right mark
+			case L'\u200F':	// right to left mark
+				continue;
+
+			case L'\u2010':	// hyphen
+			case L'\u2011':	// non-breaking hyphen
+			case L'\u2012':	// figure dash
+			case L'\u2013':	// en dash
+			case L'\u2014':	// em dash
+			case L'\u2015':	// horizontal bar
+				c = L'-';
+				break;
+
+			case L'\u2018':	// left single quotation mark
+			case L'\u2019':	// right single quotation mark
+				c = L'\'';
+				break;
+
+			case L'\u201C':	// left double quotation mark
+			case L'\u201D':	// right double quotation mark
+				c = L'"';
+				break;
+
+			case L'\u2026':	// ellipsis
+				c = L'.';
+				repeat = 3;
+				break;
+
+			case L'\uFEFF':	// byte order mark
+				continue;
+		}
+
+		while (repeat--)
+			pasteChars.push_back(c);
+	}
+
+	pasteChars.push_back(0);
+
+	auto& pokey = g_sim.GetPokey();
+	wchar_t skipLT = 0;
+
+	const wchar_t *t = pasteChars.data();
+
+	while (wchar_t c = *t++) {
+		if (c == skipLT) {
+			skipLT = 0;
+			continue;
+		}
+
+		skipLT = 0;
+
+		const uint8 kInvalidScancode = 0xFF;
+		uint8 scancode = kInvalidScancode;
+
+		switch (c) {
+			case L'\r':
+			case L'\n':
+				skipLT = c ^ (L'\r' ^ L'\n');
+				scancode = 0x0C;
+				break;
+
+			case L'\t':
+				scancode = 0x2C;
+				break;
+
+			case L'\x001B':
+				scancode = 0x1C;
+				break;
+
+			default:
+				if (ATUIGetDefaultScanCodeForCharacter(c, scancode)) {
+					// For control characters that map to visible ATASCII chars,
+					// inject ESC first so they display rather than act as controls
+					switch (scancode) {
+						case 0x1C:	// escape
+						case 0x8E:	// up arrow
+						case 0x8F:	// down arrow
+						case 0x86:	// left arrow
+						case 0x87:	// right arrow
+						case 0x82:	// spade
+						case 0x76:	// curved arrow up-left
+						case 0x34:	// tall left arrow
+						case 0x2C:	// tall right arrow
+							pokey.PushKey(0x1C /*esc*/, false, true, false, useCooldown);
+							break;
+					}
+				} else {
+					scancode = kInvalidScancode;
+				}
+				break;
+		}
+
+		if (scancode != kInvalidScancode)
+			pokey.PushKey(scancode, false, true, false, useCooldown);
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 22. OnCommand* stubs — handlers defined in main.cpp (Windows) that
+//     are forward-declared in cmds.cpp and used in command tables.
+///////////////////////////////////////////////////////////////////////////
+
+#include "cmdhelpers.h"
+#include "gtia.h"
+
+void OnCommandOpenImage(ATUICommandContext&) {
+	VDStringW path = VDGetLoadFileName('load', nullptr, L"Open Image",
+		L"All supported types\0*.atr;*.xfd;*.dcm;*.pro;*.atx;*.xex;*.obx;*.com;*.exe;*.bin;*.rom;*.car;*.cas;*.wav;*.flac;*.ogg;*.atz;*.gz;*.zip\0"
+		L"Disk images (*.atr,*.xfd,*.dcm,*.pro,*.atx)\0*.atr;*.xfd;*.dcm;*.pro;*.atx\0"
+		L"Programs (*.xex,*.obx,*.com,*.exe)\0*.xex;*.obx;*.com;*.exe\0"
+		L"Cartridges (*.bin,*.rom,*.car)\0*.bin;*.rom;*.car\0"
+		L"Cassette tapes (*.cas,*.wav)\0*.cas;*.wav\0"
+		L"All files (*.*)\0*.*\0",
+		nullptr);
+
+	if (!path.empty())
+		DoLoad(nullptr, path.c_str(), nullptr, -1, kATImageType_None, nullptr, -1, false);
+}
+
+void OnCommandBootImage(ATUICommandContext&) {
+	VDStringW path = VDGetLoadFileName('load', nullptr, L"Boot Image",
+		L"All supported types\0*.atr;*.xfd;*.dcm;*.pro;*.atx;*.xex;*.obx;*.com;*.exe;*.bin;*.rom;*.car;*.cas;*.wav;*.flac;*.ogg;*.atz;*.gz;*.zip\0"
+		L"All files (*.*)\0*.*\0",
+		nullptr);
+
+	if (!path.empty())
+		DoBootWithConfirm(path.c_str(), nullptr, -1);
+}
+
+bool OnTestCommandQuickLoadState() { return true; }
+void OnCommandQuickLoadState() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_QUICK_LOAD_STATE);
+}
+void OnCommandQuickSaveState() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_QUICK_SAVE_STATE);
+}
+
+void OnCommandLoadState() {
+	VDStringW fn = VDGetLoadFileName('save', nullptr, L"Load save state",
+		g_ATUIFileFilter_LoadState, L"atstate2");
+	if (!fn.empty()) {
+		DoLoad(nullptr, fn.c_str(), nullptr, 0, kATImageType_SaveState, nullptr, -1, false);
+	}
+}
+
+void OnCommandSaveState() {
+	VDStringW fn = VDGetSaveFileName('save', nullptr, L"Save state",
+		g_ATUIFileFilter_SaveState, L"atstate2");
+	if (!fn.empty()) {
+		extern ATSimulator g_sim;
+		try {
+			g_sim.SaveState(fn.c_str());
+		} catch (const MyError& e) {
+			ATUIShowError(e);
+		}
+	}
+}
+
+void OnCommandSaveFirmwareIDEMain() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_IDE_MAIN);
+}
+void OnCommandSaveFirmwareIDESDX() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_IDE_SDX);
+}
+void OnCommandSaveFirmwareU1MB() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_U1MB);
+}
+void OnCommandSaveFirmwareRapidusFlash() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_SAVE_FW_RAPIDUS);
+}
+
+void OnCommandExit(ATUICommandContext& ctx) {
+	ATUIExit(ctx.mbQuiet);
+}
+
+void OnCommandAnticVisualizationNext() {
+	extern ATSimulator g_sim;
+	ATAnticEmulator& antic = g_sim.GetAntic();
+	antic.SetAnalysisMode((ATAnticEmulator::AnalysisMode)(((int)antic.GetAnalysisMode() + 1) % 5));
+}
+
+void OnCommandGTIAVisualizationNext() {
+	extern ATSimulator g_sim;
+	ATGTIAEmulator& gtia = g_sim.GetGTIA();
+	auto mode = gtia.GetAnalysisMode();
+	int next = ((int)mode + 1) % ((int)ATGTIAEmulator::kAnalyzeCount);
+	gtia.SetAnalysisMode((ATGTIAEmulator::AnalysisMode)next);
+}
+
+void OnCommandVideoToggleXEP80Output() {
+	ATUIToggleAltOutput("xep80");
+}
+
+void OnCommandVideoToggleOutputAutoswitching() {
+	g_xepViewAutoswitchingEnabled = !g_xepViewAutoswitchingEnabled;
+}
+
+void OnCommandVideoEnhancedTextFontDialog() {
+	// No font picker on Linux
+}
+
+void OnCommandViewVerticalOverscan(ATGTIAEmulator::VerticalOverscanMode mode) {
+	extern ATSimulator g_sim;
+	g_sim.GetGTIA().SetVerticalOverscanMode(mode);
+	ATUIResizeDisplay();
+}
+
+void OnCommandViewTogglePALExtended() {
+	extern ATSimulator g_sim;
+	g_sim.GetGTIA().SetOverscanPALExtended(!g_sim.GetGTIA().IsOverscanPALExtended());
+	ATUIResizeDisplay();
+}
+
+void OnCommandViewToggleVSync() {
+	extern ATSimulator g_sim;
+	ATGTIAEmulator& gtia = g_sim.GetGTIA();
+	gtia.SetVsyncEnabled(!gtia.IsVsyncEnabled());
+}
+
+void OnCommandViewAdjustWindowSize() {
+	// No-op on Linux (wxWidgets handles sizing)
+}
+
+void OnCommandViewResetWindowLayout() {
+	ATLoadDefaultPaneLayout();
+}
+
+void OnCommandPane(uint32 paneId) {
+	if (paneId == kATUIPaneId_Display) {
+		if (ATMainFrame *frame = ATGetMainFrame())
+			frame->FocusDisplayCanvas();
+		return;
+	}
+
+	ATWxDebuggerActivatePane(paneId);
+}
+
+void OnCommandEditCopyFrame() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_EDIT_COPY_FRAME);
+}
+void OnCommandEditCopyFrameTrueAspect() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_EDIT_COPY_FRAME_TRUE_ASPECT);
+}
+void OnCommandEditSaveFrame() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_SAVE_SCREENSHOT);
+}
+void OnCommandEditSaveFrameTrueAspect() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_FILE_SAVE_SCREENSHOT_TRUE_ASPECT);
+}
+void OnCommandEditDeselect() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		const long pos = text->GetInsertionPoint();
+		text->SetSelection(pos, pos);
+		return;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		for (long item = 0; item < list->GetItemCount(); ++item)
+			list->SetItemState(item, 0, wxLIST_STATE_SELECTED);
+	}
+}
+
+void OnCommandEditSelectAll() {
+	if (wxTextCtrl *text = ATGetFocusedTextCtrl()) {
+		text->SelectAll();
+		return;
+	}
+
+	if (wxListCtrl *list = ATGetFocusedListCtrl()) {
+		for (long item = 0; item < list->GetItemCount(); ++item)
+			list->SetItemState(item, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+	}
+}
+
+void OnCommandEditCopyText() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(text);
+}
+
+void OnCommandEditCopyEscapedText() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATEscapeText(text));
+}
+
+void OnCommandEditCopyHex() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATTextToHex(text));
+}
+
+void OnCommandEditCopyUnicode() {
+	const wxString text = ATGetSelectedTextForCopy();
+	if (!text.empty())
+		ATSetClipboardText(ATTextToUnicodeEscapes(text));
+}
+
+void OnCommandEditPasteText() {
+	// Text paste requires complex character-to-scancode conversion.
+	// The wxWidgets menu handler in menubar.cpp handles this directly.
+}
+
+void OnCommandConsoleHoldKeys() {
+	ATUIToggleHoldKeys();
+}
+
+// Device button command handlers
+void OnCommandConsoleBlackBoxDumpScreen() {
+	ATUIActivateDeviceButton(kATDeviceButton_BlackBoxDumpScreen, true);
+}
+
+void OnCommandConsoleBlackBoxMenu() {
+	ATUIActivateDeviceButton(kATDeviceButton_BlackBoxMenu, true);
+}
+
+void OnCommandConsoleIDEPlus2SwitchDisks() {
+	ATUIActivateDeviceButton(kATDeviceButton_IDEPlus2SwitchDisks, true);
+}
+
+void OnCommandConsoleIDEPlus2WriteProtect() {
+	ATUIActivateDeviceButton(kATDeviceButton_IDEPlus2WriteProtect, true);
+}
+
+void OnCommandConsoleIDEPlus2SDX() {
+	ATUIActivateDeviceButton(kATDeviceButton_IDEPlus2SDX, true);
+}
+
+void OnCommandConsoleIndusGTId() {
+	ATUIActivateDeviceButton(kATDeviceButton_IndusGTId, true);
+}
+
+void OnCommandConsoleIndusGTError() {
+	ATUIActivateDeviceButton(kATDeviceButton_IndusGTError, true);
+}
+
+void OnCommandConsoleIndusGTTrack() {
+	ATUIActivateDeviceButton(kATDeviceButton_IndusGTTrack, true);
+}
+
+void OnCommandConsoleIndusGTBootCPM() {
+	ATUIActivateDeviceButton(kATDeviceButton_IndusGTBootCPM, true);
+}
+
+void OnCommandConsoleIndusGTChangeDensity() {
+	ATUIActivateDeviceButton(kATDeviceButton_IndusGTChangeDensity, true);
+}
+
+void OnCommandConsoleHappyToggleFastSlow() {
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton(kATDeviceButton_HappySlow, !p->IsButtonDepressed(kATDeviceButton_HappySlow));
+}
+
+void OnCommandConsoleHappyToggleWriteProtect() {
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton(kATDeviceButton_HappyWPEnable, !p->IsButtonDepressed(kATDeviceButton_HappyWPEnable));
+}
+
+void OnCommandConsoleHappyToggleWriteEnable() {
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton(kATDeviceButton_HappyWPDisable, !p->IsButtonDepressed(kATDeviceButton_HappyWPDisable));
+}
+
+void OnCommandConsoleATR8000Reset() {
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton(kATDeviceButton_ATR8000Reset, true);
+}
+
+void OnCommandConsoleXELCFSwap() {
+	extern ATSimulator g_sim;
+	for (IATDeviceButtons *p : g_sim.GetDeviceManager()->GetInterfaces<IATDeviceButtons>(false, false, false))
+		p->ActivateButton(kATDeviceButton_XELCFSwap, true);
+}
+
+// Disk commands from main.cpp
+void OnCommandDiskDrivesDialog() {
+	ATShowDeviceManagerDialog(nullptr);
+}
+
+void OnCommandDiskToggleSIOPatch() {
+	extern ATSimulator g_sim;
+	g_sim.SetDiskSIOPatchEnabled(!g_sim.IsDiskSIOPatchEnabled());
+}
+
+void OnCommandDiskToggleSIOOverrideDetection() {
+	extern ATSimulator g_sim;
+	g_sim.SetDiskSIOOverrideDetectEnabled(!g_sim.IsDiskSIOOverrideDetectEnabled());
+}
+
+void OnCommandDiskToggleAccurateSectorTiming() {
+	extern ATSimulator g_sim;
+	g_sim.SetDiskAccurateTimingEnabled(!g_sim.IsDiskAccurateTimingEnabled());
+}
+
+void OnCommandDiskToggleDriveSounds() {
+	ATUISetDriveSoundsEnabled(!ATUIGetDriveSoundsEnabled());
+}
+
+void OnCommandDiskToggleSectorCounter() {
+	extern ATSimulator g_sim;
+	g_sim.SetDiskSectorCounterEnabled(!g_sim.IsDiskSectorCounterEnabled());
+}
+
+void OnCommandDiskAttach(int index) {
+	VDStringW fn = VDGetLoadFileName('disk', nullptr, L"Attach Disk Image",
+		g_ATUIFileFilter_DiskWithArchives, L"atr");
+	if (!fn.empty()) {
+		extern ATSimulator g_sim;
+		try {
+			ATDiskInterface& di = g_sim.GetDiskInterface(index);
+			di.LoadDisk(fn.c_str());
+		} catch (const MyError& e) {
+			ATUIShowError(e);
+		}
+	}
+}
+
+void OnCommandDiskDetach(int index) {
+	extern ATSimulator g_sim;
+	if (index < 0) {
+		for (int i = 0; i < 15; ++i) {
+			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+			if (di.IsDiskLoaded())
+				di.UnloadDisk();
+		}
+	} else {
+		ATDiskInterface& di = g_sim.GetDiskInterface(index);
+		if (di.IsDiskLoaded())
+			di.UnloadDisk();
+	}
+}
+
+void OnCommandDiskDetachAll() {
+	OnCommandDiskDetach(-1);
+}
+
+void OnCommandDiskRotate(int delta) {
+	extern ATSimulator g_sim;
+	int activeDrives = 0;
+	for (int i = 14; i >= 0; --i) {
+		if (g_sim.GetDiskDrive(i).IsEnabled() || g_sim.GetDiskInterface(i).GetClientCount() > 1) {
+			activeDrives = i + 1;
+			break;
+		}
+	}
+	if (activeDrives > 0)
+		g_sim.RotateDrives(activeDrives, delta);
+}
+
+// Input commands from main.cpp
+void OnCommandInputCaptureMouse() {
+	ATLinuxToggleMouseCapture();
+}
+void OnCommandInputToggleAutoCaptureMouse() {
+	ATUISetMouseAutoCapture(!ATUIGetMouseAutoCapture());
+}
+
+void OnCommandInputInputMappingsDialog() {
+	ATShowInputSetupDialog(nullptr);
+}
+
+void OnCommandInputInputSetupDialog() {
+	ATShowInputSetupDialog(nullptr);
+}
+
+void OnCommandInputKeyboardDialog() {
+	ATShowKeyboardSettingsDialog(nullptr);
+}
+
+void OnCommandInputLightPenDialog() {
+	// No-op on Linux
+}
+
+void OnCommandInputCycleQuickMaps() {
+	extern ATSimulator g_sim;
+	auto *pIM = g_sim.GetInputManager();
+	if (pIM) {
+		ATInputMap *pMap = pIM->CycleQuickMaps();
+		auto *pUIR = g_sim.GetUIRenderer();
+		if (pUIR) {
+			if (pMap)
+				pUIR->SetStatusMessage((VDStringW(L"Quick map: ") + pMap->GetName()).c_str());
+			else
+				pUIR->SetStatusMessage(L"Quick maps disabled");
+		}
+	}
+}
+
+// Recording commands — simplified stubs
+void OnCommandRecordStop() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_STOP_RECORDING);
+}
+void OnCommandRecordRawAudio() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_AUDIO_PCM);
+}
+void OnCommandRecordAudio() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_AUDIO_WAV);
+}
+void OnCommandRecordVideo() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_VIDEO);
+}
+void OnCommandRecordPause() {
+	if (ATIsVideoRecording() && !ATIsVideoRecordingPaused())
+		ATPauseVideoRecording();
+}
+void OnCommandRecordResume() {
+	if (ATIsVideoRecording() && ATIsVideoRecordingPaused())
+		ATResumeVideoRecording();
+}
+void OnCommandRecordPauseResume() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_VIDEO_PAUSE_RESUME);
+}
+void OnCommandRecordSapTypeR() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_SAP);
+}
+void OnCommandRecordVgm() {
+	if (ATMainFrame *frame = ATGetMainFrame())
+		frame->ExecuteMenuCommand(ID_TOOLS_RECORD_VGM);
+}
+
+// Cheat commands
+void OnCommandCheatTogglePMCollisions() {
+	extern ATSimulator g_sim;
+	g_sim.GetGTIA().SetPMCollisionsEnabled(!g_sim.GetGTIA().ArePMCollisionsEnabled());
+}
+
+void OnCommandCheatTogglePFCollisions() {
+	extern ATSimulator g_sim;
+	g_sim.GetGTIA().SetPFCollisionsEnabled(!g_sim.GetGTIA().ArePFCollisionsEnabled());
+}
+
+void OnCommandCheatCheatDialog() {
+	ATShowCheaterDialog(nullptr);
+}
+
+// Tools commands
+void OnCommandToolsDiskExplorer() {
+	ATShowDiskExplorerDialog(nullptr);
+}
+
+void OnCommandToolsConvertSapToExe() {
+	// Simplified: no-op stub
+}
+
+void OnCommandToolsExportROMSet() {
+	// No-op on Linux
+}
+
+void OnCommandToolsKeyboardShortcutsDialog() {
+	ATShowKeyboardSettingsDialog(nullptr);
+}
+
+void OnCommandToolsOptionsDialog() {
+	// No separate options dialog on Linux
+}
+
+void OnCommandToolsSetupWizard() {
+	ATShowSetupWizard(nullptr);
+}
+
+// Help commands
+void OnCommandHelpContents() {
+	ATShowHelp(nullptr, nullptr);
+}
+
+void OnCommandHelpAbout() {
+	ATUIShowDialogAbout(nullptr);
+}
+
+void OnCommandHelpChangeLog() {
+	ATShowChangeLog(nullptr);
+}
+
+void OnCommandHelpCmdLine() {
+	ATUIShowDialogCmdLineHelp(nullptr);
+}
+
+void OnCommandHelpOnline() {
+	ATLaunchURL("https://www.virtualdub.org/altirra.html");
+}
+
+void OnCommandHelpCheckForUpdates() {
+	ATCheckForUpdates(nullptr);
+}
+
+// Window commands (no-ops, cmdwindow.cpp is excluded)
+void OnCommandWindowClose() {
+	ATWxDebuggerCloseActivePane();
+}
+void OnCommandWindowUndock() {
+	ATWxDebuggerToggleFloatActivePane();
+}
+void OnCommandWindowPrevPane() {
+	ATWxDebuggerCyclePane(false);
+}
+void OnCommandWindowNextPane() {
+	ATWxDebuggerCyclePane(true);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// 23. cmddebug.cpp dependencies
+///////////////////////////////////////////////////////////////////////////
+
+// ATUIGetDebugSrcMode is defined in cmddebug.cpp
+// ATUIGetActivePaneId is defined in console_wx.cpp
+
+///////////////////////////////////////////////////////////////////////////
+// 24. Miscellaneous missing symbols
+///////////////////////////////////////////////////////////////////////////
+
+// Calibration screen — static ShowDialog only (no-op on Linux).
+// Only include the header for the class declaration; don't provide
+// constructor/destructor to avoid triggering vtable emission which
+// would require the full ATUI widget hierarchy.
+#include "uicalibrationscreen.h"
+void ATUICalibrationScreen::ShowDialog() {}
+
+// Cartridge discard confirm — not in our uiconfirm stubs above
+bool ATUIConfirmDiscardCartridge(VDGUIHandle) {
+	extern ATSimulator g_sim;
+	if (!g_sim.IsStorageDirty(kATStorageId_Cartridge))
+		return true;
+	return ATUIConfirm(nullptr, nullptr,
+		L"Modified cartridge image has not been saved. Discard it anyway?",
+		L"Altirra Warning");
+}
+
+// ATUISwitchKernel single-argument overload (called by cmdsystem.cpp)
+void ATUISwitchKernel(uint64 id) {
+	ATUISwitchKernel(nullptr, id);
+}
+
+// Additional toggles used by cmd*.cpp
+void OnCommandSystemProgramLoadModeDefault() {
+	extern ATSimulator g_sim;
+	g_sim.SetHLEProgramLoadMode(kATHLEProgramLoadMode_Default);
+}
+
+void OnCommandToggleAutoReset() {
+	uint32 flags = kATUIResetFlag_CartridgeChange | kATUIResetFlag_BasicChange | kATUIResetFlag_VideoStandardChange;
+	ATUIModifyResetFlag(flags, (s_uiResetFlags & flags) != flags);
+}
+
+void OnCommandToggleBootUnload() {
+	uint32 mask = ATUIGetBootUnloadStorageMask();
+	uint32 all = kATStorageTypeMask_Cartridge | kATStorageTypeMask_Disk | kATStorageTypeMask_Tape;
+	ATUISetBootUnloadStorageMask(mask ^ all);
 }

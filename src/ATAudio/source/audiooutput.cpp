@@ -252,6 +252,7 @@ public:
 	void UnblockInternalAudio() override;
 
 	void SetAudioTap(IATAudioTap *tap) override;
+	void SetScopeTap(ScopeTapFn fn, void *ctx) override;
 
 	ATUIAudioStatus GetAudioStatus() const override {
 		return mAudioStatus;
@@ -372,6 +373,8 @@ protected:
 	vdautoptr<IVDAudioOutput>	mpAudioOut;
 	vdautoptr<vdfastvector<IATInternalAudioTap *>> mpInternalAudioTaps = nullptr;
 	IATAudioTap *mpAudioTap = nullptr;
+	ScopeTapFn mpScopeTapFn = nullptr;
+	void *mpScopeTapCtx = nullptr;
 	vdautoptr<ATAudioSamplePool> mpSamplePool;		// must be before players
 	vdautoptr<ATAudioSamplePlayer> mpSamplePlayer;
 	vdautoptr<ATAudioSamplePlayer> mpEdgeSamplePlayer;
@@ -506,6 +509,11 @@ void ATAudioOutput::SetAudioTap(IATAudioTap *tap) {
 	mpAudioTap = tap;
 
 	RecomputeResamplingRate();
+}
+
+void ATAudioOutput::SetScopeTap(ScopeTapFn fn, void *ctx) {
+	mpScopeTapFn = fn;
+	mpScopeTapCtx = ctx;
 }
 
 void ATAudioOutput::AddSyncAudioSource(IATSyncAudioSource *src) {
@@ -815,6 +823,13 @@ void ATAudioOutput::InternalWriteAudio(
 
 		mPrevDCLevels[0] = dcLevels[0];
 		mPrevDCLevels[1] = dcLevels[1];
+
+		// Send post-mix post-filter samples to scope tap (independent of recording tap).
+		if (mpScopeTapFn)
+			mpScopeTapFn(mpScopeTapCtx,
+				&mSourceBuffer[0][mBufferLevel + kFilterOffset],
+				mbFilterStereo ? &mSourceBuffer[1][mBufferLevel + kFilterOffset] : nullptr,
+				count);
 	}
 
 	// if we're filtering stereo and getting mono, check if it's safe to switch over

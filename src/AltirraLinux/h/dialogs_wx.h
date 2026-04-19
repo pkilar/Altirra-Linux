@@ -1,0 +1,83 @@
+//	Altirra - Atari 800/800XL/5200 emulator
+//	Copyright (C) 2024 Avery Lee
+//	Linux port contributions
+//
+//	This program is free software; you can redistribute it and/or modify
+//	it under the terms of the GNU General Public License as published by
+//	the Free Software Foundation; either version 2 of the License, or
+//	(at your option) any later version.
+
+#pragma once
+
+#include <wx/dialog.h>
+
+class wxCheckBox;
+class wxChoice;
+class wxRadioBox;
+class wxSlider;
+class wxSpinCtrl;
+class wxStaticText;
+
+// Show configuration dialogs (modal). Each reads current state on open
+// and applies changes on OK.
+void ATShowSystemConfigDialog(wxWindow *parent);
+void ATShowCPUOptionsDialog(wxWindow *parent);
+void ATShowBootOptionsDialog(wxWindow *parent);
+void ATShowKeyboardSettingsDialog(wxWindow *parent);
+void ATShowAudioOptionsDialog(wxWindow *parent);
+void ATShowVideoSettingsDialog(wxWindow *parent);
+
+// Show manager / tool dialogs (modal).
+void ATShowFirmwareManagerDialog(wxWindow *parent);
+void ATShowFirmwareManagerDialogModal(wxWindow *parent);
+void ATShowDeviceManagerDialog(wxWindow *parent);
+void ATShowCartridgeBrowserDialog(wxWindow *parent);
+void ATShowCassetteControlDialog(wxWindow *parent);
+
+// Show Phase 8 dialogs (modal).
+void ATShowProfileManagerDialog(wxWindow *parent);
+void ATShowVideoRecordDialog(wxWindow *parent);
+void ATShowCompatBrowserDialog(wxWindow *parent);
+void ATShowCheaterDialog(wxWindow *parent);
+
+// Input setup dialog (modal).
+void ATShowInputSetupDialog(wxWindow *parent);
+
+// Audio monitor/scope windows (non-modal, toggled).
+void ATShowAudioMonitorWindow(wxWindow *parent);
+void ATShowAudioScopeWindow(wxWindow *parent);
+
+// Tape editor window (non-modal, toggled).
+void ATShowTapeEditorDialog(wxWindow *parent);
+void ATCloseTapeEditorDialog();
+
+// Disk explorer dialog (modal).
+void ATShowDiskExplorerDialog(wxWindow *parent);
+class IATDiskImage;
+void ATShowDiskExplorerForImage(wxWindow *parent, IATDiskImage *image, const wchar_t *title, bool readOnly);
+
+// On-screen keyboard (non-modal, toggled).
+void ATShowOnScreenKeyboard(wxWindow *parent);
+void ATCloseOnScreenKeyboard();
+
+// Color/artifacting adjustment dialog (modal).
+void ATShowColorSettingsDialog(wxWindow *parent);
+
+// Advanced configuration editor (modal).
+void ATShowAdvancedConfigDialog(wxWindow *parent);
+
+// Update checker (queries GitHub releases API).
+void ATCheckForUpdates(wxWindow *parent);
+
+// Close all non-modal windows before shutdown.
+void ATCloseAllNonModalWindows();
+
+// Setup wizard (returns true if completed, false if cancelled).
+bool ATShowSetupWizard(wxWindow *parent);
+
+// Video recording control (used by menu stop command).
+void ATStopVideoRecording();
+bool ATIsVideoRecording();
+bool ATIsVideoRecordingPaused();
+void ATPauseVideoRecording();
+void ATResumeVideoRecording();

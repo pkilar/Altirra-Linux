@@ -8,7 +8,8 @@
 
 class ATFrameWindow {};
 
-inline ATFrameWindow *ATUIGetMainWindow() { return nullptr; }
+// ATUIGetMainWindow() is defined in stubs_linux.cpp returning VDGUIHandle (void*),
+// matching the declaration in uiaccessors.h. Do not redeclare here.
 
 inline void ATActivateUIPane(uint32 id, bool giveFocus, bool visible = true, uint32 relid = 0, int reldock = 0) {}
 

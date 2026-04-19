@@ -22,6 +22,10 @@
 #include <SDL3/SDL.h>
 #include <cstring>
 #include <algorithm>
+#include <thread>
+#include <atomic>
+#include <chrono>
+#include <memory>
 
 // Compiler barrier: prevents the compiler from reordering memory operations
 // across this point. On x86/x64 this is sufficient for the SPSC ring buffer
@@ -130,18 +134,74 @@ bool VDAudioOutputSDL3::Init(uint32 bufsize, uint32 bufcount, const tWAVEFORMATE
 	mTotalRead = 0;
 	memset(mRingBuffer.data(), 0, ringSize);
 
-	// Open SDL3 audio device stream
+	// Open SDL3 audio device stream.
+	// SDL3's PipeWire backend can deadlock if the PipeWire daemon is in a
+	// bad state (e.g. after a driver upgrade without restarting the session).
+	// Run the blocking call on a helper thread with a timeout so the
+	// application can still start in silent mode instead of hanging forever.
 	SDL_AudioSpec spec;
 	spec.format = SDL_AUDIO_S16;
 	spec.channels = fmt->nChannels;
 	spec.freq = mMixingRate;
 
-	mpStream = SDL_OpenAudioDeviceStream(
-		SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
-		&spec,
-		StreamCallback,
-		this
-	);
+	{
+		// Shared state must outlive Init()'s stack frame: on timeout we
+		// detach the worker, so the worker may still be blocked inside
+		// SDL_OpenAudioDeviceStream after Init() has returned. Capturing
+		// stack-local atomics by reference and then returning would leave
+		// the worker writing into dead stack memory.
+		struct OpenState {
+			std::atomic<SDL_AudioStream *> result{nullptr};
+			std::atomic<bool> done{false};
+			std::atomic<bool> abandoned{false};
+		};
+
+		auto state = std::make_shared<OpenState>();
+
+		// Capture state (shared_ptr) and spec by value so the worker is
+		// self-contained. `this` is captured by value as well — it is
+		// passed to SDL only as opaque userdata and is not dereferenced
+		// here; a late-arriving stream is destroyed before any callback
+		// can fire (SDL3 streams start paused).
+		std::thread opener([state, spec, this]() mutable {
+			SDL_AudioStream *s = SDL_OpenAudioDeviceStream(
+				SDL_AUDIO_DEVICE_DEFAULT_PLAYBACK,
+				&spec,
+				StreamCallback,
+				this
+			);
+			state->result.store(s, std::memory_order_release);
+			state->done.store(true, std::memory_order_release);
+
+			// If Init() already gave up on us, dispose of the late-arriving
+			// stream to avoid leaking it and to ensure its callback (which
+			// holds a potentially dangling `this`) can never fire.
+			if (s && state->abandoned.load(std::memory_order_acquire))
+				SDL_DestroyAudioStream(s);
+		});
+
+		static constexpr auto kAudioOpenTimeout = std::chrono::seconds(5);
+		auto deadline = std::chrono::steady_clock::now() + kAudioOpenTimeout;
+
+		while (!state->done.load(std::memory_order_acquire)) {
+			if (std::chrono::steady_clock::now() >= deadline) {
+				// The open call is stuck (likely a PipeWire deadlock).
+				// Mark the operation abandoned before detaching so the
+				// worker will destroy any stream it eventually produces.
+				// We cannot cancel SDL_OpenAudioDeviceStream directly.
+				state->abandoned.store(true, std::memory_order_release);
+				opener.detach();
+				fprintf(stderr, "Warning: SDL3 audio device open timed out (PipeWire may need restart).\n"
+					"  Try: systemctl --user restart pipewire pipewire-pulse\n"
+					"  Continuing without audio.\n");
+				return false;
+			}
+			std::this_thread::sleep_for(std::chrono::milliseconds(50));
+		}
+
+		opener.join();
+		mpStream = state->result.load(std::memory_order_acquire);
+	}
 
 	if (!mpStream)
 		return false;

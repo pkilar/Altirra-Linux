@@ -1,0 +1,134 @@
+//	Altirra - Atari 800/800XL/5200 emulator
+//	Copyright (C) 2024 Avery Lee
+//	Linux port contributions
+//
+//	This program is free software; you can redistribute it and/or modify
+//	it under the terms of the GNU General Public License as published by
+//	the Free Software Foundation; either version 2 of the License, or
+//	(at your option) any later version.
+//
+//	This program is distributed in the hope that it will be useful,
+//	but WITHOUT ANY WARRANTY; without even the implied warranty of
+//	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//	GNU General Public License for more details.
+//
+//	You should have received a copy of the GNU General Public License along
+//	with this program. If not, see <http://www.gnu.org/licenses/>.
+
+#pragma once
+
+#include <wx/frame.h>
+#include <wx/timer.h>
+#include <vd2/system/vdtypes.h>
+#include <input_wx.h>
+#include <vector>
+
+class ATDisplayCanvas;
+class ATDisplayWx;
+class ATStatusBar;
+class wxPopupTransientWindow;
+class wxStaticText;
+
+class ATMainFrame : public wxFrame {
+public:
+	ATMainFrame();
+	~ATMainFrame();
+
+	ATDisplayWx *GetDisplay() const { return mpDisplay; }
+	bool IsMouseCaptured() const { return mMouseCaptured; }
+
+	// Start the emulation idle loop
+	void StartEmulation();
+
+	// Stop emulation and disconnect from simulator (safe for shutdown)
+	void StopEmulation();
+
+	// Initialize input system (called after input manager is ready)
+	void InitInput();
+
+	// UI helpers used by the Linux frontend glue.
+	void ShowToastMessage(const wxString& message);
+	void SetMouseCaptured(bool captured);
+	void ToggleMouseCapture();
+	void ExecuteMenuCommand(int id);
+	void FocusDisplayCanvas();
+
+private:
+	void OnClose(wxCloseEvent& event);
+	void OnIdle(wxIdleEvent& event);
+	void OnActivate(wxActivateEvent& event);
+
+	// Keyboard event handlers (bound to canvas)
+	void OnKeyDown(wxKeyEvent& event);
+	void OnKeyUp(wxKeyEvent& event);
+
+	// Mouse event handlers (bound to canvas)
+	void OnMouseMotion(wxMouseEvent& event);
+	void OnMouseButton(wxMouseEvent& event);
+	void OnMouseWheel(wxMouseEvent& event);
+
+	// Gamepad polling timer
+	void OnGamepadTimer(wxTimerEvent& event);
+
+	// Atari keyboard processing pipeline
+	void ProcessAtariKeyDown(int wxKeyCode, const wxKeyEvent& event);
+	void ProcessAtariKeyUp(int wxKeyCode);
+	static bool IsExtendedWxKey(int wxKeyCode);
+	static void HandleSpecialKey(uint32 scanCode, bool state);
+
+	// Menu bar (implemented in menubar.cpp)
+	wxMenuBar *CreateMenuBar();
+	void OnMenuCommand(wxCommandEvent& event);
+	void OnMenuUpdateUI(wxUpdateUIEvent& event);
+	void OnMenuOpen(wxMenuEvent& event);
+
+	void UpdateWindowTitle();
+	void RenderAndPresent();
+	void UpdateToastPopupPosition();
+	void DismissToast();
+	void OnToastTimer(wxTimerEvent& event);
+
+	ATDisplayCanvas *mpCanvas = nullptr;
+	ATDisplayWx *mpDisplay = nullptr;
+	ATStatusBar *mpStatusBar = nullptr;
+	wxMenu *mpMRUMenu = nullptr;
+	wxMenu *mpKernelMenu = nullptr;
+	wxMenu *mpProfilesMenu = nullptr;
+	wxMenu *mpConsoleSwitchesMenu = nullptr;
+	wxMenu *mpDiskDrivesMenu = nullptr;
+	ATInputWx mInputWx;
+
+	// Gamepad polling timer (4ms = ~250Hz)
+	wxTimer mGamepadTimer;
+
+	// Track active special keys for proper release on key-up
+	struct ActiveSpecialKey {
+		uint32 vk;
+		uint32 scanCode;
+	};
+	std::vector<ActiveSpecialKey> mActiveSpecialKeys;
+
+	// Mouse tracking for relative motion
+	int mLastMouseX = -1;
+	int mLastMouseY = -1;
+	bool mIgnoreNextWarpMouse = false;
+	bool mMouseCaptured = false;
+
+	// Frame pacing state
+	sint64 mFrameError = 0;
+	uint32 mFrameTimeErrorAccum = 0;
+	uint64 mLastFrameTime = 0;
+	bool mEmulationRunning = false;
+	bool mPausedByFocusLoss = false;
+
+	wxPopupTransientWindow *mpToastPopup = nullptr;
+	wxStaticText *mpToastLabel = nullptr;
+	wxTimer mToastTimer;
+
+	wxDECLARE_EVENT_TABLE();
+};
+
+ATMainFrame *ATGetMainFrame();
+void ATLinuxToggleMouseCapture();
+void ATLinuxSetMouseCaptured(bool captured);
+bool ATLinuxIsMouseCaptured();

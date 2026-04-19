@@ -1,0 +1,929 @@
+//	Altirra - Atari 800/800XL/5200 emulator
+//	Copyright (C) 2024 Avery Lee
+//	Linux port contributions
+//
+//	This program is free software; you can redistribute it and/or modify
+//	it under the terms of the GNU General Public License as published by
+//	the Free Software Foundation; either version 2 of the License, or
+//	(at your option) any later version.
+//
+//	This program is distributed in the hope that it will be useful,
+//	but WITHOUT ANY WARRANTY; without even the implied warranty of
+//	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//	GNU General Public License for more details.
+//
+//	You should have received a copy of the GNU General Public License along
+//	with this program. If not, see <http://www.gnu.org/licenses/>.
+
+#include <stdafx.h>
+#include "mainframe.h"
+#include "menu_ids.h"
+#include <display_wx.h>
+#include <statusbar_wx.h>
+
+#include <wx/dnd.h>
+#include <wx/popupwin.h>
+#include <wx/sizer.h>
+#include <wx/msgdlg.h>
+#include <wx/panel.h>
+#include <wx/stattext.h>
+#include <time.h>
+
+#include <vd2/system/filesys.h>
+#include <vd2/system/registry.h>
+#include <vd2/system/time.h>
+#include <vd2/system/text.h>
+#include <at/atcore/device.h>
+#include <at/atcore/devicevideo.h>
+#include <at/atcore/media.h>
+#include <at/atcore/profile.h>
+
+#include "simulator.h"
+#include "cartridge.h"
+#include "cassette.h"
+#include "debugger.h"
+#include "disk.h"
+#include "inputmanager.h"
+#include "joystick.h"
+#include "uiaccessors.h"
+#include "uicommondialogs.h"
+#include "uienhancedtext.h"
+#include "uikeyboard.h"
+#include "uiqueue.h"
+
+#include <SDL3/SDL.h>
+
+// From dialogs_wx.h
+void ATCloseAllNonModalWindows();
+
+// From main_wx.cpp
+void ATLinuxClearDisplay();
+
+// External symbols
+extern ATSimulator g_sim;
+
+extern sint64 g_frameTicks;
+extern uint32 g_frameSubTicks;
+extern sint64 g_frameErrorBound;
+extern sint64 g_frameTimeout;
+
+extern ATUIKeyboardOptions g_kbdOpts;
+
+IATUIEnhancedTextEngine *ATUIGetEnhancedTextEngine();
+
+// Toast notification (defined in main_wx.cpp)
+void ATImGuiShowToast(const char *message);
+
+// MRU list (defined in menubar.cpp)
+void MRUAdd(const wchar_t *path);
+
+namespace {
+
+ATMainFrame *g_pMainFrame = nullptr;
+constexpr int kToastTimerId = wxID_HIGHEST + 100;
+
+}
+
+ATMainFrame *ATGetMainFrame() {
+	return g_pMainFrame;
+}
+
+void ATLinuxToggleMouseCapture() {
+	if (g_pMainFrame)
+		g_pMainFrame->ToggleMouseCapture();
+}
+
+void ATLinuxSetMouseCaptured(bool captured) {
+	if (g_pMainFrame)
+		g_pMainFrame->SetMouseCaptured(captured);
+}
+
+bool ATLinuxIsMouseCaptured() {
+	return g_pMainFrame && g_pMainFrame->IsMouseCaptured();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Drag-and-drop file loading
+///////////////////////////////////////////////////////////////////////////
+
+class ATFileDropTarget : public wxFileDropTarget {
+public:
+	bool OnDropFiles(wxCoord, wxCoord, const wxArrayString& filenames) override {
+		if (filenames.empty())
+			return false;
+
+		// Load the first dropped file
+		const char *utf8 = filenames[0].utf8_str().data();
+		VDStringW path = VDTextU8ToW(VDStringA(utf8));
+
+		try {
+			g_sim.Load(path.c_str(), kATMediaWriteMode_RO, nullptr);
+			MRUAdd(path.c_str());
+
+			const char *fname = strrchr(utf8, '/');
+			char msg[256];
+			snprintf(msg, sizeof(msg), "Loaded: %s", fname ? fname + 1 : utf8);
+			ATImGuiShowToast(msg);
+		} catch (const std::exception& e) {
+			char msg[512];
+			snprintf(msg, sizeof(msg), "Drop failed: %s", e.what());
+			ATImGuiShowToast(msg);
+		} catch (...) {
+			ATImGuiShowToast("Failed to load dropped file");
+		}
+
+		return true;
+	}
+};
+
+///////////////////////////////////////////////////////////////////////////
+
+wxBEGIN_EVENT_TABLE(ATMainFrame, wxFrame)
+	EVT_CLOSE(ATMainFrame::OnClose)
+	EVT_IDLE(ATMainFrame::OnIdle)
+	EVT_ACTIVATE(ATMainFrame::OnActivate)
+	EVT_TIMER(ID_GAMEPAD_TIMER_ID, ATMainFrame::OnGamepadTimer)
+wxEND_EVENT_TABLE()
+
+ATMainFrame::ATMainFrame()
+	: wxFrame(nullptr, wxID_ANY, "Altirra (Linux)")
+	, mGamepadTimer(this, ID_GAMEPAD_TIMER_ID)
+	, mToastTimer(this, kToastTimerId)
+{
+	g_pMainFrame = this;
+
+	// Restore saved window geometry, or use defaults (2x NTSC resolution)
+	int winW = 912;
+	int winH = 524;
+	int winX = -1;
+	int winY = -1;
+	bool winMaximized = false;
+
+	VDRegistryAppKey key("Window", false);
+	if (key.getInt("Width", 0) > 0) {
+		winW = key.getInt("Width", 912);
+		winH = key.getInt("Height", 524);
+		winX = key.getInt("X", -1);
+		winY = key.getInt("Y", -1);
+		winMaximized = key.getBool("Maximized", false);
+	}
+
+	SetClientSize(winW, winH);
+
+	if (winX >= 0 && winY >= 0)
+		SetPosition(wxPoint(winX, winY));
+	else
+		Centre();
+
+	if (winMaximized)
+		Maximize(true);
+
+	// Create the GL display canvas filling the client area
+	mpCanvas = new ATDisplayCanvas(this);
+	mpCanvas->InitGL();
+	mpDisplay = new ATDisplayWx(mpCanvas);
+	mpCanvas->SetDisplay(mpDisplay);
+
+	// Bind keyboard events on the canvas (canvas has focus, frame handles events)
+	mpCanvas->Bind(wxEVT_KEY_DOWN, &ATMainFrame::OnKeyDown, this);
+	mpCanvas->Bind(wxEVT_KEY_UP, &ATMainFrame::OnKeyUp, this);
+
+	// Bind mouse events on the canvas
+	mpCanvas->Bind(wxEVT_MOTION, &ATMainFrame::OnMouseMotion, this);
+	mpCanvas->Bind(wxEVT_LEFT_DOWN, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_LEFT_UP, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_MIDDLE_DOWN, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_MIDDLE_UP, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_RIGHT_DOWN, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_RIGHT_UP, &ATMainFrame::OnMouseButton, this);
+	mpCanvas->Bind(wxEVT_MOUSEWHEEL, &ATMainFrame::OnMouseWheel, this);
+
+	// Build and attach the menu bar
+	SetMenuBar(CreateMenuBar());
+
+	// Bind menu events for our ID range (1000-2100)
+	Bind(wxEVT_MENU, &ATMainFrame::OnMenuCommand, this, ID_SYSTEM_WARM_RESET, ID_GAMEPAD_TIMER_ID);
+	Bind(wxEVT_UPDATE_UI, &ATMainFrame::OnMenuUpdateUI, this, ID_SYSTEM_WARM_RESET, ID_GAMEPAD_TIMER_ID);
+
+	// Rebuild MRU submenu when any menu bar opens
+	Bind(wxEVT_MENU_OPEN, &ATMainFrame::OnMenuOpen, this);
+
+	// Create status bar
+	mpStatusBar = new ATStatusBar(this);
+	mpStatusBar->SetDisplay(mpDisplay);
+	mpStatusBar->SetVisible(ATUIGetShowStatusBar());
+
+	// Use a sizer so the canvas fills the frame on resize
+	wxBoxSizer *sizer = new wxBoxSizer(wxVERTICAL);
+	sizer->Add(mpCanvas, 1, wxEXPAND);
+	sizer->Add(mpStatusBar, 0, wxEXPAND);
+	SetSizer(sizer);
+
+	// Enable drag-and-drop file loading
+	SetDropTarget(new ATFileDropTarget());
+
+	// Give the canvas initial keyboard focus
+	mpCanvas->SetFocus();
+
+	Bind(wxEVT_TIMER, &ATMainFrame::OnToastTimer, this, kToastTimerId);
+	Bind(wxEVT_MOVE, [this](wxMoveEvent& event) {
+		UpdateToastPopupPosition();
+		event.Skip();
+	});
+	Bind(wxEVT_SIZE, [this](wxSizeEvent& event) {
+		UpdateToastPopupPosition();
+		event.Skip();
+	});
+}
+
+ATMainFrame::~ATMainFrame() {
+	if (g_pMainFrame == this)
+		g_pMainFrame = nullptr;
+
+	mToastTimer.Stop();
+	if (mpToastPopup) {
+		mpToastPopup->Destroy();
+		mpToastPopup = nullptr;
+		mpToastLabel = nullptr;
+	}
+
+	mEmulationRunning = false;
+	mGamepadTimer.Stop();
+	mInputWx.Shutdown();
+	if (mpCanvas)
+		mpCanvas->SetDisplay(nullptr);
+	delete mpDisplay;
+	mpDisplay = nullptr;
+}
+
+void ATMainFrame::InitInput() {
+	mInputWx.Init(g_sim.GetInputManager());
+
+	// Start gamepad polling timer (4ms = ~250Hz)
+	mGamepadTimer.Start(4);
+}
+
+void ATMainFrame::StartEmulation() {
+	mLastFrameTime = VDGetPreciseTick();
+	mFrameError = 0;
+	mFrameTimeErrorAccum = 0;
+	mEmulationRunning = true;
+
+	// Kick the idle loop
+	wxWakeUpIdle();
+}
+
+void ATMainFrame::StopEmulation() {
+	mEmulationRunning = false;
+	mGamepadTimer.Stop();
+
+	// Disconnect input from the simulator's input manager while it's
+	// still alive.  The deferred destructor runs after g_sim.Shutdown(),
+	// so we must unregister here.  ATInputWx::Shutdown() is idempotent.
+	mInputWx.Shutdown();
+}
+
+void ATMainFrame::OnClose(wxCloseEvent& event) {
+	SetMouseCaptured(false);
+
+	// Check for dirty disks before closing
+	if (event.CanVeto()) {
+		bool hasDirty = false;
+		wxString dirtyList;
+		for (int i = 0; i < 15; ++i) {
+			ATDiskInterface& di = g_sim.GetDiskInterface(i);
+			if (di.IsDiskLoaded() && di.IsDirty()) {
+				hasDirty = true;
+				const wchar_t *filename = VDFileSplitPath(di.GetPath());
+				VDStringA u8 = VDTextWToU8(VDStringW(filename));
+				dirtyList += wxString::Format("  D%d: %s\n", i + 1, u8.c_str());
+			}
+		}
+
+		if (hasDirty) {
+			wxString msg = "The following disks have unsaved changes:\n\n" + dirtyList +
+				"\nDo you want to save before quitting?";
+			int result = wxMessageBox(msg, "Quit Altirra?",
+				wxYES_NO | wxCANCEL | wxICON_QUESTION, this);
+
+			if (result == wxCANCEL) {
+				event.Veto();
+				return;
+			}
+
+			if (result == wxYES) {
+				for (int i = 0; i < 15; ++i) {
+					ATDiskInterface& di = g_sim.GetDiskInterface(i);
+					if (di.IsDiskLoaded() && di.IsDirty()) {
+						try { di.SaveDisk(); } catch (...) {}
+					}
+				}
+			}
+		}
+	}
+
+	// Stop emulation and disconnect from the simulator while it's still
+	// alive.  After Destroy() the frame may be deleted during idle
+	// processing (before OnExit runs), so all simulator access must
+	// happen here.
+	StopEmulation();
+
+	// Disconnect GTIA video output so nothing renders after this point
+	g_sim.GetGTIA().SetVideoOutput(nullptr);
+	ATLinuxClearDisplay();
+
+	// Close non-modal tool windows so the event loop can exit
+	ATCloseAllNonModalWindows();
+
+	// Save window geometry before shutdown
+	VDRegistryAppKey wkey("Window", true);
+	wkey.setBool("Maximized", IsMaximized());
+
+	if (!IsMaximized() && !IsFullScreen()) {
+		wxPoint pos = GetPosition();
+		wxSize size = GetClientSize();
+		wkey.setInt("X", pos.x);
+		wkey.setInt("Y", pos.y);
+		wkey.setInt("Width", size.GetWidth());
+		wkey.setInt("Height", size.GetHeight());
+	}
+
+	Destroy();
+}
+
+void ATMainFrame::OnActivate(wxActivateEvent& event) {
+	event.Skip();
+
+	if (!event.GetActive() && mMouseCaptured) {
+		SetMouseCaptured(false);
+		ShowToastMessage("Mouse released");
+	}
+
+	if (!ATUIGetPauseWhenInactive())
+		return;
+
+	if (event.GetActive()) {
+		// Regained focus — resume if we paused it
+		if (mPausedByFocusLoss) {
+			mPausedByFocusLoss = false;
+			if (g_sim.IsPaused())
+				g_sim.Resume();
+		}
+	} else {
+		// Lost focus — pause if running
+		if (!g_sim.IsPaused()) {
+			mPausedByFocusLoss = true;
+			g_sim.Pause();
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Keyboard input handling
+///////////////////////////////////////////////////////////////////////////
+
+void ATMainFrame::OnKeyDown(wxKeyEvent& event) {
+	int keyCode = event.GetKeyCode();
+
+	if (mMouseCaptured && event.ControlDown() && event.AltDown() && (keyCode == 'M' || keyCode == 'm')) {
+		SetMouseCaptured(false);
+		ShowToastMessage("Mouse released");
+		return;
+	}
+
+	// Send to input mapping system (for joystick/paddle emulation via keyboard)
+	mInputWx.OnKeyDown(keyCode);
+
+	// Send to Atari keyboard processing (for POKEY/console key emulation)
+	ProcessAtariKeyDown(keyCode, event);
+}
+
+void ATMainFrame::OnKeyUp(wxKeyEvent& event) {
+	int keyCode = event.GetKeyCode();
+
+	// Send to input mapping system
+	mInputWx.OnKeyUp(keyCode);
+
+	// Release any tracked special keys
+	ProcessAtariKeyUp(keyCode);
+}
+
+bool ATMainFrame::IsExtendedWxKey(int wxKeyCode) {
+	switch (wxKeyCode) {
+		case WXK_INSERT:
+		case WXK_DELETE:
+		case WXK_HOME:
+		case WXK_END:
+		case WXK_PAGEUP:
+		case WXK_PAGEDOWN:
+		case WXK_LEFT:
+		case WXK_RIGHT:
+		case WXK_UP:
+		case WXK_DOWN:
+		case WXK_NUMPAD_ENTER:
+			return true;
+		default:
+			return false;
+	}
+}
+
+void ATMainFrame::HandleSpecialKey(uint32 scanCode, bool state) {
+	switch (scanCode) {
+		case kATUIKeyScanCode_Start:
+			g_sim.GetGTIA().SetConsoleSwitch(0x01, state);
+			break;
+		case kATUIKeyScanCode_Select:
+			g_sim.GetGTIA().SetConsoleSwitch(0x02, state);
+			break;
+		case kATUIKeyScanCode_Option:
+			g_sim.GetGTIA().SetConsoleSwitch(0x04, state);
+			break;
+		case kATUIKeyScanCode_Break:
+			g_sim.GetPokey().SetBreakKeyState(state, !g_kbdOpts.mbFullRawKeys);
+			break;
+	}
+}
+
+void ATMainFrame::ProcessAtariKeyDown(int wxKeyCode, const wxKeyEvent& event) {
+	// Translate wxWidgets key code to virtual key (ATInputCode)
+	uint32 vk = mInputWx.TranslateWxKey(wxKeyCode);
+	if (vk == kATInputCode_None)
+		return;
+
+	// Get modifier state from the event
+	bool alt   = event.AltDown();
+	bool ctrl  = event.ControlDown();
+	bool shift = event.ShiftDown();
+	bool ext   = IsExtendedWxKey(wxKeyCode);
+
+	// Map (VK + modifiers) to Atari scan code
+	uint32 scanCode;
+	if (!ATUIGetScanCodeForVirtualKey(vk, alt, ctrl, shift, ext, scanCode))
+		return;
+
+	if (scanCode >= kATUIKeyScanCodeFirst) {
+		// Special key (Start/Select/Option/Break)
+		HandleSpecialKey(scanCode, true);
+
+		// Track for release on key-up
+		bool found = false;
+		for (auto& k : mActiveSpecialKeys) {
+			if (k.vk == vk) {
+				k.scanCode = scanCode;
+				found = true;
+				break;
+			}
+		}
+		if (!found)
+			mActiveSpecialKeys.push_back({vk, scanCode});
+	} else if (g_kbdOpts.mbRawKeys) {
+		g_sim.GetPokey().PushRawKey(scanCode, !g_kbdOpts.mbFullRawKeys);
+	} else {
+		g_sim.GetPokey().PushKey(scanCode, event.IsAutoRepeat());
+	}
+}
+
+void ATMainFrame::ProcessAtariKeyUp(int wxKeyCode) {
+	uint32 vk = mInputWx.TranslateWxKey(wxKeyCode);
+	if (vk == kATInputCode_None)
+		return;
+
+	// Release any special key tracked for this VK
+	for (auto it = mActiveSpecialKeys.begin(); it != mActiveSpecialKeys.end(); ++it) {
+		if (it->vk == vk) {
+			HandleSpecialKey(it->scanCode, false);
+			mActiveSpecialKeys.erase(it);
+			break;
+		}
+	}
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Mouse input handling
+///////////////////////////////////////////////////////////////////////////
+
+void ATMainFrame::OnMouseMotion(wxMouseEvent& event) {
+	if (mMouseCaptured && mpCanvas) {
+		const wxSize sz = mpCanvas->GetClientSize();
+		const int cx = sz.GetWidth() / 2;
+		const int cy = sz.GetHeight() / 2;
+
+		if (mIgnoreNextWarpMouse) {
+			mIgnoreNextWarpMouse = false;
+			mLastMouseX = cx;
+			mLastMouseY = cy;
+			return;
+		}
+
+		const int x = event.GetX();
+		const int y = event.GetY();
+		const int dx = x - cx;
+		const int dy = y - cy;
+
+		if (dx != 0 || dy != 0) {
+			mInputWx.OnMouseMove(dx, dy);
+			mIgnoreNextWarpMouse = true;
+			mpCanvas->WarpPointer(cx, cy);
+		}
+
+		mLastMouseX = cx;
+		mLastMouseY = cy;
+		return;
+	}
+
+	int x = event.GetX();
+	int y = event.GetY();
+
+	if (mLastMouseX >= 0 && mLastMouseY >= 0) {
+		int dx = x - mLastMouseX;
+		int dy = y - mLastMouseY;
+		if (dx != 0 || dy != 0)
+			mInputWx.OnMouseMove(dx, dy);
+	}
+
+	mLastMouseX = x;
+	mLastMouseY = y;
+}
+
+void ATMainFrame::OnMouseButton(wxMouseEvent& event) {
+	// Ensure canvas has focus when clicked
+	if (event.ButtonDown())
+		mpCanvas->SetFocus();
+
+	if (event.ButtonDown() && !mMouseCaptured && ATUIGetMouseAutoCapture()) {
+		SetMouseCaptured(true);
+		ShowToastMessage("Mouse captured - press Ctrl+Alt+M to release");
+	}
+
+	int button = 0;
+	if (event.GetButton() == wxMOUSE_BTN_LEFT)
+		button = 1;
+	else if (event.GetButton() == wxMOUSE_BTN_MIDDLE)
+		button = 2;
+	else if (event.GetButton() == wxMOUSE_BTN_RIGHT)
+		button = 3;
+
+	if (button == 0)
+		return;
+
+	if (event.ButtonDown())
+		mInputWx.OnMouseButtonDown(button);
+	else if (event.ButtonUp())
+		mInputWx.OnMouseButtonUp(button);
+}
+
+void ATMainFrame::OnMouseWheel(wxMouseEvent& event) {
+	int delta = event.GetWheelRotation();
+	if (delta != 0)
+		mInputWx.OnMouseWheel(delta);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Gamepad polling
+///////////////////////////////////////////////////////////////////////////
+
+void ATMainFrame::OnGamepadTimer(wxTimerEvent&) {
+	// Poll SDL3 for gamepad events (SDL was initialized with SDL_INIT_GAMEPAD)
+	SDL_Event sdlEvent;
+	while (SDL_PollEvent(&sdlEvent)) {
+		switch (sdlEvent.type) {
+			case SDL_EVENT_GAMEPAD_ADDED:
+			case SDL_EVENT_GAMEPAD_REMOVED:
+			case SDL_EVENT_GAMEPAD_REMAPPED:
+			case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+			case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+			case SDL_EVENT_GAMEPAD_BUTTON_UP:
+			case SDL_EVENT_JOYSTICK_ADDED:
+			case SDL_EVENT_JOYSTICK_REMOVED:
+			case SDL_EVENT_JOYSTICK_AXIS_MOTION:
+			case SDL_EVENT_JOYSTICK_BUTTON_DOWN:
+			case SDL_EVENT_JOYSTICK_BUTTON_UP:
+			case SDL_EVENT_JOYSTICK_HAT_MOTION:
+				// These events are consumed by the joystick manager
+				// through its SDL3 integration (joystick_sdl3.cpp).
+				// SDL_PollEvent removes them from the queue, and the
+				// joystick manager processes them on its next poll.
+				break;
+			default:
+				// Ignore non-gamepad SDL events
+				break;
+		}
+	}
+
+	// Poll the joystick manager to update controller state
+	IATJoystickManager *jm = g_sim.GetJoystickManager();
+	if (jm)
+		jm->Poll();
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Emulation loop
+///////////////////////////////////////////////////////////////////////////
+
+void ATMainFrame::OnIdle(wxIdleEvent& event) {
+	if (!mEmulationRunning)
+		return;
+
+	// Process UI step queue (custom device scripts, deferred actions)
+	while (ATUIGetQueue().Run()) {}
+
+	// Tick debugger (processes queued commands)
+	IATDebugger *dbg = ATGetDebugger();
+	if (dbg)
+		dbg->Tick();
+
+	// Advance emulation with exception recovery
+	ATSimulator::AdvanceResult result;
+	try {
+		result = g_sim.Advance(false);
+	} catch (const MyError& e) {
+		ATUIShowError(e);
+		g_sim.ColdReset();
+		g_sim.Resume();
+		RenderAndPresent();
+		event.RequestMore(true);
+		return;
+	} catch (const std::exception& e) {
+		ATUIShowError2(nullptr,
+			VDTextU8ToW(VDStringA(e.what())).c_str(),
+			L"Emulation Error");
+		g_sim.ColdReset();
+		g_sim.Resume();
+		RenderAndPresent();
+		event.RequestMore(true);
+		return;
+	} catch (...) {
+		ATUIShowError2(nullptr,
+			L"An unknown error occurred during emulation.",
+			L"Emulation Error");
+		g_sim.ColdReset();
+		g_sim.Resume();
+		RenderAndPresent();
+		event.RequestMore(true);
+		return;
+	}
+
+	bool frameRendered = false;
+
+	if (result == ATSimulator::kAdvanceResult_WaitingForFrame) {
+		RenderAndPresent();
+		frameRendered = true;
+	} else if (result == ATSimulator::kAdvanceResult_Stopped) {
+		// Emulation stopped — still render but at reduced rate
+		RenderAndPresent();
+
+		// Sleep 16ms to avoid spinning at full CPU when stopped
+		struct timespec ts;
+		ts.tv_sec = 0;
+		ts.tv_nsec = 16000000;
+		clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+
+		// Reset pacing state while stopped
+		mLastFrameTime = VDGetPreciseTick();
+		mFrameError = 0;
+		mFrameTimeErrorAccum = 0;
+	} else if (result == ATSimulator::kAdvanceResult_Running) {
+		// Check if display has a new frame ready
+		if (mpDisplay && mpDisplay->IsFramePending()) {
+			RenderAndPresent();
+			frameRendered = true;
+		}
+	}
+
+	// Frame pacing — error accumulation feedback loop
+	if (frameRendered) {
+		uint64 curTime = VDGetPreciseTick();
+		sint64 lastFrameDuration = curTime - mLastFrameTime;
+		mLastFrameTime = curTime;
+
+		mFrameError += lastFrameDuration - g_frameTicks;
+		mFrameTimeErrorAccum += g_frameSubTicks;
+
+		if (mFrameTimeErrorAccum >= 0x10000) {
+			mFrameTimeErrorAccum &= 0xFFFF;
+			--mFrameError;
+		}
+
+		if (mFrameError > g_frameErrorBound || mFrameError < -g_frameErrorBound)
+			mFrameError = -g_frameTicks;
+
+		// In turbo mode, don't pace
+		if (g_sim.IsTurboModeEnabled()) {
+			mFrameError = 0;
+		} else if (mFrameError < 0) {
+			// We're ahead of schedule — sleep to maintain target frame rate
+			sint64 nsToSleep = -mFrameError;
+
+			if (nsToSleep > 0 && nsToSleep < (sint64)g_frameTimeout) {
+				struct timespec ts;
+				ts.tv_sec = nsToSleep / 1000000000LL;
+				ts.tv_nsec = nsToSleep % 1000000000LL;
+				clock_nanosleep(CLOCK_MONOTONIC, 0, &ts, nullptr);
+			}
+		}
+	}
+
+	// Keep the idle loop running
+	event.RequestMore(true);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Window title and rendering
+///////////////////////////////////////////////////////////////////////////
+
+void ATMainFrame::UpdateWindowTitle() {
+	const char *hwName = "";
+	switch (g_sim.GetHardwareMode()) {
+		case kATHardwareMode_800:    hwName = "800"; break;
+		case kATHardwareMode_800XL:  hwName = "800XL"; break;
+		case kATHardwareMode_5200:   hwName = "5200"; break;
+		case kATHardwareMode_XEGS:   hwName = "XEGS"; break;
+		case kATHardwareMode_1200XL: hwName = "1200XL"; break;
+		case kATHardwareMode_130XE:  hwName = "130XE"; break;
+		default: hwName = "Atari"; break;
+	}
+
+	char title[512];
+	int off = snprintf(title, sizeof(title), "Altirra %s", hwName);
+	int baseOff = off;
+
+	// Show first loaded disk
+	for (int i = 0; i < 4; ++i) {
+		ATDiskInterface& di = g_sim.GetDiskInterface(i);
+		if (di.IsDiskLoaded()) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(di.GetPath())));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+			break;
+		}
+	}
+
+	// Show cartridge (if no disk shown)
+	if (off == baseOff && g_sim.IsCartridgeAttached(0)) {
+		ATCartridgeEmulator *cart = g_sim.GetCartridge(0);
+		if (cart && cart->GetPath() && *cart->GetPath()) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(cart->GetPath())));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+		}
+	}
+
+	// Show cassette (if no disk or cartridge shown)
+	if (off == baseOff && g_sim.GetCassette().IsLoaded()) {
+		const wchar_t *tapePath = g_sim.GetCassette().GetPath();
+		if (tapePath && *tapePath) {
+			VDStringA u8 = VDTextWToU8(VDStringW(VDFileSplitPath(tapePath)));
+			off += snprintf(title + off, sizeof(title) - off, " - %s", u8.c_str());
+		}
+	}
+
+	// Show emulation state indicators
+	if (ATUIGetTurbo())
+		off += snprintf(title + off, sizeof(title) - off, " [TURBO]");
+	else if (ATUIGetSlowMotion())
+		off += snprintf(title + off, sizeof(title) - off, " [SLOW]");
+
+	if (g_sim.IsPaused())
+		off += snprintf(title + off, sizeof(title) - off, " [PAUSED]");
+
+	IATDebugger *dbg = ATGetDebugger();
+	if (dbg && dbg->IsEnabled() && !dbg->IsRunning())
+		off += snprintf(title + off, sizeof(title) - off, " [BREAK]");
+
+	// Show video standard
+	switch (g_sim.GetVideoStandard()) {
+		case kATVideoStandard_PAL:    off += snprintf(title + off, sizeof(title) - off, " (PAL)"); break;
+		case kATVideoStandard_SECAM:  off += snprintf(title + off, sizeof(title) - off, " (SECAM)"); break;
+		case kATVideoStandard_NTSC50: off += snprintf(title + off, sizeof(title) - off, " (NTSC50)"); break;
+		case kATVideoStandard_PAL60:  off += snprintf(title + off, sizeof(title) - off, " (PAL60)"); break;
+		default: break;  // NTSC is default, don't clutter title
+	}
+
+	SetTitle(title);
+}
+
+void ATMainFrame::RenderAndPresent() {
+	if (!mpDisplay || !mEmulationRunning)
+		return;
+
+	// Update window title
+	UpdateWindowTitle();
+
+	// Update pixel aspect ratio from GTIA
+	mpDisplay->SetPixelAspectRatio(g_sim.GetGTIA().GetPixelAspectRatio());
+
+	// Update enhanced text engine if active
+	IATUIEnhancedTextEngine *enhText = ATUIGetEnhancedTextEngine();
+	if (enhText) {
+		enhText->Update(false);
+		IATDeviceVideoOutput *vo = enhText->GetVideoOutput();
+		if (vo) {
+			const VDPixmap& fb = vo->GetFrameBuffer();
+			if (fb.data && fb.w > 0 && fb.h > 0) {
+				mpDisplay->SetSourcePersistent(true, fb, true, nullptr, nullptr);
+			}
+		}
+	}
+
+	// Render emulation frame and swap buffers
+	mpDisplay->PresentFrame();
+
+	// Tick status bar frame counter and hold counters
+	if (mpStatusBar)
+		mpStatusBar->TickFrame();
+}
+
+void ATMainFrame::ShowToastMessage(const wxString& message) {
+	if (message.empty())
+		return;
+
+	if (!mpToastPopup) {
+		mpToastPopup = new wxPopupTransientWindow(this, wxBORDER_SIMPLE);
+
+		auto *panel = new wxPanel(mpToastPopup);
+		panel->SetBackgroundColour(wxColour(32, 32, 32));
+
+		mpToastLabel = new wxStaticText(panel, wxID_ANY, "");
+		mpToastLabel->SetForegroundColour(wxColour(245, 245, 245));
+		mpToastLabel->SetFont(wxFontInfo(10).Family(wxFONTFAMILY_SWISS));
+
+		auto *sizer = new wxBoxSizer(wxVERTICAL);
+		sizer->Add(mpToastLabel, 0, wxALL, 10);
+		panel->SetSizerAndFit(sizer);
+
+		auto *outer = new wxBoxSizer(wxVERTICAL);
+		outer->Add(panel, 1, wxEXPAND);
+		mpToastPopup->SetSizerAndFit(outer);
+	}
+
+	mpToastLabel->SetLabel(message);
+	mpToastLabel->Wrap(360);
+	mpToastPopup->Fit();
+	UpdateToastPopupPosition();
+	mpToastPopup->Show();
+	mToastTimer.StartOnce(2500);
+}
+
+void ATMainFrame::SetMouseCaptured(bool captured) {
+	if (!mpCanvas || captured == mMouseCaptured)
+		return;
+
+	mMouseCaptured = captured;
+	mLastMouseX = -1;
+	mLastMouseY = -1;
+	mIgnoreNextWarpMouse = false;
+
+	if (captured) {
+		if (!mpCanvas->HasCapture())
+			mpCanvas->CaptureMouse();
+
+		mpCanvas->SetCursor(wxCursor(wxCURSOR_BLANK));
+		mpCanvas->SetFocus();
+
+		const wxSize sz = mpCanvas->GetClientSize();
+		if (sz.GetWidth() > 0 && sz.GetHeight() > 0) {
+			mIgnoreNextWarpMouse = true;
+			mpCanvas->WarpPointer(sz.GetWidth() / 2, sz.GetHeight() / 2);
+		}
+	} else {
+		if (mpCanvas->HasCapture())
+			mpCanvas->ReleaseMouse();
+
+		mpCanvas->SetCursor(wxNullCursor);
+	}
+}
+
+void ATMainFrame::ToggleMouseCapture() {
+	SetMouseCaptured(!mMouseCaptured);
+}
+
+void ATMainFrame::ExecuteMenuCommand(int id) {
+	wxCommandEvent event(wxEVT_MENU, id);
+	OnMenuCommand(event);
+}
+
+void ATMainFrame::FocusDisplayCanvas() {
+	if (mpCanvas)
+		mpCanvas->SetFocus();
+}
+
+void ATMainFrame::UpdateToastPopupPosition() {
+	if (!mpToastPopup || !mpToastPopup->IsShown())
+		return;
+
+	const wxSize popupSize = mpToastPopup->GetBestSize();
+	const wxSize clientSize = GetClientSize();
+	const wxPoint clientPos(
+		std::max(12, clientSize.GetWidth() - popupSize.GetWidth() - 20),
+		12);
+
+	mpToastPopup->Move(ClientToScreen(clientPos));
+}
+
+void ATMainFrame::DismissToast() {
+	mToastTimer.Stop();
+	if (mpToastPopup)
+		mpToastPopup->Show(false);
+}
+
+void ATMainFrame::OnToastTimer(wxTimerEvent&) {
+	DismissToast();
+}

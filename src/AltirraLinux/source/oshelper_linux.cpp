@@ -29,6 +29,8 @@
 #include "encode_png.h"
 #include "decode_png.h"
 
+#include <vd2/system/binary.h>
+
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -37,6 +39,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <linux/limits.h>
 
 #include <SDL3/SDL.h>
 
@@ -93,9 +96,61 @@ bool ATLoadKernelResource(int id, vdfastvector<uint8>& data) {
 }
 
 bool ATLoadKernelResourceLZPacked(int id, vdfastvector<uint8>& data) {
-	// LZ-packed resources (nomio, noblackbox) require ATCompiler's lzpack tool
-	// which is not available on Linux. These are niche firmware placeholders.
-	return false;
+	// Load the LZ-packed resource from embedded data
+	vdfastvector<uint8> packed;
+	if (!ATEmbeddedLoadMiscResource(id, packed))
+		return false;
+
+	if (packed.size() < 4)
+		return false;
+
+	const uint8 *src = packed.data();
+
+	// First 4 bytes = uncompressed size (little-endian)
+	uint32 len = VDReadUnalignedLEU32(src);
+	data.clear();
+	data.resize(len);
+
+	uint8 *dst = data.data();
+	src += 4;
+
+	for (;;) {
+		uint8 c = *src++;
+
+		if (!c)
+			break;
+
+		if (c & 1) {
+			// Back-reference (LZ match)
+			int distm1 = *src++;
+			int matchLen;
+
+			if (c & 2) {
+				// Long match: distance high bits in c, length in next byte
+				distm1 += (c & 0xfc) << 6;
+				matchLen = *src++;
+			} else {
+				// Short match: distance mid bits in c, length in c high bits
+				distm1 += ((c & 0x1c) << 6);
+				matchLen = c >> 5;
+			}
+
+			matchLen += 3;
+
+			const uint8 *csrc = dst - distm1 - 1;
+			do {
+				*dst++ = *csrc++;
+			} while (--matchLen);
+		} else {
+			// Literal run: length = c >> 1
+			uint8 litLen = c >> 1;
+			memcpy(dst, src, litLen);
+			src += litLen;
+			dst += litLen;
+		}
+	}
+
+	return true;
 }
 
 bool ATLoadMiscResource(int id, vdfastvector<uint8>& data) {
@@ -242,12 +297,62 @@ void ATUIRestoreWindowPlacement(void *hwnd, const char *name, int nCmdShow, bool
 void ATUIEnableEditControlAutoComplete(void *hwnd) {
 }
 
-// Help system
+// Forward declaration for URL/file launching
+static void LaunchXdgOpen(const char *arg);
+
+// Help system — HTML help files are installed to share/doc/altirra/html/
 VDStringW ATGetHelpPath() {
+	// Try install prefix-relative path first, then common locations
+	static const char *searchPaths[] = {
+		"/usr/local/share/doc/altirra/html",
+		"/usr/share/doc/altirra/html",
+		nullptr
+	};
+
+	// Check relative to executable location
+	char exePath[PATH_MAX] = {};
+	ssize_t len = readlink("/proc/self/exe", exePath, sizeof(exePath) - 1);
+	if (len > 0) {
+		exePath[len] = '\0';
+		// Strip executable name and bin/ directory
+		char *slash = strrchr(exePath, '/');
+		if (slash) {
+			*slash = '\0';
+			slash = strrchr(exePath, '/');
+			if (slash) {
+				*slash = '\0';
+				std::string relPath = std::string(exePath) + "/share/doc/altirra/html";
+				struct stat st;
+				if (stat(relPath.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+					return VDTextU8ToW(VDStringSpanA(relPath.c_str(), relPath.c_str() + relPath.size()));
+			}
+		}
+	}
+
+	for (const char **p = searchPaths; *p; ++p) {
+		struct stat st;
+		if (stat(*p, &st) == 0 && S_ISDIR(st.st_mode))
+			return VDTextU8ToW(VDStringSpanA(*p));
+	}
+
 	return VDStringW();
 }
 
 void ATShowHelp(void *hwnd, const wchar_t *filename) {
+	VDStringW helpDir = ATGetHelpPath();
+	if (helpDir.empty())
+		return;
+
+	VDStringW helpPath = helpDir;
+	helpPath += L'/';
+
+	if (filename && filename[0])
+		helpPath += filename;
+	else
+		helpPath += L"toc.html";
+
+	VDStringA u8path = VDTextWToU8(helpPath);
+	LaunchXdgOpen(u8path.c_str());
 }
 
 // URL/file launching via xdg-open

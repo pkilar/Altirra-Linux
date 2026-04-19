@@ -50,6 +50,11 @@
 #include <vd2/Kasumi/pixmap.h>
 #include <at/atcore/device.h>
 #include <at/atcore/enumparse.h>
+
+// Forward declaration needed by at/atnativeui/uipane.h (used as reference return type).
+// The full class is defined in nativewindowproxy.h but we only need the declaration
+// for Linux compilation of cmd*.cpp files that include uipane.h.
+class ATUINativeWindowProxy;
 #include <atomic>
 #include <deque>
 #include <iterator>
